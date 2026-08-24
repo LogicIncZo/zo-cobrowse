@@ -1840,15 +1840,17 @@ async function testConnection() {
 
 
 /** EXECUTE_ACTIONS entry (#26 two-phase gate). A batch containing fill_form
- *  first re-captures the LIVE form (client-side truth, never the model's
- *  self-assessment) and runs isSensitiveForm: sensitive -> respond
- *  {needsConfirm,...} without executing; the sidepanel's review card re-sends
- *  with confirmed:true. The verdict is re-derived on confirm too - a form
- *  that flipped sensitive since the review re-parks, and the submit backstop
- *  inside executeActions needs the flag either way (confirming a FILL never
- *  authorizes a SUBMIT). */
+ *  OR plain fill actions first re-captures the LIVE form (client-side truth,
+ *  never the model's self-assessment) and runs isSensitiveForm: sensitive ->
+ *  respond {needsConfirm,...} without executing; the sidepanel's review card
+ *  re-sends with confirmed:true. Plain fills are covered because models drift
+ *  off the fill_form preference (live-observed on roboform.com: a 30-field
+ *  batch of individual fill{selector} actions incl. password + card fields).
+ *  The verdict is re-derived on confirm too - a form that flipped sensitive
+ *  since the review re-parks, and the submit backstop inside executeActions
+ *  needs the flag either way (confirming a FILL never authorizes a SUBMIT). */
 async function runExecuteActions(domActions, target, { confirmed } = {}) {
-  const hasFill = domActions.some((a) => a.type === 'fill_form');
+  const hasFill = domActions.some((a) => a.type === 'fill_form' || a.type === 'fill');
   if (!hasFill) return executeActions(domActions, target);
   const pre = await captureFormFields(target);
   if (!pre) {

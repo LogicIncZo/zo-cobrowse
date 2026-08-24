@@ -401,4 +401,34 @@ describe("form-fill sensitivity gate (#26)", () => {
     expect(r.ok).toBe(true);
     expect(r.results[1].blocked).toBeUndefined(); // probed, not a submit → allowed
   });
+
+  it("a batch of PLAIN fill actions parks on a sensitive form too (models drift off fill_form)", async () => {
+    // Live-observed on roboform.com: Zo emitted 30 individual fill{selector}
+    // actions incl. password + card fields instead of one fill_form batch.
+    // The gate must cover them — otherwise secrets auto-fill with no review.
+    const actions = [
+      { type: "fill", selector: "input[name=email]", value: "plain@b.c" },
+      { type: "fill", selector: "input[type=password]", value: "hunter2" },
+    ];
+    const parked = await bus.runtime.sendMessage({ type: "EXECUTE_ACTIONS", actions, tabId: checkoutTabId });
+    expect(parked.needsConfirm).toBe(true);
+    expect(parked.reasons.join(" ")).toMatch(/password/i);
+    // Parked = nothing executed (field still holds the earlier test's value).
+    expect((pageDoc.querySelector("input[name=email]") as any).value).not.toBe("plain@b.c");
+
+    const done = await bus.runtime.sendMessage({ type: "EXECUTE_ACTIONS", actions, tabId: checkoutTabId, confirmed: true });
+    expect(done.ok).toBe(true);
+    expect((pageDoc.querySelector("input[name=email]") as any).value).toBe("plain@b.c");
+  });
+
+  it("plain fills on a benign form execute immediately (no confirm)", async () => {
+    const r = await bus.runtime.sendMessage({
+      type: "EXECUTE_ACTIONS",
+      actions: [{ type: "fill", selector: "input[name=q]", value: "hi" }],
+      tabId: benignTabId,
+    });
+    expect(r.needsConfirm).toBeUndefined();
+    expect(r.ok).toBe(true);
+    expect((benignWin.document.querySelector("input[name=q]") as any).value).toBe("hi");
+  });
 });
