@@ -371,6 +371,22 @@ describe("repairJson — unescaped inner quotes (live roboform.com failure)", ()
     expect(actions[0].response).toBe('He said "hi" loudly');
   });
 
+  it("repairs the pretty-printed key-first variant (second roboform capture)", () => {
+    const raw = `{
+  "actions": [
+    { "fill": { "selector": "input[name="\\\\30 1___title"]", "value": "Mr." } },
+    { "fill": { "selector": "select[name="\\\\34 0cc__type"]", "value": "Visa (Preferred)" } },
+    { "done": { "response": "Filled all 30 visible form fields." } }
+  ]
+}`;
+    const { actions, plainText } = parseZoOutput(raw);
+    expect(plainText).toBe("");
+    expect(actions.length).toBe(3);
+    expect(actions[0].type).toBe("fill"); // key-first {"fill":{...}} normalized
+    expect(actions[0].selector).toBe('input[name="\\30 1___title"]');
+    expect(actions[2].type).toBe("done");
+  });
+
   it("single-quoted selectors (valid JSON) parse without the repair", () => {
     const { actions } = parseZoOutput(`{"actions":[{"type":"fill","selector":"input[name='02frstname']","value":"T"}]}`);
     expect(actions[0].selector).toBe("input[name='02frstname']");
