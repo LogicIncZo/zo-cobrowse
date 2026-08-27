@@ -3,7 +3,7 @@
 import { parseBangCommand, BANG_COMMANDS } from './lib/bang-commands.js';
 import { BUILTIN_MODES, DEFAULT_MODE_ID, resolveMode, presetToMode, normalizeActions, isContextAction } from './lib/modes.js';
 import { looksLikeActionJson } from './lib/intent.js';
-import { reviewRows } from './lib/formfill.js';
+import { reviewRows, fillBatchRows } from './lib/formfill.js';
 import {
   createConversationState,
   decideTurn,
@@ -1532,9 +1532,9 @@ function updateActionRunHeader(label, count, durationMs) {
  *  never round-tripped through the card (reviewRows blanks them). */
 function renderFormReview(payload) {
   return new Promise((resolve) => {
-    const fill = (payload.actions || []).find((a) => a && a.type === 'fill_form');
-    if (!fill) { resolve(null); return; }
-    const rows = reviewRows(fill, payload.fields);
+    const fills = (payload.actions || []).filter((a) => a && (a.type === 'fill_form' || a.type === 'fill'));
+    if (!fills.length) { resolve(null); return; }
+    const rows = fillBatchRows(fills, payload.fields);
     const host = document.createElement('div');
     host.className = 'msg form-review-card';
     let hostName = '';
@@ -1549,8 +1549,9 @@ function renderFormReview(payload) {
       chip.textContent = safeText(r);
       host.appendChild(chip);
     }
-    const edits = new Map();
-    for (const row of rows) {
+    const edits = new Map(); // row index → edited value
+    for (let ri = 0; ri < rows.length; ri++) {
+      const row = rows[ri];
       const line = document.createElement('label');
       line.className = 'form-review-row';
       if (row.secret) {
@@ -1560,7 +1561,7 @@ function renderFormReview(payload) {
         const input = document.createElement('input');
         input.dataset.target = row.target;
         input.value = row.value;
-        input.addEventListener('input', () => edits.set(row.target, input.value));
+        input.addEventListener('input', () => edits.set(ri, input.value));
         line.appendChild(input);
       }
       host.appendChild(line);
@@ -1572,9 +1573,24 @@ function renderFormReview(payload) {
     confirm.textContent = `Fill ${rows.filter((r) => !r.secret).length} fields`;
     cancel.textContent = 'Cancel';
     confirm.addEventListener('click', () => {
-      const edited = { ...fill, values: fill.values.map((v) => (edits.has(v.target) ? { ...v, value: edits.get(v.target) } : v)) };
+      // Confirmed batch — same order/count as `fills`; edits mapped back via
+      // the rows' ai/vi back-references.
+      const confirmed = fills.map((a) => a.type === 'fill_form' ? { ...a, values: (a.values || []).map((v) => ({ ...v })) } : { ...a });
+      for (const [ri, val] of edits) {
+        const row = rows[ri];
+        if (row.kind === 'fill_form') confirmed[row.ai].values[row.vi] = { ...confirmed[row.ai].values[row.vi], value: val };
+        else confirmed[row.ai] = { ...confirmed[row.ai], value: val };
+      }
+      // Secret rows NEVER round-trip — "left for you 🔑" means the proposed
+      // value is dropped even if the user never touched the input (live-
+      // observed: models propose password/card values despite the prompt rule).
+      for (const row of rows) {
+        if (!row.secret) continue;
+        if (row.kind === 'fill_form') confirmed[row.ai].values[row.vi] = { ...confirmed[row.ai].values[row.vi], value: '' };
+        else confirmed[row.ai] = { ...confirmed[row.ai], value: '' };
+      }
       host.remove();
-      resolve(edited);
+      resolve(confirmed);
     });
     cancel.addEventListener('click', () => {
       host.remove();
@@ -1640,6 +1656,44 @@ async function runPendingActions() {
     return;
   }
 
+  // Batch sensitivity pre-flight (#26): ONE capture + at most ONE review
+  // card per page for the whole fill batch. Models drift between fill_form
+  // and plain fill actions; per-action parking would mean N review cards for
+  // N fields (or worse, N auto-cancels). Benign forms execute right here —
+  // the pre-flight IS the execution; sensitive ones park for one review.
+  const fillIdxs = [];
+  for (let i = 0; i < actions.length; i++) {
+    const t = actions[i] && actions[i].type;
+    if (t === 'fill' || t === 'fill_form') fillIdxs.push(i);
+  }
+  if (fillIdxs.length) {
+    const fillActions = fillIdxs.map((i) => actions[i]);
+    const applyFillResults = (resp, acts) => {
+      const results = Array.isArray(resp?.results) ? resp.results : (resp && !resp.needsConfirm ? [resp] : []);
+      acts.forEach((a, k) => {
+        const r = results[k];
+        const ok = r ? r.ok !== false : resp?.ok === true;
+        if (a.type === 'fill_form' && r?.fields) renderFillFormFieldResults(fillIdxs[k], r);
+        updateActionCard(fillIdxs[k], ok ? 'done' : 'error', ok ? undefined : safeText(r?.error || resp?.error || 'failed'));
+      });
+    };
+    let fillResp = await chrome.runtime.sendMessage({ type: 'EXECUTE_ACTIONS', actions: fillActions, tabId });
+    if (fillResp?.needsConfirm) {
+      const decision = await renderFormReview(fillResp);
+      if (!decision) {
+        fillIdxs.forEach((i) => updateActionCard(i, 'error', 'skipped'));
+        addMessageDOM('assistant', 'Skipped the form fill — nothing was entered. You can fill it yourself or ask again.');
+        fillResp = null;
+      } else {
+        fillResp = await chrome.runtime.sendMessage({ type: 'EXECUTE_ACTIONS', actions: decision, tabId, confirmed: true });
+      }
+    }
+    if (fillResp && !fillResp.needsConfirm) {
+      applyFillResults(fillResp, fillActions);
+      if (fillResp.ok === false) addMessage('error', `Action failed: ${fillResp.error || 'unknown error'}`);
+    }
+  }
+
   for (let i = 0; i < actions.length; i++) {
     // Stop if the user clicked Skip (nulls pendingActions) between awaits.
     if (!pendingActions) break;
@@ -1655,6 +1709,8 @@ async function runPendingActions() {
       }
       continue;
     }
+    // Fill-family actions were handled by the batch pre-flight above.
+    if (action.type === 'fill' || action.type === 'fill_form') continue;
     updateActionCard(i, 'running');
     // No separate inline ".msg-action" message — the card in the run timeline
     // is the inline record now (avoids the prior duplicate rendering).
@@ -1664,31 +1720,6 @@ async function runPendingActions() {
       actions: [action],
       tabId,
     });
-    // Two-phase sensitivity gate (#26): the background parked a sensitive
-    // fill_form for review. Show the editable card and await the user's
-    // decision — confirm re-sends the (possibly edited) values with
-    // confirmed:true; cancel drops the fill and stops the batch.
-    if (result?.needsConfirm) {
-        const decision = await renderFormReview(result);
-      if (!decision) {
-        updateActionCard(i, 'error', 'skipped');
-        addMessageDOM('assistant', 'Skipped the form fill — nothing was entered. You can fill it yourself or ask again.');
-        break;
-      }
-      action = decision;
-      result = await chrome.runtime.sendMessage({
-        type: 'EXECUTE_ACTIONS',
-        actions: [decision],
-        tabId,
-        confirmed: true,
-      });
-    }
-    if (action.type === 'fill_form') {
-      // EXECUTE_ACTIONS returns the aggregate {ok, results:[…]}; the
-      // fill_form per-field outcomes live on the single-action result.
-      const single = Array.isArray(result?.results) ? result.results[0] : result;
-      if (single?.fields) renderFillFormFieldResults(i, single);
-    }
     if (!result?.ok) {
       const err = result?.error || 'unknown error';
       updateActionCard(i, 'error', err);

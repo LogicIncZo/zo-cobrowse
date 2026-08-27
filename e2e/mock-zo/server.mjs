@@ -79,6 +79,7 @@ function pickScenario(input) {
   const q = userRequest(input);
   if (q.includes("schema")) return "pull-form";
   if (q.includes("checkout")) return "fill-form";
+  if (q.includes("classic form")) return "classic-form";
   if (q.includes("application")) return "app-section-1";
   if (q.includes("continue") || q.includes("next section")) return "app-section-2";
   if (q.includes("fill")) return "fill";
@@ -235,6 +236,29 @@ const server = http.createServer(async (req, res) => {
         ],
       });
       return streamSse(res, [textStart(envelope), completed()], { delayMs: 40 });
+    }
+    if (scenario === "classic-form") {
+      // "Any form" hardening round: a RoboForm-shaped classic form. The mock
+      // streams the EXACT broken envelope Zo emitted live — key-first
+      // {"fill":{...}} actions, CSS \NN escapes for digit-leading names, and
+      // UNESCAPED double quotes inside the selector strings (invalid JSON).
+      // The extension must repair it, park it (password + card fields), and
+      // fill only after confirm. NOTE: hand-built string, NOT JSON.stringify —
+      // the invalidity is the scenario.
+      const broken =
+        '{"actions": [\n' +
+        '  {"fill": {"selector": "input[name="\\\\30 1___title"]", "value": "Mr."}},\n' +
+        '  {"fill": {"selector": "input[name="\\\\30 2frstname"]", "value": "Test"}},\n' +
+        '  {"fill": {"selector": "input[name="\\\\30 4lastname"]", "value": "User"}},\n' +
+        '  {"fill": {"selector": "input[name="\\\\33 0_user_id"]", "value": "testuser01"}},\n' +
+        '  {"fill": {"selector": "input[name="\\\\33 1password"]", "value": "T3st-Passw0rd!"}},\n' +
+        '  {"fill": {"selector": "select[name="\\\\34 0cc__type"]", "value": "Visa (Preferred)"}},\n' +
+        '  {"fill": {"selector": "input[name="\\\\34 1ccnumber"]", "value": "4111111111111111"}},\n' +
+        '  {"fill": {"selector": "select[name="\\\\34 2ccexp_mm"]", "value": "12"}},\n' +
+        '  {"fill": {"selector": "input[name="\\\\34 3cvc"]", "value": "123"}},\n' +
+        '  {"done": {"response": "Filled the fields with test data — review and submit when ready."}}\n' +
+        ']}';
+      return streamSse(res, [textStart(broken), completed()], { delayMs: 40 });
     }
     if (scenario === "app-section-1") {
       // "Any form" round: builder-style form — target by QUESTION text (the

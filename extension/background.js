@@ -498,6 +498,15 @@ function makeActionEval(action) {
           el.focus();
           el.value = '';
           el.value = a.value;
+          if (el.tagName === 'SELECT' && el.selectedIndex === -1) {
+            var _want = String(a.value == null ? '' : a.value).trim().toLowerCase();
+            if (_want) {
+              var _opts = [].slice.call(el.options || []);
+              var _opt = _opts.find(function(o){ return (o.textContent || '').trim().toLowerCase() === _want; }) ||
+                _opts.find(function(o){ return (o.textContent || '').trim().toLowerCase().indexOf(_want) === 0; });
+              if (_opt) el.value = _opt.value;
+            }
+          }
           el.dispatchEvent(new Event('input', { bubbles: true }));
           el.dispatchEvent(new Event('change', { bubbles: true }));
           return { ok: true, type: 'fill' };
@@ -1851,7 +1860,10 @@ async function testConnection() {
  *  needs the flag either way (confirming a FILL never authorizes a SUBMIT). */
 async function runExecuteActions(domActions, target, { confirmed } = {}) {
   const hasFill = domActions.some((a) => a.type === 'fill_form' || a.type === 'fill');
-  if (!hasFill) return executeActions(domActions, target);
+  // Click-only batches capture too: on sensitive pages the submit backstop
+  // needs the verdict, and the per-action sidepanel loop sends clicks alone.
+  const hasClick = domActions.some((a) => a.type === 'click');
+  if (!hasFill && !hasClick) return executeActions(domActions, target);
   const pre = await captureFormFields(target);
   if (!pre) {
     // Unreadable page (no content script / capture failed): execute without a
@@ -1862,7 +1874,11 @@ async function runExecuteActions(domActions, target, { confirmed } = {}) {
   }
   const verdict = isSensitiveForm(pre.formFields, pre.url);
   if (verdict.sensitive && !confirmed) {
-    return { needsConfirm: true, actions: domActions, fields: pre.formFields, url: pre.url, reasons: verdict.reasons };
+    if (hasFill) {
+      return { needsConfirm: true, actions: domActions, fields: pre.formFields, url: pre.url, reasons: verdict.reasons };
+    }
+    // Click-only: nothing to review — execute with the backstop armed.
+    return executeActions(domActions, target, { sensitive: true });
   }
   return executeActions(domActions, target, { sensitive: verdict.sensitive });
 }
@@ -2076,22 +2092,36 @@ function executeDomAction(action) {
         resolve({ ok: true, type: 'click' });
         break;
       case 'fill':
-        el.focus();
-        el.value = '';
-        el.value = action.value;
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-        resolve({ ok: true, type: 'fill' });
-        break;
       case 'fill_form': {
+        // One value-set path for both action kinds: el focuses, value set,
+        // selects fall back to OPTION-TEXT matching when the direct value
+        // assignment selects nothing (Zo sends visible text, not value attrs).
+        const setVal = (node, raw) => {
+          node.focus();
+          node.value = '';
+          node.value = raw;
+          if (node.tagName === 'SELECT' && node.selectedIndex === -1) {
+            const want = String(raw == null ? '' : raw).trim().toLowerCase();
+            if (want) {
+              const opts = Array.from(node.options || []);
+              const opt = opts.find((o) => (o.textContent || '').trim().toLowerCase() === want) ||
+                opts.find((o) => (o.textContent || '').trim().toLowerCase().startsWith(want));
+              if (opt) node.value = opt.value;
+            }
+          }
+          node.dispatchEvent(new Event('input', { bubbles: true }));
+          node.dispatchEvent(new Event('change', { bubbles: true }));
+        };
+        if (action.type === 'fill') {
+          setVal(el, action.value);
+          resolve({ ok: true, type: 'fill' });
+          break;
+        }
         const results = [];
         for (const entry of action.values || []) {
           const field = resolveFieldTarget(entry.target, entry.selector);
           if (!field) { results.push({ ok: false, target: entry.target, error: 'no field matched' }); continue; }
-          field.focus();
-          field.value = String(entry.value == null ? '' : entry.value);
-          field.dispatchEvent(new Event('input', { bubbles: true }));
-          field.dispatchEvent(new Event('change', { bubbles: true }));
+          setVal(field, String(entry.value == null ? '' : entry.value));
           results.push({ ok: true, target: entry.target, type: field.type || field.tagName.toLowerCase() });
         }
         const failed = results.filter((r) => !r.ok);

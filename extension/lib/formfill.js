@@ -35,28 +35,59 @@ export function redactValue(value) {
 }
 
 /**
- * Join a fill_form action's proposed values with captured field metadata for
- * the review card. Secret rows (password-type or sensitive-named) carry an
+ * Join a fill batch (fill_form actions AND/OR plain fill actions — models
+ * drift between the two) with captured field metadata for the review card.
+ * Rows carry `ai`/`vi` back-references so edits can be mapped onto the
+ * original actions. Secret rows (password-type or sensitive-named) carry an
  * EMPTY value — the card shows "left for you", the user's password manager
  * owns secrets.
  */
-export function reviewRows(action, fields) {
+export function fillBatchRows(actions, fields) {
   const caps = Array.isArray(fields) ? fields : [];
-  const findMeta = (v) => caps.find((f) =>
-    (f.placeholder && f.placeholder === v.target) ||
-    (f.question && f.question === v.target) ||
-    (f.name && f.name === v.target) ||
-    (v.selector && f.selector === v.selector)) || null;
-  return (action.values || []).map((v) => {
-    const meta = findMeta(v);
-    const type = String((meta && meta.type) || '').toLowerCase();
-    const secret = type === 'password' || SENSITIVE_FIELD_RE.test(String(v.target));
-    return {
-      target: v.target,
-      value: secret ? '' : String(v.value == null ? '' : v.value),
-      type,
-      secret,
-      redacted: redactValue(v.value),
-    };
+  const rows = [];
+  (Array.isArray(actions) ? actions : []).forEach((a, ai) => {
+    if (!a) return;
+    if (a.type === 'fill_form') {
+      (a.values || []).forEach((v, vi) => {
+        const meta = caps.find((f) =>
+          (f.placeholder && f.placeholder === v.target) ||
+          (f.question && f.question === v.target) ||
+          (f.name && f.name === v.target) ||
+          (v.selector && f.selector === v.selector)) || null;
+        const type = String((meta && meta.type) || '').toLowerCase();
+        const secret = type === 'password' || SENSITIVE_FIELD_RE.test(String(v.target));
+        rows.push({
+          kind: 'fill_form', ai, vi, target: v.target,
+          value: secret ? '' : String(v.value == null ? '' : v.value),
+          type, secret, redacted: redactValue(v.value),
+        });
+      });
+    } else if (a.type === 'fill') {
+      // Plain fill targets a selector; label it from the captured metadata
+      // when the selector can be joined (by selector or embedded name).
+      const sel = String(a.selector || '');
+      const meta = caps.find((f) => sel && f.selector === sel) ||
+        caps.find((f) => f.name && sel.includes(f.name)) || null;
+      const label = (meta && (meta.question || meta.placeholder || meta.name)) || sel || 'field';
+      const type = String((meta && meta.type) || '').toLowerCase();
+      const secret = type === 'password' || SENSITIVE_FIELD_RE.test(sel) || SENSITIVE_FIELD_RE.test(label);
+      rows.push({
+        kind: 'fill', ai, vi: null, selector: sel, target: label,
+        value: secret ? '' : String(a.value == null ? '' : a.value),
+        type, secret, redacted: redactValue(a.value),
+      });
+    }
   });
+  return rows;
+}
+
+/**
+ * Join a fill_form action's proposed values with captured field metadata for
+ * the review card. Secret rows carry an EMPTY value — never round-trips
+ * through the card.
+ */
+export function reviewRows(action, fields) {
+  return fillBatchRows([action], fields).map((r) => ({
+    target: r.target, value: r.value, type: r.type, secret: r.secret, redacted: r.redacted,
+  }));
 }

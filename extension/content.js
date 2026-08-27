@@ -251,6 +251,26 @@
     return null;
   }
 
+  /** Set a select value; Zo usually sends the visible OPTION TEXT ("Visa
+   *  (Preferred)") while el.value assignment matches the value attr ("visa")
+   *  — fall back to text matching when the direct set selects nothing. */
+  function setFieldValue(el, val) {
+    el.focus();
+    el.value = '';
+    el.value = val;
+    if (el.tagName === 'SELECT' && el.selectedIndex === -1) {
+      const want = String(val == null ? '' : val).trim().toLowerCase();
+      if (want) {
+        const opts = Array.from(el.options || []);
+        const opt = opts.find((o) => (o.textContent || '').trim().toLowerCase() === want) ||
+          opts.find((o) => (o.textContent || '').trim().toLowerCase().startsWith(want));
+        if (opt) el.value = opt.value;
+      }
+    }
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
   /** Execute a single action */
   async function executeAction(action) {
     switch (action.type) {
@@ -266,11 +286,7 @@
       }
       case 'fill': {
         const el = (await waitForElement(action.selector))
-        el.focus();
-        el.value = '';
-        el.value = action.value;
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
+        setFieldValue(el, action.value);
         return { ok: true, type: 'fill' };
       }
       case 'fill_form': {
@@ -278,10 +294,7 @@
         for (const entry of action.values || []) {
           const el = resolveFieldTarget(entry.target, entry.selector);
           if (!el) { results.push({ ok: false, target: entry.target, error: 'no field matched' }); continue; }
-          el.focus();
-          el.value = String(entry.value == null ? '' : entry.value);
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
+          setFieldValue(el, String(entry.value == null ? '' : entry.value));
           results.push({ ok: true, target: entry.target, type: el.type || el.tagName.toLowerCase() });
         }
         const failed = results.filter((r) => !r.ok);

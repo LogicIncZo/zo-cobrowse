@@ -62,6 +62,7 @@ function loadRealRunner(win: Window): { executeAction: Exe; waitForElement: (sel
     prologue +
     extractFn("isValidCssSelector") + "\n" +
     extractFn("resolveClickTarget") + "\n" +
+    extractFn("setFieldValue") + "\n" +
     extractFn("waitForElement") + "\n" +
     extractFn("executeAction") + "\n" +
     "self.__capture = { waitForElement, executeAction };",
@@ -122,6 +123,13 @@ describe("content.js fill — end-to-end DOM", () => {
     const res = await executeAction({ type: "fill", selector: "#plan", value: "pro" });
     // A real select needs the option selected; the generic fill sets .value
     // which for selects does select the matching option in browsers.
+    expect(win.document.querySelector("#plan")!.value).toBe("pro");
+    expect(res!.ok).toBe(true);
+  });
+
+  it("fills a SELECT by visible option text when the value attr does not match", async () => {
+    // Zo sends the visible text ("Visa (Preferred)"); the option value is "pro".
+    const res = await executeAction({ type: "fill", selector: "#plan", value: "Pro" });
     expect(win.document.querySelector("#plan")!.value).toBe("pro");
     expect(res!.ok).toBe(true);
   });
