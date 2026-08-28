@@ -29,6 +29,10 @@ import {
 } from './lib/pull.js';
 import { isSensitiveForm } from './lib/formfill.js';
 import {
+  buildEnhancePrompt,
+  parseEnhanceResponse,
+} from './lib/write-assist.js';
+import {
   loadConversationState,
   saveConversationState,
   computePageHash,
@@ -341,6 +345,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // note no-ops safely.
       const domActions = (request.actions || []).filter((a) => a && !isContextAction(a));
       runExecuteActions(domActions, request.tabId || senderTabId(sender), { confirmed: request.confirmed }).then(sendResponse);
+      return true;
+    }
+    case 'ENHANCE_TEXT': {
+      // Textarea write-assist: the content script's in-page widget sends the
+      // focused field's data; we build the prompt (lib/write-assist), call Zo
+      // one-shot (no conversation_id -> fresh thread, no ambient rotation),
+      // and return the improved text for the widget to preview + fill back.
+      enhanceText(request).then(sendResponse);
       return true;
     }
     case 'GET_OPEN_TABS': {
@@ -2272,6 +2284,52 @@ Read the skill's SKILL.md and follow its instructions.`;
     return { ok: true, response: data.output || '' };
   } catch (err) {
     return { ok: false, error: `Skill run failed: ${err.message}` };
+  }
+}
+
+// Textarea write-assist one-shot (feature/textarea-fill). Builds the prompt via
+// lib/write-assist, POSTs to /zo/ask with NO conversation_id (fresh thread per
+// call — never rotates the ambient zoConversationId), and returns the parsed
+// improved text. A 60s AbortController bounds long generations.
+async function enhanceText(request) {
+  if (!config.zoAccessToken) {
+    return { ok: false, error: 'No access token configured. Save one in the extension options.' };
+  }
+  const req = request || {};
+  const prompt = buildEnhancePrompt({
+    text: req.text,
+    instruction: req.instruction,
+    field: req.field,
+    page: req.page,
+  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60000);
+  try {
+    const resp = await fetch(config.zoApiUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${config.zoAccessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        input: prompt,
+        model_name: config.zoModel || undefined,
+      }),
+      signal: controller.signal,
+    });
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '');
+      return { ok: false, error: `Zo API error: ${resp.status} ${body.substring(0, 200)}` };
+    }
+    const data = await resp.json();
+    const { text } = parseEnhanceResponse(data.output);
+    if (!text) return { ok: false, error: 'Zo returned an empty response.' };
+    return { ok: true, text };
+  } catch (err) {
+    if (err && err.name === 'AbortError') return { ok: false, error: 'Enhance timed out after 60s.' };
+    return { ok: false, error: `Enhance failed: ${err.message}` };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
