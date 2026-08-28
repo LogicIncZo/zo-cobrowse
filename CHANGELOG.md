@@ -67,6 +67,12 @@ fixtures, so "any form" is the actual test bar.
 - Secrets proposed by the model despite the prompt rule are stripped from the
   confirmed batch (live-observed; the review card's "left for you" is now
   enforced, not just displayed).
+- **After a fill, Zo never clicks ANY action button** (submit/OK/Next/
+  Continue/Create… — every page, not just sensitive ones): prompt rule plus a
+  hard per-page backstop that blocks button-ish clicks on the last-filled page
+  (links stay clickable; the block clears on navigation). The tab-strip
+  Open-all race (a stale tabs snapshot could repaint mid-open under load) is
+  fixed with a sequence guard on the tab query.
 
 ### Docs / planning
 - 0.2.0 planning suite: competitive analysis (Comet/Dia/Operator/Fellou/
