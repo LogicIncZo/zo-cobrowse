@@ -1997,6 +1997,8 @@ function appendMentionPill(userBody, label) {
 
 const tabRefsEnabled = new Set(); // tabIds currently referenced
 let openTabs = [];                // last GET_OPEN_TABS result (recency order)
+let openTabsQuerySeq = 0;         // latest-issued query owns the strip (stale
+                                  // responses must not overwrite fresher ones)
 let tabStripCollapsed = false;
 
 function initTabStrip() {
@@ -2029,8 +2031,13 @@ function initTabStrip() {
 }
 
 async function refreshOpenTabs() {
+  const seq = ++openTabsQuerySeq;
   try {
     const resp = await chrome.runtime.sendMessage({ type: 'GET_OPEN_TABS' });
+    // A newer query (e.g. openAllLinks' own refresh, issued after all tabs
+    // were created) must win — an earlier trigger's late response would
+    // otherwise repaint the strip from a pre-creation snapshot.
+    if (seq !== openTabsQuerySeq) return;
     openTabs = (resp && Array.isArray(resp.tabs)) ? resp.tabs : [];
     // Drop toggles for tabs that no longer exist — in the active set AND in
     // every chat's stashed set.

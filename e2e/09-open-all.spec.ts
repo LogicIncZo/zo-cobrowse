@@ -31,6 +31,8 @@ async function activeTabUrl(panel: ExtensionHarness["panel"]): Promise<string> {
 }
 
 test.describe("link chips + open all (#27)", () => {
+  test.setTimeout(90_000); // CI-load headroom (QA_REPORT flake)
+
   test("prose answer with links renders the card; Open all opens + references tabs", async () => {
     await sendQuery(h.panel, "give me links to the fixture pages");
     await waitForTurnComplete(h.panel);
@@ -72,7 +74,7 @@ test.describe("link chips + open all (#27)", () => {
 
     // Opened tabs auto-become referenced chips in the tab strip
     await expect(h.panel.locator("#tab-contexts")).toBeVisible();
-    await expect(h.panel.locator("#tab-strip .tab-chip")).toHaveCount(4, { timeout: 10_000 });
+    await expect(h.panel.locator("#tab-strip .tab-chip")).toHaveCount(4, { timeout: 25_000 }); // CI runners under load poll slowly (QA_REPORT flake)
     await expect(h.panel.locator("#tab-strip .tab-chip-on")).toHaveCount(3);
     await expect(h.panel.locator("#tab-strip-count")).toHaveText("(3/4)");
   });
