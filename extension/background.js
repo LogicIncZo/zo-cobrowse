@@ -1901,8 +1901,14 @@ async function captureFormFields(tabId) {
 // misses <button>Place order</button> without an explicit type attribute).
 const SUBMIT_TEXT_RE = /submit|pay|checkout|order|place|buy/i;
 
-/** Probe a click target for the submit backstop: {form,type,text} of the
- *  element, or null on any failure (fail-open - a broken probe must not
+// Co-browse contract (user rule): after Zo fills a form on a page, it NEVER
+// clicks ANY action button on that page (submit/OK/Next/Create/Continue/…) —
+// the user reviews and clicks. tabId → URL of the last fill; cleared when the
+// tab navigates elsewhere. The prompt rule is primary; this cannot be ignored.
+const filledPages = new Map();
+
+/** Probe a click target for the submit backstop: {form,tag,type,role,text} of
+ *  the element, or null on any failure (fail-open - a broken probe must not
  *  brick clicking). */
 async function probeClickTarget(tabId, selector) {
   try {
@@ -1922,13 +1928,19 @@ async function probeClickTarget(tabId, selector) {
 function probeExpr(sel) {
   return '(function(){var el=document.querySelector(' + JSON.stringify(sel) + ');'
     + 'if(!el)return null;'
-    + 'return{form:!!el.closest("form"),type:el.type||"",text:(el.textContent||el.value||"").trim().substring(0,40)};})()';
+    + 'return{form:!!el.closest("form"),type:el.type||"",tag:(el.tagName||"").toLowerCase(),role:(el.getAttribute&&el.getAttribute("role"))||"",text:(el.textContent||el.value||"").trim().substring(0,40)};})()';
 }
 
 function probeFn(sel) {
   const el = document.querySelector(sel);
   if (!el) return null;
-  return { form: !!el.closest('form'), type: el.type || '', text: (el.textContent || el.value || '').trim().substring(0, 40) };
+  return {
+    form: !!el.closest('form'),
+    type: el.type || '',
+    tag: (el.tagName || '').toLowerCase(),
+    role: (el.getAttribute && el.getAttribute('role')) || '',
+    text: (el.textContent || el.value || '').trim().substring(0, 40),
+  };
 }
 
 async function executeActions(actions, tabId, opts = {}) {
@@ -1960,6 +1972,28 @@ async function executeActions(actions, tabId, opts = {}) {
       if (isSubmit) {
         results.push({ ok: false, type: 'click', blocked: true, error: 'blocked submit on sensitive page - review and submit yourself' });
         continue;
+      }
+    }
+
+    // Co-browse contract (user rule): once Zo has filled a form on this page,
+    // it never clicks ANY action button (submit/OK/Next/Continue/Create/…) —
+    // the user reviews and clicks. Links stay allowed (navigation ≠ form
+    // action). The entry clears when the tab navigates elsewhere.
+    if (action.type === 'click' && filledPages.has(tabId)) {
+      let currentUrl = '';
+      try { currentUrl = (await chrome.tabs.get(tabId)).url || ''; } catch { /* tab gone */ }
+      if (currentUrl && currentUrl !== filledPages.get(tabId)) {
+        filledPages.delete(tabId); // navigated away - the contract is satisfied
+      } else if (currentUrl) {
+        const probe = await probeClickTarget(tabId, action.selector);
+        const isActionButton = probe && (
+          probe.tag === 'button' ||
+          (probe.tag === 'input' && (probe.type === 'submit' || probe.type === 'button')) ||
+          probe.role === 'button');
+        if (isActionButton) {
+          results.push({ ok: false, type: 'click', blocked: true, error: 'blocked action-button click after a form fill - review the page and click it yourself' });
+          continue;
+        }
       }
     }
 
@@ -1999,6 +2033,13 @@ async function executeActions(actions, tabId, opts = {}) {
 
     results.push(result);
     if (!result?.ok) break;
+    // Arm the post-fill action-button contract for this page.
+    if ((action.type === 'fill' || action.type === 'fill_form') && result.ok) {
+      try {
+        const tab = await chrome.tabs.get(tabId);
+        if (tab?.url) filledPages.set(tabId, tab.url);
+      } catch { /* tab gone - nothing to arm */ }
+    }
     if (action.type !== 'wait') await sleep(500);
   }
 

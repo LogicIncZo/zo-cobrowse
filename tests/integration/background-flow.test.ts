@@ -329,7 +329,8 @@ describe("form-fill sensitivity gate (#26)", () => {
 
     // Benign search page: no sensitive fields, no sensitive URL.
     benignWin.document.write(`<!DOCTYPE html><html><head><title>Search</title></head><body>
-      <form><input id="q" name="q" placeholder="Search"><button type="button">Go</button></form>
+      <form><input id="q" name="q" placeholder="Search"><button id="go-btn" type="button">Go</button></form>
+      <a id="next-link" href="#next">Next</a>
     </body></html>`);
     stubNonZeroRects(benignWin);
     const benignTarget = createTabTarget();
@@ -430,5 +431,47 @@ describe("form-fill sensitivity gate (#26)", () => {
     expect(r.needsConfirm).toBeUndefined();
     expect(r.ok).toBe(true);
     expect((benignWin.document.querySelector("input[name=q]") as any).value).toBe("hi");
+  });
+
+  it("after a fill on a page, Zo clicking an ACTION button is blocked (user rule)", async () => {
+    // Co-browse contract: Zo fills, the USER clicks submit/OK/Next — on ANY
+    // page, not just sensitive ones. Fill in one message, click in the next
+    // (the sidepanel's per-action loop shape).
+    bus.scripting.dom = benignWin;
+    const fill = await bus.runtime.sendMessage({
+      type: "EXECUTE_ACTIONS",
+      actions: [{ type: "fill", selector: "#q", value: "blocked-click-test" }],
+      tabId: benignTabId,
+    });
+    expect(fill.ok).toBe(true);
+
+    let goClicked = 0;
+    benignWin.document.querySelector("#go-btn").addEventListener("click", () => { goClicked += 1; });
+    const click = await bus.runtime.sendMessage({
+      type: "EXECUTE_ACTIONS",
+      actions: [{ type: "click", selector: "#go-btn" }],
+      tabId: benignTabId,
+    });
+    expect(click.ok).toBe(false);
+    expect(click.results[0].blocked).toBe(true);
+    expect(click.results[0].error).toMatch(/action-button click after a form fill/i);
+    expect(goClicked).toBe(0);
+  });
+
+  it("links are still clickable after a fill (navigation ≠ form action)", async () => {
+    bus.scripting.dom = benignWin;
+    const fill = await bus.runtime.sendMessage({
+      type: "EXECUTE_ACTIONS",
+      actions: [{ type: "fill", selector: "#q", value: "link-test" }],
+      tabId: benignTabId,
+    });
+    expect(fill.ok).toBe(true);
+    const click = await bus.runtime.sendMessage({
+      type: "EXECUTE_ACTIONS",
+      actions: [{ type: "click", selector: "#next-link" }],
+      tabId: benignTabId,
+    });
+    expect(click.results[0].blocked).toBeUndefined();
+    expect(click.ok).toBe(true);
   });
 });

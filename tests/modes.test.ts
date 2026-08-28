@@ -102,17 +102,19 @@ describe("ACTION_SCHEMA_COMPACT", () => {
     }
   });
 
-  it("documents fill_form + the no-auto-submit rule", () => {
+  it("documents fill_form + the never-click-any-button rule", () => {
     expect(ACTION_SCHEMA_COMPACT).toContain("fill_form{values:[{target,value}]}");
     expect(ACTION_SCHEMA_COMPACT).toMatch(/question\/label\/placeholder text/);
-    expect(ACTION_SCHEMA_COMPACT).toMatch(/never click submit.*done\(\)/i);
+    expect(ACTION_SCHEMA_COMPACT).toMatch(/never click ANY button/i);
+    expect(ACTION_SCHEMA_COMPACT).toMatch(/done\(\)/);
     expect(ACTION_SCHEMA_COMPACT).toMatch(/password/i);
   });
 
-  it("cobrowse instructions carry the no-auto-submit + pacing rules", () => {
+  it("cobrowse instructions carry the never-click + pacing rules", () => {
     expect(BUILTIN_MODES.cobrowse.instructions).toMatch(/fill_form/);
     expect(BUILTIN_MODES.cobrowse.instructions).toMatch(/visible section/);
-    expect(BUILTIN_MODES.cobrowse.instructions).toMatch(/never click submit.*done\(\)/i);
+    expect(BUILTIN_MODES.cobrowse.instructions).toMatch(/never click ANY button/i);
+    expect(BUILTIN_MODES.cobrowse.instructions).toMatch(/done\(\)/);
   });
 
   it("teaches the context-only pull actions (never cross-tab DOM actions)", () => {

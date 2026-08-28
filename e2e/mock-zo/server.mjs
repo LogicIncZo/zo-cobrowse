@@ -81,6 +81,7 @@ function pickScenario(input) {
   if (q.includes("checkout")) return "fill-form";
   if (q.includes("classic form")) return "classic-form";
   if (q.includes("chunked")) return "fill-chunked";
+  if (q.includes("then click")) return "fill-then-click";
   if (q.includes("application")) return "app-section-1";
   if (q.includes("continue") || q.includes("next section")) return "app-section-2";
   if (q.includes("fill")) return "fill";
@@ -254,6 +255,20 @@ const server = http.createServer(async (req, res) => {
       const deltas = [];
       for (let i = 0; i < envelope.length; i += step) deltas.push(envelope.slice(i, i + step));
       return streamSse(res, [textStart(deltas[0]), ...deltas.slice(1).map(textDelta), completed()], { delayMs: 15 });
+    }
+    if (scenario === "fill-then-click") {
+      // The user rule: Zo fills, and then MUST NOT click the form's action
+      // button. The model drifts here on purpose — the extension's hard
+      // backstop has to block the #submit-btn click (a plain type=button on
+      // a benign page; the sensitive-page gate does not apply).
+      const envelope = JSON.stringify({
+        actions: [
+          { type: "fill", selector: "#name", value: "Click Block" },
+          { type: "click", selector: "#submit-btn" },
+          { type: "done", response: "Filled the name field." },
+        ],
+      });
+      return streamSse(res, [textStart(envelope), completed()], { delayMs: 40 });
     }
     if (scenario === "classic-form") {
       // "Any form" hardening round: a RoboForm-shaped classic form. The mock
