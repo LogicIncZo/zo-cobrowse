@@ -1,0 +1,6 @@
+{
+  "id": "cobrowse-readonly",
+  "promptHash": "fc3b6c526100ce71490d1bb710a012846916a1bc5e5da9c5184929983a9a879d",
+  "fetchedAt": "2026-08-28T23:45:09.747Z",
+  "output": "This is a test page for the Zo co-browsing extension. It's structured like a typical SaaS landing page:\n\n- **Header/nav**: Links to Pricing, Features, Docs, and About, with a search box (a `q` input) in the top right.\n- **Hero**: Headline \"Build Smarter with Zo\" with a subheading describing the platform.\n- **Three feature cards**: Instant DuckDB Queries, Web Research Automation, and Custom Skill Builder — each with a \"Learn More\" link.\n- **Footer**: Copyright notice plus Privacy Policy and Terms of Service links.\n\nIn short, it's a demo/mock landing page (\"Build Smarter with Zo\") used to verify that the co-browse assistant can see page structure — nav, hero, cards, forms, footer — and summarize it."
+}

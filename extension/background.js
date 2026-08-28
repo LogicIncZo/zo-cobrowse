@@ -33,6 +33,13 @@ import {
   parseEnhanceResponse,
 } from './lib/write-assist.js';
 import {
+  buildGenerateModePrompt,
+  buildRunSkillPrompt,
+  buildCreateAutomationPrompt,
+  buildListAutomationsPrompt,
+  buildTestConnectionPrompt,
+} from './lib/zo-prompts.js';
+import {
   loadConversationState,
   saveConversationState,
   computePageHash,
@@ -1788,6 +1795,7 @@ async function generateMode(description) {
     return { error: 'No token' };
   }
   try {
+    const prompt = buildGenerateModePrompt(description);
     const r = await fetch(config.zoApiUrl, {
       method: 'POST',
       headers: {
@@ -1796,7 +1804,7 @@ async function generateMode(description) {
         Accept: 'application/json',
       },
       body: JSON.stringify({
-        input: `You are a Mode designer for a browser co-browsing AI assistant. Based on this user description, generate a custom Mode.\n\nUser description: ${description}\n\nCreate a Mode with these fields:\n1. name: A short, catchy name (2-4 words)\n2. description: One sentence explaining what this Mode does\n3. icon: A single emoji\n4. systemPrompt: A paragraph setting the AI's role and behavior for this task (write as if addressing the AI directly, starting with "You are Zo —")\n5. instructions: Detailed instructions for how the AI should respond, including output format guidance.\n6. contextTier: 0 (URL only), 1 (+page text), 2 (+clickable elements & form fields), or 3 (+screenshot)\n7. expectJson: true if the mode should drive browser actions, false if it should reply with plain markdown\n\nReturn ONLY valid JSON with those 7 fields. No markdown, no explanation.`,
+        input: prompt,
         model_name: config.zoModel || undefined,
       }),
     });
@@ -1836,7 +1844,7 @@ async function testConnection() {
         Accept: 'application/json',
       },
       body: JSON.stringify({
-        input: 'Reply with just: ZO_OK',
+        input: buildTestConnectionPrompt(),
         model_name: config.zoModel || undefined,
         conversation_id: zoConversationId || undefined,
       }),
@@ -2260,15 +2268,7 @@ async function savePageToWorkspace(pageContext, savePath) {
 
 // Run a Zo skill on the current page (#04)
 async function runSkill(skillName, pageContext) {
-  const prompt = `Run the skill named "${skillName}" using the content from the current page as input.
-
-Page URL: ${pageContext?.url || '(unknown)'}
-Page title: ${pageContext?.title || '(unknown)'}
-
-Page text (first 2000 chars):
-${(pageContext?.visibleText || '').slice(0, 2000)}
-
-Read the skill's SKILL.md and follow its instructions.`;
+  const prompt = buildRunSkillPrompt(skillName, pageContext);
   try {
     const resp = await fetch(config.zoApiUrl, {
       method: 'POST',
@@ -2343,16 +2343,7 @@ async function enhanceText(request) {
 
 // Create a scheduled automation from the current page (#08)
 async function createAutomation(instruction, rrule, pageContext) {
-  const prompt = `Create a scheduled automation with these parameters:
-  - Instruction: ${instruction}
-  - Schedule (RRULE): ${rrule || 'FREQ=DAILY'}
-  - Source page URL: ${pageContext?.url || '(unknown)'}
-  - Source page title: ${pageContext?.title || '(unknown)'}
-
-Context from the page (first 1000 chars):
-${(pageContext?.visibleText || '').slice(0, 1000)}
-
-Use the create_agent tool to create this automation now.`;
+  const prompt = buildCreateAutomationPrompt(instruction, rrule, pageContext);
   try {
     const resp = await fetch(config.zoApiUrl, {
       method: 'POST',
@@ -2377,7 +2368,7 @@ Use the create_agent tool to create this automation now.`;
 
 // List existing automations (#08)
 async function listAutomations() {
-  const prompt = 'List all my automations. For each, return the title, schedule (RRULE), and delivery method.';
+  const prompt = buildListAutomationsPrompt();
   try {
     const resp = await fetch(config.zoApiUrl, {
       method: 'POST',

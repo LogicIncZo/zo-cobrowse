@@ -1,0 +1,6 @@
+{
+  "id": "cobrowse-fill-search",
+  "promptHash": "98f1a3287239d45744909f2d157b32d2324d2a87393d55273f8830ea2d9b9932",
+  "fetchedAt": "2026-08-28T23:44:08.919Z",
+  "output": "```json\n{\"actions\":[{\"fill\":{\"selector\":\"#search-box\",\"value\":\"Zo Computer\"}},{\"done\":{\"response\":\"Filled the search box with 'Zo Computer'. No search button exists in the elements list — the search is a form field, so press Enter (or click submit) to run it.\"}}]}\n```"
+}

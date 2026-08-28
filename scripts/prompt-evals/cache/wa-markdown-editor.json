@@ -1,0 +1,6 @@
+{
+  "id": "wa-markdown-editor",
+  "promptHash": "da05ef709ffb10b635ab937d09df8ad76ad184ab1bc23737c10a709271c5868e",
+  "fetchedAt": "2026-08-28T23:48:37.624Z",
+  "output": "<write-assist>\n**Migrating our analytics stack to DuckDB**\n\nI led the migration of 40 dashboards from our legacy database backend to DuckDB, and owned the process end to end — from evaluating DuckDB and making the case for the switch, to planning the migration itself, to making sure the team could run with it afterwards.\n\nOn the technical side, that meant auditing each of the 40 dashboards to understand their queries and data dependencies, porting them over to DuckDB, and validating that results matched before cutting anything over. DuckDB's columnar engine and low operational overhead were a strong fit for our analytics workloads, and the migration let the dashboards run noticeably faster with far less infrastructure to babysit.\n\nBecause a migration only sticks if the team can maintain it, I also ran the training effort: hands-on sessions introducing the team to DuckDB's SQL dialect and tooling, documentation covering our new setup and common patterns, and pairing support as people converted their own dashboards. By the end, the team was self-sufficient on the new stack — the migration became theirs, not just mine.\n</write-assist>"
+}

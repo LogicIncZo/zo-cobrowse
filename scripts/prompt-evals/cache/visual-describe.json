@@ -1,0 +1,6 @@
+{
+  "id": "visual-describe",
+  "promptHash": "59782ef598f541789d51b678bf38e25ab0c44c80f8fafedf7af1d98eef103081",
+  "fetchedAt": "2026-08-28T23:47:54.307Z",
+  "output": "The screen shows a simple landing page titled \"Test Page for Zo Co-browse\" at `example.com/test-page`, laid out as follows:\n\n**Navigation header** (top of page)\n- Links: Pricing, Features, Docs, and About — each anchoring to its own section on the page.\n- A search box sits in the top-right corner (an input field named `q`, placeholder text \"Search…\").\n\n**Hero section** (main content)\n- Headline: **\"Build Smarter with Zo\"**\n- A subheading beneath it describing the platform.\n\n**Three feature cards** below the hero:\n1. **Instant DuckDB Queries**\n2. **Web Research Automation**\n3. **Custom Skill Builder**\n\nEach card includes a \"Learn More\" link.\n\n**Footer** (bottom of page)\n- Copyright information\n- Links to Privacy Policy and Terms of Service\n\nThat's the full page — a clean single-viewport layout with no other interactive elements beyond the nav links, search input, card CTAs, and footer links. This looks like a deliberately simple fixture page, likely used to validate the Zo co-browse extension's ability to read page structure (headers, forms, element selectors like `#search-box`, `.cta`, etc.)."
+}

@@ -1,0 +1,6 @@
+{
+  "id": "cobrowse-checkout-fill",
+  "promptHash": "88d5f5474b14908688b3a4ebca73f4998216487a3a29f8ca7c85c523ec75d118",
+  "fetchedAt": "2026-08-28T23:55:20.257Z",
+  "output": "{\"actions\":[{\"fill_form\":{\"values\":[{\"target\":\"Email address\",\"value\":\"buyer@example.com\"},{\"target\":\"Full name\",\"value\":\"Ada Lovelace\"}]}},{\"done\":{\"response\":\"Filled email and full name. Password and card fields left empty for you; review and click Complete order when ready.\"}}]}"
+}
