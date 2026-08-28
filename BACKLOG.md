@@ -1,6 +1,7 @@
 # Zo Co-browse — Backlog
 
-> Updated 2026-08-15. All QA-report findings from the 2026-08-08 round are **resolved**
+> Updated 2026-08-20 — v0.1.0 released 2026-08-19; **0.2.0 planned** (see the 🎯 section).
+> All QA-report findings from the 2026-08-08 round are **resolved**
 > (see `QA_REPORT.md` remediation log). Remaining items are feature work.
 > An **infrastructure round** (2026-08-09) added the loop-engineering gate, CI on
 > all branches, and a dormant release workflow — see below.
@@ -13,7 +14,7 @@
 - **CI/CD:** CI runs on every branch push + PR to `main` (tests + transpile + release checks + zip artifact); `.github/workflows/release.yml` publishes `v*` tag releases (used for v0.0.2)
 - **Streaming:** hardened end-to-end (sessionId isolation, port-disconnect safety, retry correctness, 60s liveness timeout)
 - **P0/P1/P2/P3 QA findings:** all closed (P2-31 deferred by design — see below)
-- **Release:** ✅ **v0.0.2** tagged + GitHub release published (2026-08-10) with the extension zip. Next milestone: Chrome Web Store submission (#11)
+- **Release:** ✅ **v0.1.0** tagged + GitHub release published (2026-08-19). Next milestone: **v0.2.0** (section below); Chrome Web Store submission (#11) stays its own 0.2.x milestone
 
 ## ✅ Completed this round
 
@@ -40,17 +41,30 @@
 
 | Tier | Ticket | Status | Notes |
 |------|--------|--------|-------|
-| Tier 1 | #16 Scheduled AI Commands | P0 — not started | Reuses streaming + persona paths (now stable) |
-| Tier 1 | #17 Web Monitoring & Page Change Detection | P0 — not started | Zo automations + DuckDB history |
-| Tier 1 | #18 Shared Sessions (multi-participant) | P1 — `backend/relay.ts` exists, extension integration not done |
-| Tier 1 | #19 Multi-Model Selection UI | P1 — not started | model picker in panel |
-| Tier 1 | #20 Tab Compare / Side-by-Side | P1 — depends on #10 |
+| Tier 1 | #16 Scheduled AI Commands | → folded into **#29** (0.2.0) | Unify with monitoring under one task engine |
+| Tier 1 | #17 Web Monitoring & Page Change Detection | → folded into **#29** (0.2.0) | Zo verdicts + notifications; cloud checks deferred |
+| Tier 1 | #18 Shared Sessions (multi-participant) | P1 — `backend/relay.ts` exists, extension integration not done | Deferred past 0.2.0 (analysis §5) |
+| Tier 1 | #19 Multi-Model Selection UI | spec'd — **0.2.0** | `docs/superpowers/specs/2026-08-20-model-picker-design.md` |
+| Tier 1 | #20 Tab Compare / Side-by-Side | P1 — depends on #10 | After #10's actions half (0.2.0) |
 | Tier 2 | #21 Page Context Export (PDF/MD) | P2 | |
-| Tier 2 | #14 Page Monitoring (basic) | P2 | |
-| Parity | #10 Multi-Tab Context | P3 — context half DONE (`feature/tab-contexts`): tab references (manifest + excerpt + `read_tab` on-demand, chip strip + `@` mention); cross-tab actions + tab management remain | Spec: docs/superpowers/specs/2026-08-14-tab-contexts-design.md |
+| Tier 2 | #14 Page Monitoring (basic) | → folded into **#29** (0.2.0) | |
+| Parity | #10 Multi-Tab Context | P3 — context half DONE (`feature/tab-contexts`): tab references (manifest + excerpt + `read_tab` on-demand, chip strip + `@` mention); cross-tab actions + tab management remain — **spec'd for 0.2.0** (see 🎯 section) | Spec: docs/superpowers/specs/2026-08-14-tab-contexts-design.md + 2026-08-20-cross-tab-actions-design.md |
 | Parity | Chat tabs + chat management (no ticket) | DONE 2026-08-15 (`feature/tab-interface`): chat tab bar (≤8 open, per-chat Zo threads + context state, streams survive switches, parked `pendingActions`), history-view rename + search | Spec: docs/superpowers/specs/2026-08-15-chat-tabs-design.md; follow-ups (pin/export, multi-window sync) open |
 | Parity | #27 Cold-start + research → "open all" tabs | DONE 2026-08-15 (`feature/newtab`): blank/new-tab pages skip page context entirely (no debug banner, no hard-block, no T1/`## Page` noise — `isBlankPage`/`pageBlank`); link-chips card + `Open all (N)` on prose answers (first-fg/rest-bg) auto-adds opened tabs as reference chips. **E2E coverage + demo video added 2026-08-18** (`chore/verify-open-all`): `e2e/09-open-all.spec.ts` (card render, Open all → real tabs, first-fg active-tab check, strip `(3/4)` referenced chips, single-chip foreground open) against a new `links` mock scenario; demo recording via `ZO_DEMO=1 bun x playwright test -c e2e/playwright.config.ts demo-open-all` → `demo/open-all-demo.mp4` (gitignored artifact) | Spec: docs/superpowers/specs/2026-08-15-cold-start-open-all-design.md |
 | Parity | Image/file upload, #23 Workflow Recording, Download files, Risk dialogs, #11 Web Store Listing | P3–P4 | |
+
+## 🎯 0.2.0 — planned 2026-08-20 (competitive round)
+
+Scope chosen in-session ("Everything" option) against a full competitive scan of the Aug-2026 field — agentic browsers (Comet/Dia/Opera/Fellou, Atlas sunset), companion extensions, monitoring + agentic-checkout categories. Full analysis + deferred-with-rationale list: **`docs/superpowers/specs/2026-08-20-0.2.0-competitive-analysis.md`**. Owner decision: features only — **no** #11 store listing in this milestone.
+
+| ID | Feature | Design spec | Implementation plan | Notes |
+|----|---------|-------------|---------------------|-------|
+| #19 | Model picker — per-chat override, catalog badges (👁 vision / ⭐ free / ⚠ deprecated), options-page pre-token fix | [model-picker-design](docs/superpowers/specs/2026-08-20-model-picker-design.md) | [plan](docs/superpowers/plans/2026-08-20-model-picker.md) | build **first** (smallest; `ASK_ZO.modelName` plumbing already exists) |
+| #26 | Form-fill — batch `fill_form` by label cues + confirm-before-fill review card + submit backstop + no-secrets rule | [form-fill-design](docs/superpowers/specs/2026-08-20-form-fill-design.md) | [plan](docs/superpowers/plans/2026-08-20-form-fill.md) | layer 1 (`get_form`) shipped with #24; the pre-fill review table is a differentiator nobody ships |
+| #10 | Cross-tab actions — `"tab":"Tn"` targeting + `open_tab`/`close_tab`/`switch_tab` verbs, tab-routed parked actions | [cross-tab-actions-design](docs/superpowers/specs/2026-08-20-cross-tab-actions-design.md) | [plan](docs/superpowers/plans/2026-08-20-cross-tab-actions.md) | completes the 0.1.0 context half |
+| #29 | Watch & Scheduled Tasks — page watches (snapshot→diff→Zo verdict→notify) + scheduled prompts + monitor→act bridge | [watch-tasks-design](docs/superpowers/specs/2026-08-20-watch-tasks-design.md) | [plan](docs/superpowers/plans/2026-08-20-watch-tasks.md) | **unifies #14 + #16 + #17**; bridge = the wedge (detect → notify → act → *confirm*) |
+
+**Build order: #19 → #26 → #10 → #29** (each independently shippable; #29's bridge consumes the other three). Deferred past 0.2.0 with rationale (analysis §5): memory, voice, post-hoc undo, payment rails, #15/#18 shared sessions, cloud/browser-closed checks (FCM), #20, #21, #11.
 
 ## 🧪 Proposed 2026-08-15 — brainstormed, pending triage
 
