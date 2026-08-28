@@ -29,7 +29,7 @@ import { describe, it, expect, beforeAll } from "bun:test";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 import { Window } from "happy-dom";
-import { createFakeChrome, createTabTarget, stubNonZeroRects, waitUntil } from "../helpers/chrome-mock.ts";
+import { createFakeChrome, createTabTarget, stubNonZeroRects, waitUntil, FakeEvent } from "../helpers/chrome-mock.ts";
 import { ZoFetchMock, MOCK_ZO_TOKEN, sseResponse, sseEvent, deferredSse, zoSseText, jsonResponse } from "../helpers/zo-fetch-mock.ts";
 
 const PANEL_HTML = readFileSync(resolve(import.meta.dir, "../../extension/sidepanel.html"), "utf-8")
@@ -643,5 +643,67 @@ describe("form-fill review card (#26)", () => {
     const rows = [...panelWin.document.querySelectorAll(".field-result")] as HTMLElement[];
     expect(rows.length).toBeGreaterThanOrEqual(2);
     expect(rows.every((r) => !!r.closest(".action-card-fill_form"))).toBe(true);
+  }, 30000);
+});
+
+// Write-assist (feature/textarea-fill) — the first CONTENT-initiated message.
+// A dedicated content.js instance (rich chrome: storage + sendMessage routed to
+// the bus) drives ENHANCE_TEXT through the REAL background one-shot handler to
+// the Zo fetch mock, asserting the wire request is threadless and the enhanced
+// text round-trips back into the popover preview.
+describe("write-assist ENHANCE_TEXT round-trip (content → background → Zo)", () => {
+  it("enhances a textarea lead via the real background one-shot (no conversation_id)", async () => {
+    // Superset handler: write-assist marker → JSON one-shot; else beforeAll defaults.
+    fm.handle((url, _init, req) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [{ model_name: "trio-model", label: "Trio Model" }] });
+      if (url.includes("/models/catalog")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      const input = req.body && req.body.input != null ? String(req.body.input) : "";
+      if (input.includes("write-assist")) {
+        return jsonResponse({ output: "ENHANCED BY ZO", conversation_id: "conv_enhance_x" });
+      }
+      return sseResponse(zoSseText({ text: "It is a test page." }));
+    });
+
+    const waWin: any = new Window({ url: "https://jobs.example.test/apply" });
+    waWin.document.write(`<!DOCTYPE html><html><head><title>Job Application</title></head><body>
+      <label for="proj">Describe your project</label>
+      <textarea id="proj" maxlength="500">Led migration of 40 dashboards</textarea>
+    </body></html>`);
+    stubNonZeroRects(waWin);
+    const waChrome = {
+      runtime: {
+        onMessage: new FakeEvent(),
+        sendMessage: (msg: any) => bus.runtime.sendMessage(msg), // content → background
+        getURL: (p: string) => `chrome-extension://test-extension-id/${p}`,
+      },
+      storage: bus.storage,
+    };
+    loadContentScript(waWin, waChrome);
+    const tick = () => new Promise((r) => setTimeout(r, 10));
+    await tick(); // let the storage.get callback set waEnabled
+
+    const ta = waWin.document.querySelector("#proj");
+    ta.focus();
+    await tick();
+    const host = waWin.document.getElementById("zo-write-assist-host");
+    expect(host).toBeTruthy();
+    const root = host.shadowRoot;
+    root.querySelector(".zo-wa-icon").click();
+    await tick();
+    const pop = root.querySelector(".zo-wa-pop");
+    [...pop.querySelectorAll("button")].find((b: any) => b.textContent === "Enhance").click();
+    await waitUntil(() => !!pop.querySelector(".zo-wa-result"), 5000);
+    expect(pop.querySelector(".zo-wa-result").textContent).toBe("ENHANCED BY ZO");
+
+    // The wire request: a one-shot /zo/ask carrying the marker + lead, with NO
+    // conversation_id (fresh thread — never rotates the ambient thread).
+    const enhanceReqs = fm.to("/zo/ask").filter((r) => String(r.body?.input || "").includes("write-assist"));
+    expect(enhanceReqs.length).toBeGreaterThanOrEqual(1);
+    const req = enhanceReqs[enhanceReqs.length - 1];
+    expect(req.body.conversation_id).toBeUndefined();
+    expect(req.body.input).toContain("Led migration of 40 dashboards");
+    expect(req.body.input).toContain("Describe your project");
+    expect(req.headers.authorization).toBe(`Bearer ${MOCK_ZO_TOKEN}`);
   }, 30000);
 });

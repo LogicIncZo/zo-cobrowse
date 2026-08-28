@@ -437,6 +437,7 @@
   function waBuild() {
     if (waReady) return;
     waHost = document.createElement('div');
+    waHost.id = 'zo-write-assist-host';
     waHost.style.cssText = 'position:fixed; top:0; left:0; pointer-events:none; z-index:2147483647;';
     waRoot = waHost.attachShadow({ mode: 'open' });
     const style = document.createElement('style');
