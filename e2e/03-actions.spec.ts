@@ -6,29 +6,27 @@ import { test, expect } from "@playwright/test";
 import { openHarness, sendQuery, waitForTurnComplete } from "./helpers/extension";
 
 test.describe("action turns", () => {
-  test("fill + click envelope mutates the real form and reports done", async () => {
+  test("fill envelope mutates the real form without submitting", async () => {
     const h = await openHarness({ freshProfile: true, sitePath: "/form.html" });
     try {
       await sendQuery(h.panel, "fill the form for me");
-      // Real DOM effects on the fixture page (two-way binding + submit)
+      // Real DOM effects: fields filled, but NOT submitted (co-browse rule).
       await expect(h.site.locator("#name")).toHaveValue("E2E Tester", { timeout: 20_000 });
       await expect(h.site.locator("#email")).toHaveValue("e2e@example.test");
       await expect(h.site.locator("#plan")).toHaveValue("pro");
-      await expect(h.site.locator("#form-result")).toContainText("submitted:E2E Tester:e2e@example.test", { timeout: 20_000 });
+      // The form was NOT auto-submitted — #form-result stays empty.
+      await expect(h.site.locator("#form-result")).toBeEmpty({ timeout: 3000 });
 
-      // Panel: the inline action run settles (NOTE — observed contract, also
-      // documented in tests/integration/extension-flow.test.ts: a streamed
-      // action turn keeps its "_Preparing actions…" placeholder in the bubble;
-      // the done response is persisted to the conversation but not rendered.)
+      // Panel: 3 fill cards + done (no click card).
       await expect(h.panel.locator("#action-run .action-run-label")).toContainText("Performed actions", { timeout: 20_000 });
       const cards = h.panel.locator("#action-timeline .action-card");
-      await expect(cards).toHaveCount(4, { timeout: 20_000 }); // 3 fills + click (done is not a card)
+      await expect(cards).toHaveCount(3, { timeout: 20_000 }); // fills only — no submit click
       await expect(cards.first()).toContainText("Fill");
       // …and the done response WAS persisted for history
       await waitForTurnComplete(h.panel);
       const stored = await h.serviceWorker.evaluate(() => new Promise((r) =>
         chrome.storage.local.get("cobrowse_convos", (v) => r(JSON.stringify(v.cobrowse_convos || {})))));
-      expect(stored).toContain("Form filled and submitted.");
+      expect(stored).toContain("Form filled — review");
     } finally {
       await h.context.close();
     }

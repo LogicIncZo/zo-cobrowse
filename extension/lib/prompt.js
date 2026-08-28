@@ -76,13 +76,17 @@ export function compactEl(e) {
   return `[${e.tag || 'a'}${t}${sel ? ' ' + sel : ''}]`;
 }
 
-/** Compact one-line serializer for a form field. */
+/** Compact one-line serializer for a form field. The `question` cue (nearest
+ *  preceding title/label text) is the only disambiguator on builder-style
+ *  forms where every field shares an identical placeholder and a UUID id. */
 export function compactForm(f) {
   const ph = (f.placeholder || '').replace(/\s+/g, ' ').trim().slice(0, 30);
   const sel = f.selector || '';
   const ty = f.type ? ` type=${f.type}` : '';
   const p = ph ? ` "${ph}"` : '';
-  return `[${f.tag || 'input'}${sel}${ty}${p}]`;
+  const q = (f.question || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+  const qs = q ? ` — ${q}` : '';
+  return `[${f.tag || 'input'}${sel}${ty}${p}]${qs}`;
 }
 
 /**

@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>E2E Fixture Checkout</title>
+  <style>body { font-family: system-ui, sans-serif; margin: 2rem; } label { display: block; margin-top: .75rem; }</style>
+</head>
+<body>
+  <main>
+    <h1>Fixture Checkout</h1>
+    <p>Sensitive form for the #26 fill_form review-card flow.</p>
+    <form id="checkout-form">
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" />
+      <label for="pw">Password</label>
+      <input id="pw" name="pw" type="password" />
+      <label for="cc">Card number</label>
+      <input id="cc" name="cc" inputmode="numeric" />
+      <button id="checkout-submit" type="submit">Place order</button>
+    </form>
+    <div id="submit-result" aria-live="polite"></div>
+  </main>
+  <script>
+    document.getElementById('checkout-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      document.getElementById('submit-result').textContent = 'submitted';
+    });
+  </script>
+</body>
+</html>

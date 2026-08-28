@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>E2E Fixture Application</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; }
+    .block { min-height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; padding: 0 3rem; border: none; }
+    .field-title { font-size: 1.1rem; margin-bottom: .4rem; }
+    .input-wrap input { font-size: 1rem; padding: .5rem; width: 320px; }
+    .ok-btn { margin-top: 1rem; font-size: 1rem; padding: .5rem 1.4rem; }
+    #app-submitted { padding: 2rem 3rem; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="app-root">
+    <!-- Builder-style: no <form>, no label/for, no name attrs, UUID ids,
+         one identical placeholder everywhere, question text as a plain div
+         above each input wrapper (live-probed Typeform shape). -->
+    <fieldset class="block" id="block-1">
+      <div class="block-title">1 Tell us about yourself</div>
+      <div class="field">
+        <div class="field-title">First name*</div>
+        <div class="input-wrap"><input type="text" id="uuid-a1" placeholder="Type your answer here..."></div>
+      </div>
+      <div class="field">
+        <div class="field-title">Work email</div>
+        <div class="input-wrap"><input type="email" id="uuid-a2" placeholder="Type your answer here..."></div>
+      </div>
+      <button type="button" class="ok-btn" data-next="block-2">OK</button>
+    </fieldset>
+    <fieldset class="block" id="block-2">
+      <div class="block-title">2 Your work</div>
+      <div class="field">
+        <div class="field-title">Share your website</div>
+        <div class="input-wrap"><input type="text" id="uuid-b1" placeholder="Type your answer here..."></div>
+      </div>
+      <div class="field">
+        <div class="field-title">Tell us about you</div>
+        <div class="input-wrap"><input type="text" id="uuid-b2" placeholder="Type your answer here..."></div>
+      </div>
+      <button type="button" class="ok-btn" data-submit>OK</button>
+    </fieldset>
+    <div id="app-submitted" hidden>application submitted</div>
+  </div>
+  <script>
+    // The USER advances (co-browse pacing): OK scrolls the next section into
+    // view; the last OK "submits".
+    for (const btn of document.querySelectorAll('.ok-btn')) {
+      btn.addEventListener('click', () => {
+        const next = btn.getAttribute('data-next');
+        if (next) {
+          document.getElementById(next).scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else {
+          document.getElementById('app-submitted').hidden = false;
+        }
+      });
+    }
+  </script>
+</body>
+</html>

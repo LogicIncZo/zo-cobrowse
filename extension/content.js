@@ -46,6 +46,7 @@
         name: el.name || el.id || '',
         selector: buildSelector(el),
         placeholder: el.placeholder || '',
+        question: nearestQuestion(el),
         value: el.value?.substring(0, 100) || '',
       });
     });
@@ -110,24 +111,199 @@
     });
   }
 
+  /** Prefer the candidate the user can actually see — long/SPA forms keep
+   *  every section's fields in the DOM at once (builder-style forms), so
+   *  equal cues must resolve to the field on screen, not the first in
+   *  document order. Falls back to document order when none intersect. */
+  function pickVisible(fields) {
+    for (const f of fields) {
+      const r = f.getBoundingClientRect();
+      if (r.top < window.innerHeight && r.bottom > 0) return f;
+    }
+    return fields[0] || null;
+  }
+
+  /** Question-scoped resolution for builder-style forms (Typeform et al.):
+   *  inputs carry no label/name and share an identical placeholder, but each
+   *  question's title text sits near its field. A cue matches a text element
+   *  (heading/legend/label-like leaf) exactly; the field associates by shared
+   *  wrapper — climb from the cue until its subtree contains a field. */
+  function resolveByQuestion(t) {
+    const want = normCue(t);
+    const cues = [];
+    for (const el of document.querySelectorAll('h1,h2,h3,h4,h5,h6,legend,label,p,span,div,td,th,fieldset')) {
+      if (el.querySelector('input, textarea, select')) continue; // a wrapper, not a cue
+      const txt = (el.innerText || '').trim();
+      if (!txt || txt.length > 160) continue;
+      if (normCue(txt) !== want) continue;
+      cues.push(el);
+    }
+    const candidates = [];
+    for (const cue of cues) {
+      let scope = cue;
+      for (let i = 0; i < 8 && scope; i++) {
+        const inner = scope.querySelector('input, textarea, select');
+        if (inner) { candidates.push(inner); break; }
+        scope = scope.parentElement;
+      }
+    }
+    return candidates.length ? pickVisible(candidates) : null;
+  }
+
+  /** Cue normalization — builder forms decorate titles ("First name*",
+   *  "Email:") and Zo's target may or may not carry the decoration. */
+  function normCue(s) {
+    return String(s || '').trim().toLowerCase().replace(/\s+/g, ' ').replace(/[:*]+$/, '').trim();
+  }
+
+  /** Nearest question title for a field, generic across builders: explicit
+   *  label/aria first, then the title-above-field convention — climb from the
+   *  field and read the nearest preceding sibling's text (live-verified on a
+   *  Typeform: the question is a plain div, the input wrapper's prev sibling).
+   *  Feeds `formFields[].question` so Zo can target fill_form by question text
+   *  when placeholders collide. */
+  function nearestQuestion(el) {
+    const id = el.id;
+    if (id) {
+      const lab = document.querySelector(`label[for="${CSS.escape(id)}"]`);
+      if (lab && (lab.textContent || '').trim()) return lab.textContent.trim().slice(0, 120);
+    }
+    const aria = (el.getAttribute('aria-label') || '').trim();
+    if (aria) return aria.slice(0, 120);
+    let scope = el;
+    for (let i = 0; i < 8 && scope; i++) {
+      let sib = scope.previousElementSibling;
+      while (sib) {
+        const txt = (sib.innerText || '').trim();
+        if (txt && txt.length <= 160 && !/^(ok|next|submit|start|back)$/i.test(txt) &&
+            !sib.querySelector('button, a[href], input, textarea, select')) {
+          return txt.replace(/\s+/g, ' ').slice(0, 120);
+        }
+        sib = sib.previousElementSibling;
+      }
+      scope = scope.parentElement;
+    }
+    return '';
+  }
+
+  /** Resolve a fill_form target to a field element: CSS selector fallback
+   *  first, then label text (for=/nested), aria-label/labelledby, placeholder,
+   *  name, id — the human cues get_form surfaced to Zo — then question text
+   *  for builder-style forms, with viewport preference for equal cues. */
+  function resolveFieldTarget(target, selector) {
+    if (selector) {
+      const el = document.querySelector(selector);
+      if (el) return el;
+    }
+    const t = String(target || '').trim().toLowerCase();
+    if (!t) return null;
+    const fields = Array.from(document.querySelectorAll('input, textarea, select'))
+      .filter((f) => f.type !== 'hidden');
+    for (const label of document.querySelectorAll('label')) {
+      if ((label.textContent || '').trim().toLowerCase() !== t) continue;
+      const forEl = label.htmlFor ? document.getElementById(label.htmlFor) : null;
+      const inner = label.querySelector('input, textarea, select');
+      const el = forEl || inner;
+      if (el) return el;
+    }
+    const byAria = fields.filter((f) =>
+      (f.getAttribute('aria-label') || '').trim().toLowerCase() === t ||
+      (f.getAttribute('aria-labelledby') || '').trim().split(/\s+/).some((id) => {
+        const lab = id && document.getElementById(id);
+        return lab && (lab.textContent || '').trim().toLowerCase() === t;
+      }));
+    if (byAria.length) return byAria[0];
+    const byAttr = fields.filter((f) =>
+      (f.placeholder || '').trim().toLowerCase() === t ||
+      (f.name || '').toLowerCase() === t ||
+      (f.id || '').toLowerCase() === t);
+    if (byAttr.length) return pickVisible(byAttr);
+    return resolveByQuestion(t);
+  }
+
+  /** Check whether a string is a valid CSS selector (guards against
+   *  Playwright pseudo-selectors like :has-text()/:text() that Zo may
+   *  emit — those throw in document.querySelector). */
+  function isValidCssSelector(sel) {
+    if (!sel || typeof sel !== 'string') return false;
+    // Reject known non-CSS pseudo-selectors up front.
+    if (/:has-text|:text\(|:has\(/i.test(sel)) return false;
+    try { document.querySelector(sel); return true; }
+    catch { return false; }
+  }
+
+  /** Resolve a click target: pure CSS selector preferred, but fall back to
+   *  text matching when Zo emits Playwright-style :has-text("…") selectors.
+   *  Returns an element or null. */
+  function resolveClickTarget(selector) {
+    if (!selector) return null;
+    // Fast path: valid CSS.
+    if (isValidCssSelector(selector)) return document.querySelector(selector);
+    // Extract text from Playwright :has-text("…") / :text("…").
+    const m = selector.match(/:has-text\(\s*["']([^"']+)["']\s*\)|:text\(\s*["']([^"']+)["']\s*\)/i);
+    const txt = m ? (m[1] || m[2]) : null;
+    if (txt) {
+      const norm = txt.toLowerCase().trim();
+      for (const el of document.querySelectorAll('a, button, [role=button], [onclick], input[type=submit], input[type=button], [type=submit]')) {
+        if ((el.textContent || '').trim().toLowerCase().includes(norm)) return el;
+      }
+    }
+    return null;
+  }
+
+  /** Set a select value; Zo usually sends the visible OPTION TEXT ("Visa
+   *  (Preferred)") while el.value assignment matches the value attr ("visa")
+   *  — fall back to text matching when the direct set selects nothing. */
+  function setFieldValue(el, val) {
+    el.focus();
+    el.value = '';
+    el.value = val;
+    if (el.tagName === 'SELECT' && el.selectedIndex === -1) {
+      const want = String(val == null ? '' : val).trim().toLowerCase();
+      if (want) {
+        const opts = Array.from(el.options || []);
+        const opt = opts.find((o) => (o.textContent || '').trim().toLowerCase() === want) ||
+          opts.find((o) => (o.textContent || '').trim().toLowerCase().startsWith(want));
+        if (opt) el.value = opt.value;
+      }
+    }
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
   /** Execute a single action */
   async function executeAction(action) {
     switch (action.type) {
       case 'click': {
-        const el = await waitForElement(action.selector);
+        const el = resolveClickTarget(action.selector) || await waitForElement(
+          isValidCssSelector(action.selector) ? action.selector : ''
+        );
+        if (!el) throw new Error(`Element not found: ${action.selector}`);
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         await sleep(300);
         el.click();
         return { ok: true, type: 'click' };
       }
       case 'fill': {
-        const el = (await waitForElement(action.selector)) 
-        el.focus();
-        el.value = '';
-        el.value = action.value;
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
+        const el = (await waitForElement(action.selector))
+        setFieldValue(el, action.value);
         return { ok: true, type: 'fill' };
+      }
+      case 'fill_form': {
+        const results = [];
+        for (const entry of action.values || []) {
+          const el = resolveFieldTarget(entry.target, entry.selector);
+          if (!el) { results.push({ ok: false, target: entry.target, error: 'no field matched' }); continue; }
+          setFieldValue(el, String(entry.value == null ? '' : entry.value));
+          results.push({ ok: true, target: entry.target, type: el.type || el.tagName.toLowerCase() });
+        }
+        const failed = results.filter((r) => !r.ok);
+        return {
+          ok: failed.length === 0,
+          type: 'fill_form',
+          fields: results,
+          ...(failed.length ? { error: `${failed.length} field(s) unmatched: ${failed.map((f) => f.target).join(', ')}` } : {}),
+        };
       }
       case 'extract': {
         const el = await waitForElement(action.selector);

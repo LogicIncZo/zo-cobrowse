@@ -234,6 +234,11 @@ describe("prompt helpers", () => {
       .toBe('[input#q type=text "Search"]');
   });
 
+  it("compactForm appends the question cue when captured (builder-form disambiguator)", () => {
+    expect(compactForm({ tag: "input", type: "text", selector: "#uuid1", placeholder: "Type your answer here...", question: "Your name" }))
+      .toBe('[input#uuid1 type=text "Type your answer here..."] — Your name');
+  });
+
   it("safeText passes strings, blanks nullish, JSON-stringifies objects", () => {
     expect(safeText("hi")).toBe("hi");
     expect(safeText(null)).toBe("");

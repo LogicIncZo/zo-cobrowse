@@ -171,6 +171,20 @@ describe("looksLikeActionJson — suppress raw action-JSON during streaming", ()
     expect(looksLikeActionJson('{"foo":1}')).toBe(false);
   });
 
+  it("detects a FENCED envelope (cobrowse models wrap it in ```json)", () => {
+    expect(looksLikeActionJson('```json\n{"actions":[{"type":"fill"}]}\n```')).toBe(true);
+    expect(looksLikeActionJson('```\n{"actions":')).toBe(true);
+    expect(looksLikeActionJson('```json\n{"reasoning":"x"}\n```')).toBe(false);
+  });
+
+  it("detects the envelope from ANY accumulated-stream prefix (not just chunk 1)", () => {
+    // The streaming guard tests the ACCUMULATED text; a mid-stream prefix that
+    // starts mid-envelope (the old per-delta bug) must not be the test basis,
+    // while an accumulated prefix starting at the envelope must still match.
+    expect(looksLikeActionJson('{"actions":[{"type":"fill","selector":"#r_bk","val')).toBe(true);
+    expect(looksLikeActionJson('or":"#r_bk","value":"x"}')).toBe(false); // bare delta, no envelope start
+  });
+
   it("coerces non-string input safely", () => {
     expect(looksLikeActionJson(null as unknown as string)).toBe(false);
     expect(looksLikeActionJson(undefined as unknown as string)).toBe(false);

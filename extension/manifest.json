@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Zo Co-browse",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Co-browsing extension powered by Zo — AI backend that sees your page and takes actions through it.",
   "homepage_url": "https://github.com/CCAgentOrg/zo-cobrowse",
   "permissions": [

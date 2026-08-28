@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>E2E Fixture Classic Form</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; }
+    fieldset { border: 1px solid #ccc; margin-bottom: 1rem; }
+    legend { font-weight: 600; }
+    label { display: inline-block; width: 9rem; }
+    input, select { margin: .2rem 0; width: 14rem; }
+    #classic-result { margin-top: 1rem; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <!-- RoboForm-style classic form (live-probed on roboform.com/filling-test-all-fields):
+       every input NAME starts with a digit (needs CSS \NN escapes), no labels/
+       ids/placeholders — targeting is name-attribute selectors only. Includes
+       selects, password + card fields (sensitivity-gate bait), and a submit
+       button that must never be auto-clicked. -->
+  <form id="classic" onsubmit="return false">
+    <fieldset>
+      <legend>Identity</legend>
+      <div><label>Title</label><input type="text" name="01___title"></div>
+      <div><label>First</label><input type="text" name="02frstname"></div>
+      <div><label>Middle</label><input type="text" name="03middle_i"></div>
+      <div><label>Last</label><input type="text" name="04lastname"></div>
+      <div><label>Company</label><input type="text" name="05_company"></div>
+    </fieldset>
+    <fieldset>
+      <legend>Login</legend>
+      <div><label>User ID</label><input type="text" name="30_user_id"></div>
+      <div><label>Password</label><input type="password" name="31password"></div>
+    </fieldset>
+    <fieldset>
+      <legend>Payment</legend>
+      <div><label>Type</label>
+        <select name="40cc__type">
+          <option value="">choose...</option>
+          <option value="visa">Visa (Preferred)</option>
+          <option value="mc">Mastercard</option>
+        </select>
+      </div>
+      <div><label>Number</label><input type="text" name="41ccnumber"></div>
+      <div><label>Exp MM</label>
+        <select name="42ccexp_mm">
+          <option value="">--</option>
+          <option value="12">12</option>
+        </select>
+      </div>
+      <div><label>CVC</label><input type="text" name="43cvc"></div>
+    </fieldset>
+    <button type="submit" id="classic-submit">Submit All</button>
+  </form>
+  <div id="classic-result"></div>
+  <script>
+    // Submit is wired so a test can PROVE it was never auto-clicked.
+    let submitted = false;
+    document.getElementById("classic-submit").addEventListener("click", () => {
+      submitted = true;
+      document.getElementById("classic-result").textContent = "submitted";
+    });
+    window.__classicSubmitted = () => submitted;
+  </script>
+</body>
+</html>
