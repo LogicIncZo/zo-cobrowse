@@ -194,6 +194,7 @@ Background SW → `chrome.scripting.executeScript` → (fallback if content scri
 |------|-----------|---------|
 | `CAPTURE_CONTEXT` | BG→Content | Get page DOM snapshot |
 | `EXECUTE_ACTION` | BG→Content | Run a single browser action |
+| `ENHANCE_TEXT` | Content→BG | Write-assist one-shot (the only Content→BG type): enhance a textarea lead — `enhanceText()` builds the prompt via `lib/write-assist.js` and calls `/zo/ask` **threadless** (no `conversation_id`); returns `{ok, text}` for the in-page popover's preview + Accept fill-back |
 | `GET_PAGE_CONTEXT` | Panel→BG | Forward to `getActiveTabContext()` |
 | `ASK_ZO` | Panel→BG | Forward to `askZo()` with page context + query |
 | `NEW_CONVERSATION` | Panel→BG | Reset `zoConversationId` to null |
