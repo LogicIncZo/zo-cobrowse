@@ -219,6 +219,18 @@ const server = http.createServer(async (req, res) => {
     } catch {}
     requests.push({ ts: Date.now(), method: "POST", url: "/zo/ask", body });
 
+    // Write-assist one-shot (feature/textarea-fill): the in-page widget's
+    // ENHANCE_TEXT handler calls /zo/ask NON-streaming and parses JSON
+    // ({output}), so reply with a plain JSON body — not SSE. Routed on the
+    // stable write-assist marker baked into the enhance prompt.
+    if (String(body.input || "").includes("write-assist")) {
+      res.writeHead(200, { "content-type": "application/json", ...cors });
+      return res.end(JSON.stringify({
+        output: "I led the migration of 40 dashboards to DuckDB, unifying our analytics stack and cutting p95 query times roughly in half.",
+        conversation_id: "e2e-enhance-conv",
+      }));
+    }
+
     const scenario = pickScenario(body.input);
     if (scenario === "pull-form") {
       // Zo asks for the complete form schema before acting (#24 pull loop).

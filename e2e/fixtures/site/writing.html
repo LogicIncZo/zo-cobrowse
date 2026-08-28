@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Fixture Job Application</title>
+  <style>body { font-family: system-ui, sans-serif; margin: 2rem; } label { display: block; margin-top: .75rem; } textarea { width: 32rem; min-height: 7rem; }</style>
+</head>
+<body>
+  <main>
+    <h1>Fixture Job Application</h1>
+    <p>A long-form field for the write-assist floating Zo icon.</p>
+    <form id="apply-form">
+      <label for="proj">Describe your project</label>
+      <textarea id="proj" name="proj" placeholder="Tell us about a project you worked on" maxlength="500">Led migration of 40 dashboards to DuckDB</textarea>
+      <label for="cover">Anything else?</label>
+      <textarea id="cover" name="cover" placeholder="Optional"></textarea>
+      <button id="apply-submit" type="button">Submit application</button>
+    </form>
+    <div id="apply-result" aria-live="polite"></div>
+  </main>
+  <script>
+    // Framework-style two-way binding so the write-assist fill-back
+    // (native setter + input/change) is observable on the page.
+    for (const el of document.querySelectorAll("textarea")) {
+      el.addEventListener("input", () => (document.getElementById("apply-result").dataset[el.id] = el.value));
+    }
+    document.getElementById("apply-submit").addEventListener("click", () => {
+      document.getElementById("apply-result").textContent = "submitted:" + document.getElementById("proj").value;
+    });
+  </script>
+</body>
+</html>
