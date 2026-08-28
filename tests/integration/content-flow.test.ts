@@ -9,6 +9,8 @@
 // each test file imports it with its own cache-busting query string.)
 
 import { describe, it, expect, beforeAll } from "bun:test";
+import { readFileSync } from "fs";
+import { resolve } from "path";
 import { Window } from "happy-dom";
 import { createTabTarget, stubNonZeroRects } from "../helpers/chrome-mock.ts";
 
@@ -27,6 +29,20 @@ function setPageGlobals(win: any, chromeObj: any) {
   for (const [name, value] of Object.entries(pairs)) {
     Object.defineProperty(g, name, { value, configurable: true, writable: true });
   }
+}
+
+const CONTENT_SRC = readFileSync(resolve(import.meta.dir, "../../extension/content.js"), "utf-8");
+
+/** Execute the real content.js IIFE with a page window baked in as parameters
+ * (extension-flow's recipe) — a second instance that doesn't touch globals. */
+function loadContentScript(win: any, chromeObj: any) {
+  const run = new Function(
+    "chrome", "document", "window", "location", "CSS", "Event",
+    "MutationObserver", "setTimeout", "clearTimeout", "console",
+    CONTENT_SRC,
+  );
+  run(chromeObj, win.document, win, win.location, win.CSS, win.Event,
+    win.MutationObserver, setTimeout, clearTimeout, console);
 }
 
 describe("content.js — full-script message flow", () => {
@@ -160,6 +176,84 @@ describe("content.js — full-script message flow", () => {
     it("unknown message type responds cleanly (no hanging promise)", async () => {
       const res = await target.dispatch({ type: "SOMETHING_ELSE" });
       expect(res).toEqual({ ok: false, error: "Unknown request type: SOMETHING_ELSE" });
+    });
+  });
+
+  // Builder-style forms (the "any form" round): live-probed on a Typeform —
+  // inputs carry no label/name and share one placeholder; the question text
+  // is a plain div, the input wrapper's previous sibling; advance buttons sit
+  // outside any <form>. A SECOND content.js instance runs against its own
+  // window so the primary page's fixtures stay untouched.
+  describe("builder-style forms (#26 any-form)", () => {
+    const bWin: any = new Window({ url: "https://example.test/apply" });
+    let bTarget: ReturnType<typeof createTabTarget>;
+
+    beforeAll(() => {
+      bWin.document.write(`<!DOCTYPE html><html><head><title>Application</title></head><body>
+        <div class="app-root">
+          <fieldset class="block" data-block="1">
+            <div class="block-title">1 Tell us about yourself</div>
+            <div class="field">
+              <div class="field-title">First name*</div>
+              <div class="input-wrap"><input type="text" id="uuid-a1" placeholder="Type your answer here..."></div>
+            </div>
+            <div class="field">
+              <div class="field-title">Work email</div>
+              <div class="input-wrap"><input type="email" id="uuid-a2" placeholder="name@example.com"></div>
+            </div>
+            <button type="button" class="ok-btn">OK</button>
+          </fieldset>
+          <fieldset class="block" data-block="2">
+            <div class="block-title">2 Your links</div>
+            <div class="field">
+              <div class="field-title">First name*</div>
+              <div class="input-wrap"><input type="text" id="uuid-b1" placeholder="Type your answer here..."></div>
+            </div>
+            <button type="button" class="ok-btn">OK</button>
+          </fieldset>
+        </div>
+      </body></html>`);
+      stubNonZeroRects(bWin);
+      bTarget = createTabTarget();
+      loadContentScript(bWin, bTarget.chrome);
+    });
+
+    it("capture joins each field with its question text (title-above-field)", async () => {
+      const ctx = await bTarget.dispatch({ type: "CAPTURE_CONTEXT", tier: 2 });
+      const bySel = Object.fromEntries(ctx.formFields.map((f: any) => [f.selector, f]));
+      expect(bySel["#uuid-a1"].question).toBe("First name*");
+      expect(bySel["#uuid-a2"].question).toBe("Work email");
+      expect(bySel["#uuid-b1"].question).toBe("First name*"); // innermost title wins over the block title
+      expect(ctx.formFields.every((f: any) => f.placeholder === "Type your answer here..." || f.placeholder === "name@example.com")).toBe(true);
+    });
+
+    it("fill_form resolves by question text despite identical placeholders", async () => {
+      const res = await bTarget.dispatch({
+        type: "EXECUTE_ACTION",
+        action: { type: "fill_form", values: [
+          { target: "First name", value: "Ada Lovelace" }, // undecorated target vs "First name*" cue
+          { target: "Work email", value: "ada@example.test" },
+        ] },
+      });
+      expect(res.ok).toBe(true);
+      expect(res.fields.map((f: any) => f.ok)).toEqual([true, true]);
+      expect(bWin.document.querySelector("#uuid-a1").value).toBe("Ada Lovelace");
+      expect(bWin.document.querySelector("#uuid-a2").value).toBe("ada@example.test");
+      expect(bWin.document.querySelector("#uuid-b1").value).toBe(""); // the section-2 namesake untouched
+    });
+
+    it("a repeated question resolves to the field currently in the viewport", async () => {
+      // Section 1 scrolled past (above the viewport), section 2 on screen.
+      const a1 = bWin.document.querySelector("#uuid-a1");
+      const b1 = bWin.document.querySelector("#uuid-b1");
+      a1.getBoundingClientRect = () => ({ width: 200, height: 32, top: -600, left: 0, right: 200, bottom: -568, x: 0, y: -600 });
+      const res = await bTarget.dispatch({
+        type: "EXECUTE_ACTION",
+        action: { type: "fill_form", values: [{ target: "First name", value: "viewport pick" }] },
+      });
+      expect(res.ok).toBe(true);
+      expect(b1.value).toBe("viewport pick");
+      expect(a1.value).toBe("Ada Lovelace"); // kept its value from the previous test
     });
   });
 });

@@ -220,3 +220,65 @@ The extension is green-tested with a hardened streaming path. Remaining work is 
 
 - `bun run verify` green (767 tests / 33 files after merging dev's #24 cold-start work in; lint, transpile).
 - `bun run test:e2e` green (15 specs, ~45s).
+
+
+---
+
+## 2026-08-21 — Form-fill round (#26: batch `fill_form` + confirm-before-fill)
+
+**Scope:** the #26 quality layer over #24's `get_form` pull — batch form filling by human-facing field cues, a sensitivity gate that parks sensitive fills behind an editable review card, and a submit backstop. Plan: `docs/superpowers/plans/2026-08-20-form-fill.md` (PR #35), spec: `docs/superpowers/specs/2026-08-20-form-fill-design.md`.
+
+### Delivered
+
+- **`fill_form {values:[{target,value,selector?}]}` action** (`FillFormAction` in `tests/schemas/actions.ts`): one action fills N fields; `resolveFieldTarget` (content.js primary + a serialized twin inside `executeDomAction`'s executeScript fallback) resolves each `target` by label text (for=/nested) → `aria-label`/`aria-labelledby` → placeholder → name → id → optional CSS selector passthrough. Result shape carries per-field `{ok,target,type?,error?}`; the debugger-eval fast path is skipped for fill_form by design.
+- **Sensitivity gate** (`extension/lib/formfill.js`, pure + Zod schema): `EXECUTE_ACTIONS` batches containing `fill_form` first re-capture the live form (tier-2 `{pull:'form'}` — client-side truth, never the model's self-assessment) and run `isSensitiveForm` (password/card/CVV/expiry/identity fields, or login/checkout/payment/billing/account URLs). Sensitive → `{needsConfirm, actions, fields, url, reasons}` **without executing**; the verdict is re-derived on `confirmed:true` (a form that flipped sensitive re-parks) and stamps `unverifiedForm` when the pre-flight capture fails (fail-open, surfaced in the card).
+- **Review card** (sidepanel `renderFormReview`): editable input per non-secret row, "left for you 🔑" for secret rows (password/card values are blanked by `reviewRows` and never round-tripped through the card), reason chips, **Fill N fields** / **Cancel**. Confirm re-sends the edited map with `confirmed:true`; cancel drops the fill and explains. `fill_form` renders as ONE timeline card with per-field ✓/✗ rows.
+- **Submit backstop** (`executeActions` + `probeClickTarget`): on a page the gate flagged sensitive, a click whose resolved target is a form's submit/pay control is refused (`blocked submit on sensitive page`); non-submit clicks pass (probe fails open). Belt-and-suspenders with the prompt rule — confirming a FILL never authorizes a SUBMIT.
+- **Prompt rules** (`ACTION_SCHEMA_COMPACT` + cobrowse instructions): prefer `fill_form` for 2+ fields, never propose password/card/CVV values, never click submit/pay on login/payment/checkout/account pages.
+- **Executor-coverage contract** (`tests/actions-coverage.test.ts`): every `ACTION_TYPES` entry must appear as an executor case in content.js and background.js — new action types can't ship executor-less again.
+
+### Findings / deviations from the plan
+
+- **Plan bug (fixed per the plan's own truth-table test):** the plan's `SENSITIVE_FIELD_RE` didn't match `ccnumber`/`exp-date` field names its own test asserted; extended with `cc[-_.]?num` + `exp[-_.]?(date|month|year)` variants, later also `password` (a label-only Password row whose captured metadata can't be joined must still render secret).
+- **Plan gap (fixed):** `ACTION_TYPE_NAMES` (lib/modes.js) lacked `fill_form` — `normalizeActions` silently dropped every fill_form action before execution; caught by the integration test, fixed + pinned by an updated count test.
+- **Plan gap (fixed):** the sidepanel reads the per-action result from the aggregate `EXECUTE_ACTIONS` response (`result.results[0]`), not `result.fields` as sketched.
+- **Confirm semantics (design-aligned deviation):** the plan's `runExecuteActions` sketch only computed `sensitive` when unconfirmed, which would have disabled the backstop on the confirmed path its own test exercised; the verdict is now re-derived on confirm (re-park on flip + backstop always armed on sensitive pages).
+- **`ACTION_SCHEMA_COMPACT` length guard** raised 600 → 760 (713 actual): the new action + safety rules legitimately grew the compact schema; the guard stays tight vs the legacy ~600-char block it was created against.
+- **Tooling (documented in-test):** bun 1.3.10 + happy-dom natively crash (segfault, no leak — RSS flat at ~123MB) when descendant class selectors (`.action-card-fill_form .field-result`) or attribute selectors query the live panel DOM after a full prior test file ran; the extension-flow scenario syncs on bounded sleeps + single-class queries + JS traversal instead. Real-Chromium coverage unaffected (e2e uses the same selectors fine).
+
+### Verification
+
+- `bun run verify` green — 873 tests / 39 files (0 failures), lint, transpile.
+- `bun run test:e2e` green — 21 passed + 1 skipped (ZO_DEMO-gated demo spec), incl. the new `e2e/11-fill-form.spec.ts` (park → edit → confirm → page filled, secrets untouched; cancel path). One transient 09-open-all flake under full-suite load passed on re-run and in isolation.
+
+
+---
+
+## 2026-08-21 — "Any form" round (#26.2: builder-style forms + section-by-section co-browse)
+
+**Scope:** make the #26 form-fill experience work on ANY form — not just well-labeled ones — driven by a live Zo Ambassador application on form.typeform.com/to/ruHPhO5n. The user's target UX: Zo fills each section, the user reviews and advances.
+
+### Live-probe findings (Typeform, headless Chromium)
+
+- All sections' inputs render in ONE DOM at once (11 inputs); only the viewport distinguishes the current section.
+- Inputs carry **no usable metadata**: no `label`/`for`, no `aria-label`, no `name` — UUID ids, and every text field shares the placeholder "Type your answer here...". The existing resolver (label → aria → placeholder → name) cannot disambiguate.
+- The **question text is a plain div — the input wrapper's previous sibling** ("First name*"), sometimes with a section fieldset `aria-labelledby` pointing at a group title ("1 Tell us about yourself"). No headings anywhere.
+- The advance control (OK) sits **outside any `<form>`** → the #26 submit backstop correctly does not fight section navigation.
+
+### Delivered (generic — nothing Typeform-specific)
+
+- **Question-aware capture**: `formFields[].question` on all three capture paths (content script, CDP eval, executeScript) via `nearestQuestion` — explicit label/aria first, then the universal title-above-field convention: climb from the field and read the nearest preceding sibling's text (guarded: ≤160 chars, no interactive descendants, not button-ish). `compactForm` renders it (`[input#uuid type=text "Type your answer here..."] — First name*`), so both the tier-2 prompt section and the `get_form` pull teach Zo the question cues.
+- **Question-scoped resolution**: `resolveByQuestion` fallback in both executors (content.js + the serialized `executeDomAction` twin) — a cue matches a text leaf exactly (normalized: case, whitespace, trailing `*`/`:` decorations), then associates the field by shared wrapper (climb until the subtree contains a field).
+- **Viewport preference** (`pickVisible`): when equal cues match several fields (identical placeholders, repeated questions), the field intersecting the viewport wins — long/SPA forms resolve to the section the user is actually looking at.
+- **Co-browse pacing rule** (cobrowse instructions): on one-question-per-screen forms, fill only the visible section per turn, then `done` — the user reviews and presses Next; Zo continues when asked. `ACTION_SCHEMA_COMPACT` wording now targets "question/label/placeholder text" (722 chars, still under the 760 guard).
+- `reviewRows` joins captured `question` text, so the review card labels builder-form fields correctly.
+
+### Findings / fixes while executing
+
+- **Template-literal escape bug (CDP path only):** a `\s` inside the `captureExpr` template literal renders as a bare `s` (unknown escape drops the backslash — the same reason `SEL_HELPER` writes `\s+`), turning the whitespace normalizer into `replace(/s+/g,' ')` and EATING EVERY "s" from captured question text ("Fir t name*"). Caught by the e2e's prompt assertion; fixed by double-escaping in the embedded string. The content-script and executeScript paths were unaffected.
+- bun's bare `bunx` in this sandbox intermittently fails with `CouldntReadCurrentDirectory`; `/home/logic/.bun/bin/bun x ...` is the reliable invocation.
+
+### Verification
+
+- `bun run verify` green — 879 tests / 39 files (0 failures; +6: question join, compactForm cue, pacing rule, capture join, question resolution, viewport preference).
+- `bun run test:e2e` green — 22 passed + 2 skipped (both ZO_DEMO demo specs), incl. new `e2e/12-any-form.spec.ts`: builder-style fixture (no labels/names, shared placeholder, div titles, OK outside forms) — turn 1 fills the visible section by question text (prompt shown to carry `— First name*`), the user presses OK themselves, turn 2 "continue" fills the next section, section-1 values unchanged, nothing auto-submitted.

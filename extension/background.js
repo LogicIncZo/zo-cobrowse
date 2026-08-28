@@ -27,6 +27,7 @@ import {
   pullCaptureOpts,
   MAX_PULL_CYCLES,
 } from './lib/pull.js';
+import { isSensitiveForm } from './lib/formfill.js';
 import {
   loadConversationState,
   saveConversationState,
@@ -339,7 +340,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // here so a degenerate Zo response that still asks after the budget
       // note no-ops safely.
       const domActions = (request.actions || []).filter((a) => a && !isContextAction(a));
-      executeActions(domActions, request.tabId || senderTabId(sender)).then(sendResponse);
+      runExecuteActions(domActions, request.tabId || senderTabId(sender), { confirmed: request.confirmed }).then(sendResponse);
       return true;
     }
     case 'GET_OPEN_TABS': {
@@ -476,7 +477,17 @@ function makeActionEval(action) {
     const a = ${a};
     try {
       if (a.type === 'navigate' || a.type === 'done') return { ok: true, type: a.type };
-      const el = a.selector ? document.querySelector(a.selector) : null;
+      let el = a.selector ? document.querySelector(a.selector) : null;
+      if (a.selector && !el) {
+        // Playwright :has-text()/:text() fallback — not valid CSS.
+        const hm = a.selector.match(/:has-text\(\s*["']([^"']+)["']\s*\)|:text\(\s*["']([^"']+)["']\s*\)/i);
+        if (hm) {
+          const ht = (hm[1] || hm[2]).toLowerCase().trim();
+          for (const c of document.querySelectorAll('a, button, [role=button], [onclick], input[type=submit], input[type=button]')) {
+            if ((c.textContent || '').trim().toLowerCase().includes(ht)) { el = c; break; }
+          }
+        }
+      }
       if (a.selector && !el) return { ok: false, error: 'Element not found: ' + a.selector, type: a.type };
       switch (a.type) {
         case 'click':
@@ -487,6 +498,15 @@ function makeActionEval(action) {
           el.focus();
           el.value = '';
           el.value = a.value;
+          if (el.tagName === 'SELECT' && el.selectedIndex === -1) {
+            var _want = String(a.value == null ? '' : a.value).trim().toLowerCase();
+            if (_want) {
+              var _opts = [].slice.call(el.options || []);
+              var _opt = _opts.find(function(o){ return (o.textContent || '').trim().toLowerCase() === _want; }) ||
+                _opts.find(function(o){ return (o.textContent || '').trim().toLowerCase().indexOf(_want) === 0; });
+              if (_opt) el.value = _opt.value;
+            }
+          }
           el.dispatchEvent(new Event('input', { bubbles: true }));
           el.dispatchEvent(new Event('change', { bubbles: true }));
           return { ok: true, type: 'fill' };
@@ -571,7 +591,8 @@ async function getActiveTabContext(tabId, tier, modeId, opts) {
     } else {
       captureExpr = `(function(){${SEL_HELPER}
         var m=document.querySelector('main,article,[role=main],#content,.content');var b=document.body;var tx=(m||b)?.innerText||'';
-        var ff=[];document.querySelectorAll('input:not([type=hidden]),textarea,select').forEach(function(el){var r=el.getBoundingClientRect();if(r.width===0||r.height===0)return;ff.push({tag:el.tagName.toLowerCase(),type:el.type||'text',name:el.name||el.id||'',selector:sel(el),placeholder:el.placeholder||''});});
+        function qfor(el){var lab=el.id?document.querySelector('label[for="'+(window.CSS&&CSS.escape?CSS.escape(el.id):el.id)+'"]'):null;if(lab&&(lab.textContent||'').trim())return lab.textContent.trim().substring(0,120);var ar=(el.getAttribute('aria-label')||'').trim();if(ar)return ar.substring(0,120);var sc=el;for(var i=0;i<8&&sc;i++){var sib=sc.previousElementSibling;while(sib){var t=(sib.innerText||'').trim();if(t&&t.length<=160&&!/^(ok|next|submit|start|back)$/i.test(t)&&!sib.querySelector('button, a[href], input, textarea, select'))return t.replace(/\\s+/g,' ').substring(0,120);sib=sib.previousElementSibling;}sc=sc.parentElement;}return '';}
+        var ff=[];document.querySelectorAll('input:not([type=hidden]),textarea,select').forEach(function(el){var r=el.getBoundingClientRect();if(r.width===0||r.height===0)return;ff.push({tag:el.tagName.toLowerCase(),type:el.type||'text',name:el.name||el.id||'',selector:sel(el),placeholder:el.placeholder||'',question:qfor(el)});});
         var ck=[];document.querySelectorAll('a,button,[role=button],[onclick],input[type=submit],input[type=button]').forEach(function(el){var r=el.getBoundingClientRect();if(r.width<8||r.height<8)return;var tx=(el.textContent||el.value||'').trim().substring(0,60);if(!tx)return;ck.push({text:tx,tag:el.tagName.toLowerCase(),selector:sel(el)});});
         return{url:location.href,title:document.title,visibleText:tx.substring(0,${textBudget}),formFields:ff.slice(0,${formCap}),clickable:ck.slice(0,${clickCap}),viewport:{w:window.innerWidth,h:window.innerHeight}};
       })()`;
@@ -616,6 +637,31 @@ async function getActiveTabContext(tabId, tier, modeId, opts) {
             const p = el.parentElement; if (p) { const sib = Array.from(p.children).filter((x) => x.tagName === el.tagName); if (sib.length > 1) s += ':nth-of-type(' + (sib.indexOf(el) + 1) + ')'; }
             return s;
           }
+          // Nearest question title (mirror of content.js#nearestQuestion):
+          // explicit label/aria first, then title-above-field sibling climb.
+          function nearestQuestion(el) {
+            const id = el.id;
+            if (id) {
+              const lab = document.querySelector(`label[for="${CSS.escape(id)}"]`);
+              if (lab && (lab.textContent || '').trim()) return lab.textContent.trim().slice(0, 120);
+            }
+            const aria = (el.getAttribute('aria-label') || '').trim();
+            if (aria) return aria.slice(0, 120);
+            let scope = el;
+            for (let i = 0; i < 8 && scope; i++) {
+              let sib = scope.previousElementSibling;
+              while (sib) {
+                const txt = (sib.innerText || '').trim();
+                if (txt && txt.length <= 160 && !/^(ok|next|submit|start|back)$/i.test(txt) &&
+                    !sib.querySelector('button, a[href], input, textarea, select')) {
+                  return txt.replace(/\s+/g, ' ').slice(0, 120);
+                }
+                sib = sib.previousElementSibling;
+              }
+              scope = scope.parentElement;
+            }
+            return '';
+          }
           const formCap = pull === 'form' ? 300 : pull === 'dom' ? 150 : 30;
           const clickCap = pull === 'dom' ? 200 : 50;
           const m = document.querySelector('main, article, [role="main"], #content, .content');
@@ -624,7 +670,7 @@ async function getActiveTabContext(tabId, tier, modeId, opts) {
           document.querySelectorAll('input:not([type="hidden"]), textarea, select').forEach((el) => {
             const r = el.getBoundingClientRect();
             if (r.width === 0 || r.height === 0) return;
-            formFields.push({ tag: el.tagName.toLowerCase(), type: el.type || 'text', name: el.name || el.id || '', selector: sel(el), placeholder: el.placeholder || '' });
+            formFields.push({ tag: el.tagName.toLowerCase(), type: el.type || 'text', name: el.name || el.id || '', selector: sel(el), placeholder: el.placeholder || '', question: nearestQuestion(el) });
           });
           const clickable = [];
           document.querySelectorAll('a, button, [role="button"], [onclick], input[type="submit"], input[type="button"]').forEach((el) => {
@@ -1802,7 +1848,90 @@ async function testConnection() {
 
 
 
-async function executeActions(actions, tabId) {
+/** EXECUTE_ACTIONS entry (#26 two-phase gate). A batch containing fill_form
+ *  OR plain fill actions first re-captures the LIVE form (client-side truth,
+ *  never the model's self-assessment) and runs isSensitiveForm: sensitive ->
+ *  respond {needsConfirm,...} without executing; the sidepanel's review card
+ *  re-sends with confirmed:true. Plain fills are covered because models drift
+ *  off the fill_form preference (live-observed on roboform.com: a 30-field
+ *  batch of individual fill{selector} actions incl. password + card fields).
+ *  The verdict is re-derived on confirm too - a form that flipped sensitive
+ *  since the review re-parks, and the submit backstop inside executeActions
+ *  needs the flag either way (confirming a FILL never authorizes a SUBMIT). */
+async function runExecuteActions(domActions, target, { confirmed } = {}) {
+  const hasFill = domActions.some((a) => a.type === 'fill_form' || a.type === 'fill');
+  // Click-only batches capture too: on sensitive pages the submit backstop
+  // needs the verdict, and the per-action sidepanel loop sends clicks alone.
+  const hasClick = domActions.some((a) => a.type === 'click');
+  if (!hasFill && !hasClick) return executeActions(domActions, target);
+  const pre = await captureFormFields(target);
+  if (!pre) {
+    // Unreadable page (no content script / capture failed): execute without a
+    // review, stamped so the card can say "unverified form - no review". A
+    // page we can't read is also a page whose fields we can't resolve - expect
+    // per-field misses rather than silent wrong fills.
+    return { ...await executeActions(domActions, target), unverifiedForm: true };
+  }
+  const verdict = isSensitiveForm(pre.formFields, pre.url);
+  if (verdict.sensitive && !confirmed) {
+    if (hasFill) {
+      return { needsConfirm: true, actions: domActions, fields: pre.formFields, url: pre.url, reasons: verdict.reasons };
+    }
+    // Click-only: nothing to review — execute with the backstop armed.
+    return executeActions(domActions, target, { sensitive: true });
+  }
+  return executeActions(domActions, target, { sensitive: verdict.sensitive });
+}
+
+/** Pre-flight form capture for the sensitivity gate: the #24 get_form pull
+ *  shape ({formFields, url}) off the live tab. Null = unreadable -> fail open. */
+async function captureFormFields(tabId) {
+  try {
+    const cap = await getActiveTabContext(tabId, 2, null, { pull: 'form' });
+    if (cap && !cap.error && !cap.blank && cap.url) {
+      return { formFields: Array.isArray(cap.formFields) ? cap.formFields : [], url: cap.url };
+    }
+  } catch {
+    // unreadable - caller fails open
+  }
+  return null;
+}
+
+// Submit-looking button text for the backstop (probe.type 'submit' alone
+// misses <button>Place order</button> without an explicit type attribute).
+const SUBMIT_TEXT_RE = /submit|pay|checkout|order|place|buy/i;
+
+/** Probe a click target for the submit backstop: {form,type,text} of the
+ *  element, or null on any failure (fail-open - a broken probe must not
+ *  brick clicking). */
+async function probeClickTarget(tabId, selector) {
+  try {
+    const resp = await evalInPage(tabId, probeExpr(String(selector || '')), 4000);
+    if (resp.ok && resp.value) return resp.value;
+  } catch {
+    // debugger not available - fall through
+  }
+  try {
+    const [r] = await chrome.scripting.executeScript({ target: { tabId }, func: probeFn, args: [String(selector || '')] });
+    return (r && r.result) || null;
+  } catch {
+    return null;
+  }
+}
+
+function probeExpr(sel) {
+  return '(function(){var el=document.querySelector(' + JSON.stringify(sel) + ');'
+    + 'if(!el)return null;'
+    + 'return{form:!!el.closest("form"),type:el.type||"",text:(el.textContent||el.value||"").trim().substring(0,40)};})()';
+}
+
+function probeFn(sel) {
+  const el = document.querySelector(sel);
+  if (!el) return null;
+  return { form: !!el.closest('form'), type: el.type || '', text: (el.textContent || el.value || '').trim().substring(0, 40) };
+}
+
+async function executeActions(actions, tabId, opts = {}) {
   if (!tabId) {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     tabId = tabs[0]?.id;
@@ -1819,6 +1948,19 @@ async function executeActions(actions, tabId) {
     if (action.type === 'done') {
       results.push({ ok: true, type: 'done', response: action.response });
       continue;
+    }
+
+    // Submit backstop (#26): on a page the gate flagged sensitive, a click on
+    // a form's submit/pay control is refused - the user reviews and submits.
+    // Prompt-side rule alone can be ignored by the model; this cannot.
+    if (opts.sensitive && action.type === 'click') {
+      const probe = await probeClickTarget(tabId, action.selector);
+      const isSubmit = probe && probe.form &&
+        (probe.type === 'submit' || SUBMIT_TEXT_RE.test(probe.text || ''));
+      if (isSubmit) {
+        results.push({ ok: false, type: 'click', blocked: true, error: 'blocked submit on sensitive page - review and submit yourself' });
+        continue;
+      }
     }
 
     let result;
@@ -1868,8 +2010,77 @@ async function executeActions(actions, tabId) {
 }
 
 function executeDomAction(action) {
+  // fill_form twin of content.js#resolveFieldTarget — inlined here because
+  // this function is serialized into the page by chrome.scripting.executeScript
+  // and cannot close over module scope.
+  const resolveFieldTarget = (target, selector) => {
+    if (selector) {
+      const el = document.querySelector(selector);
+      if (el) return el;
+    }
+    const t = String(target || '').trim().toLowerCase();
+    if (!t) return null;
+    const fields = Array.from(document.querySelectorAll('input, textarea, select'))
+      .filter((f) => f.type !== 'hidden');
+    for (const label of document.querySelectorAll('label')) {
+      if ((label.textContent || '').trim().toLowerCase() !== t) continue;
+      const forEl = label.htmlFor ? document.getElementById(label.htmlFor) : null;
+      const inner = label.querySelector('input, textarea, select');
+      const el = forEl || inner;
+      if (el) return el;
+    }
+    const byAria = fields.find((f) =>
+      (f.getAttribute('aria-label') || '').trim().toLowerCase() === t ||
+      (f.getAttribute('aria-labelledby') || '').trim().split(/\s+/).some((id) => {
+        const lab = id && document.getElementById(id);
+        return lab && (lab.textContent || '').trim().toLowerCase() === t;
+      }));
+    if (byAria) return byAria;
+    // Viewport preference + question-text fallback (mirror of content.js).
+    const pickVisible = (list) => {
+      for (const f of list) {
+        const r = f.getBoundingClientRect();
+        if (r.top < window.innerHeight && r.bottom > 0) return f;
+      }
+      return list[0] || null;
+    };
+    const normCue = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ').replace(/[:*]+$/, '').trim();
+    const byAttr = fields.filter((f) =>
+      (f.placeholder || '').trim().toLowerCase() === t ||
+      (f.name || '').toLowerCase() === t ||
+      (f.id || '').toLowerCase() === t);
+    if (byAttr.length) return pickVisible(byAttr);
+    const cues = [];
+    for (const el of document.querySelectorAll('h1,h2,h3,h4,h5,h6,legend,label,p,span,div,td,th,fieldset')) {
+      if (el.querySelector('input, textarea, select')) continue;
+      const txt = (el.innerText || '').trim();
+      if (!txt || txt.length > 160) continue;
+      if (normCue(txt) !== normCue(t)) continue;
+      cues.push(el);
+    }
+    const candidates = [];
+    for (const cue of cues) {
+      let scope = cue;
+      for (let i = 0; i < 8 && scope; i++) {
+        const inner = scope.querySelector('input, textarea, select');
+        if (inner) { candidates.push(inner); break; }
+        scope = scope.parentElement;
+      }
+    }
+    return candidates.length ? pickVisible(candidates) : null;
+  };
   return new Promise((resolve, reject) => {
-    const el = action.selector ? document.querySelector(action.selector) : null;
+    let el = action.selector ? document.querySelector(action.selector) : null;
+    if (!el && action.selector) {
+      // Playwright :has-text()/:text() fallback — not valid CSS.
+      const hm = action.selector.match(/:has-text\(\s*["']([^"']+)["']\s*\)|:text\(\s*["']([^"']+)["']\s*\)/i);
+      if (hm) {
+        const ht = (hm[1] || hm[2]).toLowerCase().trim();
+        for (const c of document.querySelectorAll('a, button, [role=button], [onclick], input[type=submit], input[type=button]')) {
+          if ((c.textContent || '').trim().toLowerCase().includes(ht)) { el = c; break; }
+        }
+      }
+    }
     if (!el && action.selector) {
       reject(new Error(`Element not found: ${action.selector}`));
       return;
@@ -1881,13 +2092,47 @@ function executeDomAction(action) {
         resolve({ ok: true, type: 'click' });
         break;
       case 'fill':
-        el.focus();
-        el.value = '';
-        el.value = action.value;
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-        resolve({ ok: true, type: 'fill' });
+      case 'fill_form': {
+        // One value-set path for both action kinds: el focuses, value set,
+        // selects fall back to OPTION-TEXT matching when the direct value
+        // assignment selects nothing (Zo sends visible text, not value attrs).
+        const setVal = (node, raw) => {
+          node.focus();
+          node.value = '';
+          node.value = raw;
+          if (node.tagName === 'SELECT' && node.selectedIndex === -1) {
+            const want = String(raw == null ? '' : raw).trim().toLowerCase();
+            if (want) {
+              const opts = Array.from(node.options || []);
+              const opt = opts.find((o) => (o.textContent || '').trim().toLowerCase() === want) ||
+                opts.find((o) => (o.textContent || '').trim().toLowerCase().startsWith(want));
+              if (opt) node.value = opt.value;
+            }
+          }
+          node.dispatchEvent(new Event('input', { bubbles: true }));
+          node.dispatchEvent(new Event('change', { bubbles: true }));
+        };
+        if (action.type === 'fill') {
+          setVal(el, action.value);
+          resolve({ ok: true, type: 'fill' });
+          break;
+        }
+        const results = [];
+        for (const entry of action.values || []) {
+          const field = resolveFieldTarget(entry.target, entry.selector);
+          if (!field) { results.push({ ok: false, target: entry.target, error: 'no field matched' }); continue; }
+          setVal(field, String(entry.value == null ? '' : entry.value));
+          results.push({ ok: true, target: entry.target, type: field.type || field.tagName.toLowerCase() });
+        }
+        const failed = results.filter((r) => !r.ok);
+        resolve({
+          ok: failed.length === 0,
+          type: 'fill_form',
+          fields: results,
+          ...(failed.length ? { error: `${failed.length} field(s) unmatched: ${failed.map((f) => f.target).join(', ')}` } : {}),
+        });
         break;
+      }
       case 'extract':
         resolve({
           ok: true,

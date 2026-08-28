@@ -3,6 +3,7 @@
 import { parseBangCommand, BANG_COMMANDS } from './lib/bang-commands.js';
 import { BUILTIN_MODES, DEFAULT_MODE_ID, resolveMode, presetToMode, normalizeActions, isContextAction } from './lib/modes.js';
 import { looksLikeActionJson } from './lib/intent.js';
+import { reviewRows, fillBatchRows } from './lib/formfill.js';
 import {
   createConversationState,
   decideTurn,
@@ -1251,17 +1252,19 @@ function escapeHtml(s) {
 // inside. Repeated consecutive actions collapse into a single card with a
 // "× N" count.
 const ACTION_META = {
-  click:    { icon: '👆', label: 'Click' },
-  fill:     { icon: '✏️', label: 'Fill' },
-  scroll:   { icon: '📜', label: 'Scroll' },
-  navigate: { icon: '🔗', label: 'Navigate' },
-  extract:  { icon: '📋', label: 'Extract' },
-  wait:     { icon: '⏳', label: 'Wait' },
-  done:     { icon: '✅', label: 'Done' },
+  click:     { icon: '👆', label: 'Click' },
+  fill:      { icon: '✏️', label: 'Fill' },
+  fill_form: { icon: '📝', label: 'Fill form' },
+  scroll:    { icon: '📜', label: 'Scroll' },
+  navigate:  { icon: '🔗', label: 'Navigate' },
+  extract:   { icon: '📋', label: 'Extract' },
+  wait:      { icon: '⏳', label: 'Wait' },
+  done:      { icon: '✅', label: 'Done' },
 };
 
 function actionDetail(action) {
   if (action.response) return '';
+  if (action.type === 'fill_form') return action.values?.length ? `${action.values.length} fields` : '';
   return action.selector || action.url || action.value || action.ms || '';
 }
 
@@ -1477,6 +1480,7 @@ function renderActionTimeline() {
     const meta = ACTION_META[g.action.type] || { icon: '•', label: g.action.type };
     const card = document.createElement('div');
     card.className = 'action-card pending';
+    card.classList.add(`action-card-${g.action.type}`);
     // Map every original index in this group to the same card so
     // updateActionCard(i) resolves the group's card for any member action.
     for (const idx of g.indices) card.dataset.index = card.dataset.index || String(idx);
@@ -1522,6 +1526,105 @@ function updateActionRunHeader(label, count, durationMs) {
   if (durEl) durEl.textContent = durationMs != null ? `· ${formatDuration(durationMs)}` : '';
 }
 
+/** Editable review card for a parked sensitive fill_form (#26). Resolves with
+ *  the (possibly edited) fill_form action on confirm, or null on cancel.
+ *  Secret rows render "left for you 🔑" — values for password/card fields are
+ *  never round-tripped through the card (reviewRows blanks them). */
+function renderFormReview(payload) {
+  return new Promise((resolve) => {
+    const fills = (payload.actions || []).filter((a) => a && (a.type === 'fill_form' || a.type === 'fill'));
+    if (!fills.length) { resolve(null); return; }
+    const rows = fillBatchRows(fills, payload.fields);
+    const host = document.createElement('div');
+    host.className = 'msg form-review-card';
+    let hostName = '';
+    try { hostName = new URL(payload.url).host; } catch { hostName = safeText(payload.url || ''); }
+    const title = document.createElement('div');
+    title.className = 'form-review-title';
+    title.textContent = `Review before filling — ${hostName}`;
+    host.appendChild(title);
+    for (const r of payload.reasons || []) {
+      const chip = document.createElement('span');
+      chip.className = 'form-review-chip';
+      chip.textContent = safeText(r);
+      host.appendChild(chip);
+    }
+    const edits = new Map(); // row index → edited value
+    for (let ri = 0; ri < rows.length; ri++) {
+      const row = rows[ri];
+      const line = document.createElement('label');
+      line.className = 'form-review-row';
+      if (row.secret) {
+        line.textContent = `${row.target}: left for you 🔑`;
+      } else {
+        line.textContent = row.target + ' ';
+        const input = document.createElement('input');
+        input.dataset.target = row.target;
+        input.value = row.value;
+        input.addEventListener('input', () => edits.set(ri, input.value));
+        line.appendChild(input);
+      }
+      host.appendChild(line);
+    }
+    const confirm = document.createElement('button');
+    confirm.className = 'btn btn-primary form-review-confirm';
+    const cancel = document.createElement('button');
+    cancel.className = 'btn btn-ghost form-review-cancel';
+    confirm.textContent = `Fill ${rows.filter((r) => !r.secret).length} fields`;
+    cancel.textContent = 'Cancel';
+    confirm.addEventListener('click', () => {
+      // Confirmed batch — same order/count as `fills`; edits mapped back via
+      // the rows' ai/vi back-references.
+      const confirmed = fills.map((a) => a.type === 'fill_form' ? { ...a, values: (a.values || []).map((v) => ({ ...v })) } : { ...a });
+      for (const [ri, val] of edits) {
+        const row = rows[ri];
+        if (row.kind === 'fill_form') confirmed[row.ai].values[row.vi] = { ...confirmed[row.ai].values[row.vi], value: val };
+        else confirmed[row.ai] = { ...confirmed[row.ai], value: val };
+      }
+      // Secret rows NEVER round-trip — "left for you 🔑" means the proposed
+      // value is dropped even if the user never touched the input (live-
+      // observed: models propose password/card values despite the prompt rule).
+      for (const row of rows) {
+        if (!row.secret) continue;
+        if (row.kind === 'fill_form') confirmed[row.ai].values[row.vi] = { ...confirmed[row.ai].values[row.vi], value: '' };
+        else confirmed[row.ai] = { ...confirmed[row.ai], value: '' };
+      }
+      host.remove();
+      resolve(confirmed);
+    });
+    cancel.addEventListener('click', () => {
+      host.remove();
+      resolve(null);
+    });
+    host.append(confirm, cancel);
+    msgsEl.appendChild(host);
+    msgsEl.scrollTop = msgsEl.scrollHeight;
+  });
+}
+
+/** Per-field ✓/✗ rows inside a fill_form timeline card (#26). One card, N
+ *  field outcomes — mirrors the card-per-action convention of the timeline. */
+function renderFillFormFieldResults(index, result) {
+  const timeline = document.getElementById('action-timeline');
+  if (!timeline) return;
+  const card = [...timeline.querySelectorAll('.action-card')].find((c) =>
+    (c.dataset.indices || '').split(',').map(Number).includes(index),
+  );
+  if (!card) return;
+  if (result.unverifiedForm) {
+    const note = document.createElement('div');
+    note.className = 'field-result field-result-note';
+    note.textContent = '⚠️ unverified form — page was unreadable, no review shown';
+    card.appendChild(note);
+  }
+  for (const f of result.fields || []) {
+    const row = document.createElement('div');
+    row.className = 'field-result';
+    row.textContent = f.ok ? `✓ ${f.target}` : `✗ ${f.target} — ${safeText(f.error || 'failed')}`;
+    card.appendChild(row);
+  }
+}
+
 // ---- Execute pending actions ----
 async function runPendingActions() {
   if (!pendingActions || actionRunning) return;
@@ -1553,10 +1656,48 @@ async function runPendingActions() {
     return;
   }
 
+  // Batch sensitivity pre-flight (#26): ONE capture + at most ONE review
+  // card per page for the whole fill batch. Models drift between fill_form
+  // and plain fill actions; per-action parking would mean N review cards for
+  // N fields (or worse, N auto-cancels). Benign forms execute right here —
+  // the pre-flight IS the execution; sensitive ones park for one review.
+  const fillIdxs = [];
+  for (let i = 0; i < actions.length; i++) {
+    const t = actions[i] && actions[i].type;
+    if (t === 'fill' || t === 'fill_form') fillIdxs.push(i);
+  }
+  if (fillIdxs.length) {
+    const fillActions = fillIdxs.map((i) => actions[i]);
+    const applyFillResults = (resp, acts) => {
+      const results = Array.isArray(resp?.results) ? resp.results : (resp && !resp.needsConfirm ? [resp] : []);
+      acts.forEach((a, k) => {
+        const r = results[k];
+        const ok = r ? r.ok !== false : resp?.ok === true;
+        if (a.type === 'fill_form' && r?.fields) renderFillFormFieldResults(fillIdxs[k], r);
+        updateActionCard(fillIdxs[k], ok ? 'done' : 'error', ok ? undefined : safeText(r?.error || resp?.error || 'failed'));
+      });
+    };
+    let fillResp = await chrome.runtime.sendMessage({ type: 'EXECUTE_ACTIONS', actions: fillActions, tabId });
+    if (fillResp?.needsConfirm) {
+      const decision = await renderFormReview(fillResp);
+      if (!decision) {
+        fillIdxs.forEach((i) => updateActionCard(i, 'error', 'skipped'));
+        addMessageDOM('assistant', 'Skipped the form fill — nothing was entered. You can fill it yourself or ask again.');
+        fillResp = null;
+      } else {
+        fillResp = await chrome.runtime.sendMessage({ type: 'EXECUTE_ACTIONS', actions: decision, tabId, confirmed: true });
+      }
+    }
+    if (fillResp && !fillResp.needsConfirm) {
+      applyFillResults(fillResp, fillActions);
+      if (fillResp.ok === false) addMessage('error', `Action failed: ${fillResp.error || 'unknown error'}`);
+    }
+  }
+
   for (let i = 0; i < actions.length; i++) {
     // Stop if the user clicked Skip (nulls pendingActions) between awaits.
     if (!pendingActions) break;
-    const action = actions[i];
+    let action = actions[i];
     if (action.type === 'done') {
       updateActionCard(i, 'done');
       if (action.response) {
@@ -1568,11 +1709,13 @@ async function runPendingActions() {
       }
       continue;
     }
+    // Fill-family actions were handled by the batch pre-flight above.
+    if (action.type === 'fill' || action.type === 'fill_form') continue;
     updateActionCard(i, 'running');
     // No separate inline ".msg-action" message — the card in the run timeline
     // is the inline record now (avoids the prior duplicate rendering).
     const actionStart = Date.now();
-    const result = await chrome.runtime.sendMessage({
+    let result = await chrome.runtime.sendMessage({
       type: 'EXECUTE_ACTIONS',
       actions: [action],
       tabId,
@@ -3251,20 +3394,38 @@ function handleStreamMessage(msg) {
       if (!streamSession.active) return;
       // Co-browse streams the action envelope as text deltas: the raw JSON
       // accumulates here. Never render it as prose; show a placeholder instead.
-      const isActionJson = looksLikeActionJson(msg.text);
+      // The test runs on the ACCUMULATED text — testing the delta alone leaks
+      // every chunk after the first (real Zo streams many small deltas; only
+      // chunk 1 starts with '{').
+      streamSession.fullText += safeText(msg.text);
+      const isActionJson = looksLikeActionJson(streamSession.fullText);
       if (streamIsBackground()) {
         // Background chat: accumulate only; the bubble re-creates on switch-back.
-        streamSession.fullText += safeText(msg.text);
         break;
       }
       if (!streamSession.msgEl) {
         const thinking = msgsEl.querySelector('.msg-thinking');
         if (thinking) thinking.remove();
         streamSession.msgEl = addMessageDOM('assistant', isActionJson ? '_Preparing actions…_' : '', { streaming: true });
+        if (isActionJson) {
+          // Tag the placeholder so STREAM_DONE can swap it for the done response.
+          // The markdown renderer may leave the underscore text as a BARE text
+          // node (no <p>/<em>), so wrap matching text nodes in a tagged span.
+          const phBody = streamSession.msgEl.querySelector('.msg-body');
+          const hits = [...(phBody?.childNodes || [])].filter((n) => /Preparing actions/.test(n.textContent || ''));
+          for (const n of hits) {
+            if (n.nodeType === 3) { // TEXT_NODE — wrap it
+              const span = document.createElement('span');
+              span.className = 'msg-actions-placeholder';
+              span.textContent = n.textContent;
+              phBody.replaceChild(span, n);
+            } else {
+              n.classList?.add('msg-actions-placeholder');
+            }
+          }
+        }
         startStreamTimer(streamSession.msgEl);
-        streamSession.fullText = safeText(msg.text);
       } else {
-        streamSession.fullText += safeText(msg.text);
         const body = streamSession.msgEl.querySelector('.msg-body');
         if (body && !isActionJson) {
           // During streaming: append plain text for immediate feedback.
@@ -3369,11 +3530,18 @@ function handleStreamMessage(msg) {
       if (streamSession.msgEl) {
         const body = streamSession.msgEl.querySelector('.msg-body');
         if (body) {
+          // For action turns the accumulated stream text is the raw JSON
+          // envelope — render the done response as normal prose instead (and
+          // swap the _Preparing actions…_ placeholder for it).
+          const leakedJson = looksLikeActionJson(streamSession.fullText);
+          const finalText = leakedJson ? responseText : streamSession.fullText;
           const streamingTexts = body.querySelectorAll('.msg-streaming-text');
-          if (streamingTexts.length > 0 && streamSession.fullText) {
+          const placeholders = body.querySelectorAll('.msg-actions-placeholder');
+          if (finalText && (streamingTexts.length > 0 || placeholders.length > 0)) {
             // Replace all streaming text spans with a single fully-rendered markdown block
-            const renderedHtml = markdownToHtml(streamSession.fullText);
+            const renderedHtml = markdownToHtml(finalText);
             streamingTexts.forEach(el => el.remove());
+            placeholders.forEach(el => el.remove());
             body.insertAdjacentHTML('beforeend', renderedHtml);
           }
         }

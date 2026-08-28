@@ -3,7 +3,7 @@ import { readFileSync } from "fs";
 import { resolve } from "path";
 import * as vm from "node:vm";
 import { normalizeActions } from "../extension/lib/modes.js";
-import { parseZoOutput, stripCodeFence } from "../extension/lib/parse-output.js";
+import { parseZoOutput, repairJson, stripCodeFence } from "../extension/lib/parse-output.js";
 import { replaySse } from "./test-prompts/replay.js";
 
 /**
@@ -335,6 +335,67 @@ describe("finishStream plain-text path (ticket #29)", () => {
     // The misleading bare "Done." literal must be gone; replaced by a hint.
     expect(sp).not.toContain("addMessage('assistant', 'Done.')");
     expect(sp).toContain("empty response");
+  });
+});
+
+describe("repairJson — unescaped inner quotes (live roboform.com failure)", () => {
+  // Zo sometimes writes CSS attribute selectors with DOUBLE quotes inside the
+  // JSON string: "selector":"input[name="\30 1___title"]". The inner " makes
+  // strict JSON.parse throw and the whole envelope degraded to plain-text
+  // display (user saw the raw JSON in chat; nothing filled). The repair pass
+  // re-escapes inner quotes so the envelope parses.
+  const broken =
+    `{"actions":[{"type":"fill","selector":"input[name="\\\\30 1___title"]","value":"Mr."},` +
+    `{"type":"fill","selector":"input[name="\\\\34 3cvc"]","value":"123"}]}`;
+
+  it("repairJson escapes inner quotes; valid JSON round-trips unchanged", () => {
+    expect(repairJson('{"a":"b"}')).toBe('{"a":"b"}');
+    expect(repairJson('{"a":"say \\"hi\\" now"}')).toBe('{"a":"say \\"hi\\" now"}'); // already-escaped kept
+    const repaired = repairJson(broken);
+    expect(() => JSON.parse(repaired)).not.toThrow();
+  });
+
+  it("parseZoOutput recovers actions from the broken envelope", () => {
+    const { actions, plainText } = parseZoOutput(broken);
+    expect(plainText).toBe("");
+    expect(actions.length).toBe(2);
+    expect(actions[0].type).toBe("fill");
+    // The decoded selector keeps the CSS escape: input[name="\30 1___title"]
+    expect(actions[0].selector).toBe('input[name="\\30 1___title"]');
+    expect(actions[1].selector).toBe('input[name="\\34 3cvc"]');
+  });
+
+  it("repairs quoted prose inside done.response too", () => {
+    const { actions } = parseZoOutput('{"actions":[{"type":"done","response":"He said "hi" loudly"}]}');
+    expect(actions[0].type).toBe("done");
+    expect(actions[0].response).toBe('He said "hi" loudly');
+  });
+
+  it("repairs the pretty-printed key-first variant (second roboform capture)", () => {
+    const raw = `{
+  "actions": [
+    { "fill": { "selector": "input[name="\\\\30 1___title"]", "value": "Mr." } },
+    { "fill": { "selector": "select[name="\\\\34 0cc__type"]", "value": "Visa (Preferred)" } },
+    { "done": { "response": "Filled all 30 visible form fields." } }
+  ]
+}`;
+    const { actions, plainText } = parseZoOutput(raw);
+    expect(plainText).toBe("");
+    expect(actions.length).toBe(3);
+    expect(actions[0].type).toBe("fill"); // key-first {"fill":{...}} normalized
+    expect(actions[0].selector).toBe('input[name="\\30 1___title"]');
+    expect(actions[2].type).toBe("done");
+  });
+
+  it("single-quoted selectors (valid JSON) parse without the repair", () => {
+    const { actions } = parseZoOutput(`{"actions":[{"type":"fill","selector":"input[name='02frstname']","value":"T"}]}`);
+    expect(actions[0].selector).toBe("input[name='02frstname']");
+  });
+
+  it("still degrades to plainText when the repair cannot save it", () => {
+    const { actions, plainText } = parseZoOutput("not json at all {broken");
+    expect(actions).toEqual([]);
+    expect(plainText).toContain("not json at all");
   });
 });
 

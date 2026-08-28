@@ -16,12 +16,14 @@
 // is rendered into a separate Thought bubble; it is never asked for here.
 export const ACTION_SCHEMA_COMPACT =
   'Respond with JSON {"actions":[...]}. ' +
-  'Actions: click{selector} | fill{selector,value} | extract{selector,attribute} | ' +
-  'navigate{url} | scroll{direction,amount?} | wait{ms} | done{response}' +
+  'Actions: click{selector} | fill{selector,value} | ' +
+  'fill_form{values:[{target,value}]} — batch-fill by question/label/placeholder text (PREFER for 2+ fields) | ' +
+  'extract{selector,attribute} | navigate{url} | scroll{direction,amount?} | wait{ms} | done{response}' +
   ' | read_tab{ref} — request full content of a referenced tab (context only)' +
   ' | read_page — fetch full text of the current page (context only)' +
   ' | get_dom — fetch all interactive elements of the current page (context only)' +
-  ' | get_form — fetch all form fields of the current page (context only).';
+  ' | get_form — fetch all form fields of the current page (context only). ' +
+  'Never propose password/card/CVV values. Never click submit/OK/Next/Subscribe (or any form-submit) buttons after filling — fill, then done(); the user reviews and submits.';
 
 /**
  * Fallback instructions for Modes that don't define their own.
@@ -48,7 +50,7 @@ export const BUILTIN_MODES = {
     name: 'Co-browse',
     icon: '🤖',
     systemPrompt: "You are Zo — the user's AI co-browsing assistant. You see the page they're on and can control the browser.",
-    instructions: 'Act on the page to fulfill the request. Use the ELEMENTS list when targeting clicks/fills.',
+    instructions: 'Act on the page to fulfill the request. Use the ELEMENTS list when targeting clicks/fills. Prefer fill_form for multi-field forms (target = the field\'s question text); omit password/card/CVV values; never click submit/OK/Next/Subscribe (or any form-submit) button — always done() after filling so the user can review before submitting. On one-question-per-screen forms, fill only the visible section per turn and let the user review + advance.',
     contextTier: TIER.ELEMENTS,
     textBudget: 4000,
     expectJson: true,
@@ -200,7 +202,7 @@ export function presetToMode(preset) {
  * (Kept here — next to ACTION_SCHEMA_COMPACT, the single source of truth —
  * rather than duplicated in background.js.)
  */
-export const ACTION_TYPE_NAMES = ['click', 'fill', 'extract', 'navigate', 'scroll', 'wait', 'done'];
+export const ACTION_TYPE_NAMES = ['click', 'fill', 'fill_form', 'extract', 'navigate', 'scroll', 'wait', 'done'];
 
 /**
  * Context-only ("pull") action names (#24) — intercepted by the background's

@@ -574,3 +574,74 @@ describe("vision-gated screenshots (#25)", () => {
     }
   }, 30000);
 });
+
+describe("form-fill review card (#26)", () => {
+  const checkoutTabId = 43;
+  const checkoutWin: any = new Window({ url: "https://example.test/checkout" });
+
+  beforeAll(() => {
+    checkoutWin.document.write(`<!DOCTYPE html><html><head><title>Checkout</title></head><body>
+      <form>
+        <label for="c-email">Email</label><input id="c-email" name="email" type="email">
+        <label for="c-pw">Password</label><input id="c-pw" name="pw" type="password">
+      </form>
+    </body></html>`);
+    stubNonZeroRects(checkoutWin);
+    const t = createTabTarget();
+    loadContentScript(checkoutWin, t.chrome);
+    bus.tabs.registerTab({ id: checkoutTabId, url: "https://example.test/checkout", title: "Checkout" });
+    bus.tabs.bindTab(checkoutTabId, t.onMessage);
+    // runPendingActions targets the ACTIVE web tab — make checkout active for
+    // this scenario (the shared form-page tab stays first-in-window fallback).
+    const mainTab: any = bus.tabs._tabs.find((x: any) => x.id === TAB_ID);
+    const checkoutTab: any = bus.tabs._tabs.find((x: any) => x.id === checkoutTabId);
+    mainTab.active = false;
+    checkoutTab.active = true;
+  });
+
+  it("sensitive fill_form parks as a review card; edits apply on confirm", async () => {
+    fm.handle(() =>
+      sseResponse(zoSseText({ text: JSON.stringify({ actions: [
+        { type: "fill_form", values: [
+          { target: "Email", value: "bot@example.com" },
+          { target: "Password", value: "" },
+        ] },
+        { type: "done", response: "Filled what I could — review and submit." },
+      ] }) })),
+    );
+    await typeAndSend("fill the checkout form");
+
+    // NOTE: polled waitUntil over these class selectors trips a bun+happy-dom
+    // pathology (runaway allocation in the selector engine → segfault), so
+    // this scenario syncs on bounded sleeps instead of 10ms polling. The
+    // real-browser equivalent is covered by e2e/11-fill-form.spec.ts.
+    await new Promise((r) => setTimeout(r, 4000));
+    const card = panelWin.document.querySelector(".form-review-card");
+    expect(card).toBeTruthy();
+    expect(card.textContent).toMatch(/password/i);
+    const inputs = [...card.querySelectorAll("input")] as HTMLInputElement[];
+    const byTarget = (t: string) => inputs.find((i) => i.dataset.target === t);
+    // Secret row never carries an input — the user's password manager owns it.
+    expect(byTarget("Password")).toBeUndefined();
+    const input = byTarget("Email");
+    expect(input.value).toBe("bot@example.com");
+
+    input.value = "edited@x.y";
+    input.dispatchEvent(new panelWin.Event("input", { bubbles: true }));
+    (card.querySelector(".form-review-confirm") as HTMLElement).click();
+
+    // Bounded sleeps instead of polled waitUntil: this scenario trips a
+    // bun+happy-dom native crash when descendant class selectors (e.g.
+    // '.action-card-fill_form .field-result') query the live panel DOM, so
+    // sync on time + single-class queries + JS traversal. The real-browser
+    // equivalent is covered by e2e/11-fill-form.spec.ts.
+    await new Promise((r) => setTimeout(r, 6000));
+    const emailEl = checkoutWin.document.querySelector("input[name=email]") as HTMLInputElement;
+    expect(emailEl.value).toBe("edited@x.y");
+    const pwEl = checkoutWin.document.querySelector("input[name=pw]") as HTMLInputElement;
+    expect(pwEl.value).toBe(""); // never touched
+    const rows = [...panelWin.document.querySelectorAll(".field-result")] as HTMLElement[];
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+    expect(rows.every((r) => !!r.closest(".action-card-fill_form"))).toBe(true);
+  }, 30000);
+});

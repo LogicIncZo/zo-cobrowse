@@ -97,9 +97,22 @@ describe("BUILTIN_MODES — tier invariants", () => {
 
 describe("ACTION_SCHEMA_COMPACT", () => {
   it("mentions every action type from the action protocol", () => {
-    for (const action of ["click", "fill", "extract", "navigate", "scroll", "wait", "done", "read_tab", "read_page", "get_dom", "get_form"]) {
+    for (const action of ["click", "fill", "fill_form", "extract", "navigate", "scroll", "wait", "done", "read_tab", "read_page", "get_dom", "get_form"]) {
       expect(ACTION_SCHEMA_COMPACT).toContain(action);
     }
+  });
+
+  it("documents fill_form + the no-auto-submit rule", () => {
+    expect(ACTION_SCHEMA_COMPACT).toContain("fill_form{values:[{target,value}]}");
+    expect(ACTION_SCHEMA_COMPACT).toMatch(/question\/label\/placeholder text/);
+    expect(ACTION_SCHEMA_COMPACT).toMatch(/never click submit.*done\(\)/i);
+    expect(ACTION_SCHEMA_COMPACT).toMatch(/password/i);
+  });
+
+  it("cobrowse instructions carry the no-auto-submit + pacing rules", () => {
+    expect(BUILTIN_MODES.cobrowse.instructions).toMatch(/fill_form/);
+    expect(BUILTIN_MODES.cobrowse.instructions).toMatch(/visible section/);
+    expect(BUILTIN_MODES.cobrowse.instructions).toMatch(/never click submit.*done\(\)/i);
   });
 
   it("teaches the context-only pull actions (never cross-tab DOM actions)", () => {
@@ -111,8 +124,9 @@ describe("ACTION_SCHEMA_COMPACT", () => {
   });
 
   it("is much shorter than the legacy commented JSON block (sanity)", () => {
-    // The old schema block was ~600 chars / ~130 tokens. Compact should be well under.
-    expect(ACTION_SCHEMA_COMPACT.length).toBeLessThan(600);
+    // The old schema block was ~600 chars / ~130 tokens. #26's fill_form +
+    // sensitive-form rules legitimately grew it; the guard stays tight.
+    expect(ACTION_SCHEMA_COMPACT.length).toBeLessThan(760);
   });
 
   it("demands ACTIONS only — not a {reasoning, actions} envelope (declubbing)", () => {

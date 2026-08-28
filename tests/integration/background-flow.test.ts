@@ -8,9 +8,13 @@
 // query string (?file=...) to get a fresh instance bound to ITS bus.
 
 import { describe, it, expect, beforeAll } from "bun:test";
+import { readFileSync } from "fs";
+import { resolve } from "path";
+import { Window } from "happy-dom";
 import {
   createFakeChrome,
   createTabTarget,
+  stubNonZeroRects,
   waitUntil,
 } from "../helpers/chrome-mock.ts";
 import {
@@ -22,6 +26,19 @@ import {
   jsonResponse,
   textResponse,
 } from "../helpers/zo-fetch-mock.ts";
+
+const CONTENT_SRC = readFileSync(resolve(import.meta.dir, "../../extension/content.js"), "utf-8");
+
+/** Execute the real content.js IIFE with a page window baked in as parameters. */
+function loadContentScript(win: any, chromeObj: any) {
+  const run = new Function(
+    "chrome", "document", "window", "location", "CSS", "Event",
+    "MutationObserver", "setTimeout", "clearTimeout", "console",
+    CONTENT_SRC,
+  );
+  run(chromeObj, win.document, win, win.location, win.CSS, win.Event,
+    win.MutationObserver, setTimeout, clearTimeout, console);
+}
 
 const bus = createFakeChrome();
 const fm = new ZoFetchMock();
@@ -283,5 +300,135 @@ describe("background context capture — 3-path fallback", () => {
       (c: any) => c.api === "tabs.sendMessage" && c.tabId === tabId && c.msg?.type === "EXECUTE_ACTION",
     );
     expect(executed.map((c: any) => c.msg.action.type)).toEqual(["fill"]);
+  });
+});
+
+describe("form-fill sensitivity gate (#26)", () => {
+  const checkoutTabId = 77;
+  const benignTabId = 78;
+  const checkoutWin: any = new Window({ url: "https://shop.test/checkout" });
+  const benignWin: any = new Window({ url: "https://example.test/search" });
+  const pageDoc = checkoutWin.document;
+
+  beforeAll(() => {
+    // Checkout page: password + card fields inside a form with a submit button.
+    checkoutWin.document.write(`<!DOCTYPE html><html><head><title>Checkout</title></head><body>
+      <form>
+        <label for="email">Email</label><input id="email" name="email" type="email">
+        <label for="pw">Password</label><input id="pw" name="pw" type="password">
+        <label for="cc">Card number</label><input id="cc" name="cc" inputmode="numeric">
+        <button id="checkout-submit">Place order</button>
+      </form>
+      <a id="help-link" href="#help">Help</a>
+    </body></html>`);
+    stubNonZeroRects(checkoutWin);
+    const checkoutTarget = createTabTarget();
+    loadContentScript(checkoutWin, checkoutTarget.chrome);
+    bus.tabs.registerTab({ id: checkoutTabId, url: "https://shop.test/checkout", title: "Checkout" });
+    bus.tabs.bindTab(checkoutTabId, checkoutTarget.onMessage);
+
+    // Benign search page: no sensitive fields, no sensitive URL.
+    benignWin.document.write(`<!DOCTYPE html><html><head><title>Search</title></head><body>
+      <form><input id="q" name="q" placeholder="Search"><button type="button">Go</button></form>
+    </body></html>`);
+    stubNonZeroRects(benignWin);
+    const benignTarget = createTabTarget();
+    loadContentScript(benignWin, benignTarget.chrome);
+    bus.tabs.registerTab({ id: benignTabId, url: "https://example.test/search", title: "Search" });
+    bus.tabs.bindTab(benignTabId, benignTarget.onMessage);
+
+    // probeClickTarget's executeScript path runs against the checkout DOM
+    // (the debugger fast-path is refused by the default fake).
+    bus.scripting.dom = checkoutWin;
+  });
+
+  it("fill_form on a sensitive form parks for confirmation; confirmed:true executes", async () => {
+    const actions = [
+      { type: "fill_form", values: [{ target: "Email", value: "a@b.c" }, { target: "Password", value: "" }] },
+    ];
+
+    const parked = await bus.runtime.sendMessage({ type: "EXECUTE_ACTIONS", actions, tabId: checkoutTabId });
+    expect(parked.needsConfirm).toBe(true);
+    expect(parked.reasons.join(" ")).toMatch(/password/i);
+    expect(parked.actions).toEqual(actions);
+    expect(parked.fields.some((f: any) => f.type === "password")).toBe(true);
+    expect(parked.url).toContain("shop.test");
+    // Parked = nothing executed: the email field is untouched.
+    expect((pageDoc.querySelector("input[name=email]") as any).value).toBe("");
+
+    const done = await bus.runtime.sendMessage({ type: "EXECUTE_ACTIONS", actions, tabId: checkoutTabId, confirmed: true });
+    expect(done.ok).toBe(true);
+    expect((pageDoc.querySelector("input[name=email]") as any).value).toBe("a@b.c");
+    expect(done.results[0].fields.map((f: any) => f.target)).toEqual(["Email", "Password"]);
+  });
+
+  it("click on a submit button of a sensitive form is blocked by the backstop", async () => {
+    const r = await bus.runtime.sendMessage({
+      type: "EXECUTE_ACTIONS",
+      actions: [
+        { type: "fill_form", values: [{ target: "Email", value: "a@b.c" }] },
+        { type: "click", selector: "#checkout-submit" },
+      ],
+      tabId: checkoutTabId,
+      confirmed: true,
+    });
+    expect(r.ok).toBe(false);
+    expect(r.results[1].blocked).toBe(true);
+    expect(r.results[1].error).toMatch(/blocked submit/i);
+  });
+
+  it("benign fill_form executes immediately (no confirm)", async () => {
+    const r = await bus.runtime.sendMessage({
+      type: "EXECUTE_ACTIONS",
+      actions: [{ type: "fill_form", values: [{ target: "Search", value: "hi" }] }],
+      tabId: benignTabId,
+    });
+    expect(r.needsConfirm).toBeUndefined();
+    expect(r.ok).toBe(true);
+    expect((benignWin.document.querySelector("input[name=q]") as any).value).toBe("hi");
+  });
+
+  it("a non-submit click on a sensitive page is NOT blocked (submit buttons only)", async () => {
+    const r = await bus.runtime.sendMessage({
+      type: "EXECUTE_ACTIONS",
+      actions: [
+        { type: "fill_form", values: [{ target: "Email", value: "a@b.c" }] },
+        { type: "click", selector: "#help-link" },
+      ],
+      tabId: checkoutTabId,
+      confirmed: true,
+    });
+    expect(r.ok).toBe(true);
+    expect(r.results[1].blocked).toBeUndefined(); // probed, not a submit → allowed
+  });
+
+  it("a batch of PLAIN fill actions parks on a sensitive form too (models drift off fill_form)", async () => {
+    // Live-observed on roboform.com: Zo emitted 30 individual fill{selector}
+    // actions incl. password + card fields instead of one fill_form batch.
+    // The gate must cover them — otherwise secrets auto-fill with no review.
+    const actions = [
+      { type: "fill", selector: "input[name=email]", value: "plain@b.c" },
+      { type: "fill", selector: "input[type=password]", value: "hunter2" },
+    ];
+    const parked = await bus.runtime.sendMessage({ type: "EXECUTE_ACTIONS", actions, tabId: checkoutTabId });
+    expect(parked.needsConfirm).toBe(true);
+    expect(parked.reasons.join(" ")).toMatch(/password/i);
+    // Parked = nothing executed (field still holds the earlier test's value).
+    expect((pageDoc.querySelector("input[name=email]") as any).value).not.toBe("plain@b.c");
+
+    const done = await bus.runtime.sendMessage({ type: "EXECUTE_ACTIONS", actions, tabId: checkoutTabId, confirmed: true });
+    expect(done.ok).toBe(true);
+    expect((pageDoc.querySelector("input[name=email]") as any).value).toBe("plain@b.c");
+  });
+
+  it("plain fills on a benign form execute immediately (no confirm)", async () => {
+    const r = await bus.runtime.sendMessage({
+      type: "EXECUTE_ACTIONS",
+      actions: [{ type: "fill", selector: "input[name=q]", value: "hi" }],
+      tabId: benignTabId,
+    });
+    expect(r.needsConfirm).toBeUndefined();
+    expect(r.ok).toBe(true);
+    expect((benignWin.document.querySelector("input[name=q]") as any).value).toBe("hi");
   });
 });

@@ -78,6 +78,11 @@ function pickScenario(input) {
   if (String(input || "").includes("## Auto-fetched:")) return "pull-followup";
   const q = userRequest(input);
   if (q.includes("schema")) return "pull-form";
+  if (q.includes("checkout")) return "fill-form";
+  if (q.includes("classic form")) return "classic-form";
+  if (q.includes("chunked")) return "fill-chunked";
+  if (q.includes("application")) return "app-section-1";
+  if (q.includes("continue") || q.includes("next section")) return "app-section-2";
   if (q.includes("fill")) return "fill";
   if (q.includes("click")) return "click";
   if (q.includes("scroll")) return "scroll";
@@ -233,15 +238,99 @@ const server = http.createServer(async (req, res) => {
       });
       return streamSse(res, [textStart(envelope), completed()], { delayMs: 40 });
     }
+    if (scenario === "fill-chunked") {
+      // Real Zo streams the action envelope as MANY small text deltas (the
+      // e2e textStart blocks are single-chunk, which hid a leak: the panel
+      // tested each delta for action-JSON, and every delta after the first
+      // rendered as chat prose). Split mid-string like a real token stream.
+      const envelope = JSON.stringify({
+        actions: [
+          { type: "fill", selector: "#name", value: "Chunked E2E" },
+          { type: "fill", selector: "#email", value: "chunked@example.test" },
+          { type: "done", response: "Filled the two visible fields — review them and submit when ready." },
+        ],
+      });
+      const step = 14;
+      const deltas = [];
+      for (let i = 0; i < envelope.length; i += step) deltas.push(envelope.slice(i, i + step));
+      return streamSse(res, [textStart(deltas[0]), ...deltas.slice(1).map(textDelta), completed()], { delayMs: 15 });
+    }
+    if (scenario === "classic-form") {
+      // "Any form" hardening round: a RoboForm-shaped classic form. The mock
+      // streams the EXACT broken envelope Zo emitted live — key-first
+      // {"fill":{...}} actions, CSS \NN escapes for digit-leading names, and
+      // UNESCAPED double quotes inside the selector strings (invalid JSON).
+      // The extension must repair it, park it (password + card fields), and
+      // fill only after confirm. NOTE: hand-built string, NOT JSON.stringify —
+      // the invalidity is the scenario.
+      const broken =
+        '{"actions": [\n' +
+        '  {"fill": {"selector": "input[name="\\\\30 1___title"]", "value": "Mr."}},\n' +
+        '  {"fill": {"selector": "input[name="\\\\30 2frstname"]", "value": "Test"}},\n' +
+        '  {"fill": {"selector": "input[name="\\\\30 4lastname"]", "value": "User"}},\n' +
+        '  {"fill": {"selector": "input[name="\\\\33 0_user_id"]", "value": "testuser01"}},\n' +
+        '  {"fill": {"selector": "input[name="\\\\33 1password"]", "value": "T3st-Passw0rd!"}},\n' +
+        '  {"fill": {"selector": "select[name="\\\\34 0cc__type"]", "value": "Visa (Preferred)"}},\n' +
+        '  {"fill": {"selector": "input[name="\\\\34 1ccnumber"]", "value": "4111111111111111"}},\n' +
+        '  {"fill": {"selector": "select[name="\\\\34 2ccexp_mm"]", "value": "12"}},\n' +
+        '  {"fill": {"selector": "input[name="\\\\34 3cvc"]", "value": "123"}},\n' +
+        '  {"done": {"response": "Filled the fields with test data — review and submit when ready."}}\n' +
+        ']}';
+      return streamSse(res, [textStart(broken), completed()], { delayMs: 40 });
+    }
+    if (scenario === "app-section-1") {
+      // "Any form" round: builder-style form — target by QUESTION text (the
+      // fields share one placeholder); fill only the VISIBLE section, then
+      // done so the user reviews + advances (co-browse pacing).
+      const envelope = JSON.stringify({
+        reasoning: "This is a one-question-per-screen form; I'll fill the visible section and let the user review it.",
+        actions: [
+          { type: "fill_form", values: [
+            { target: "First name", value: "Ada Lovelace" },
+            { target: "Work email", value: "ada@example.dev" },
+          ] },
+          { type: "done", response: "Filled the visible section — review it and press OK when ready, then ask me to continue." },
+        ],
+      });
+      return streamSse(res, [textStart(envelope), completed()], { delayMs: 40 });
+    }
+    if (scenario === "app-section-2") {
+      const envelope = JSON.stringify({
+        reasoning: "The user advanced to section 2; filling the now-visible section.",
+        actions: [
+          { type: "fill_form", values: [
+            { target: "Share your website", value: "https://ada.example.dev" },
+            { target: "Tell us about you", value: "I build browser tooling." },
+          ] },
+          { type: "done", response: "Section 2 filled — review and submit when ready." },
+        ],
+      });
+      return streamSse(res, [textStart(envelope), completed()], { delayMs: 40 });
+    }
+    if (scenario === "fill-form") {
+      // #26: batch fill by human-facing cues; password/card values omitted by
+      // the prompt rule — the review card lists them as "left for you".
+      const envelope = JSON.stringify({
+        reasoning: "I will batch-fill the checkout form; secrets stay with the user.",
+        actions: [
+          { type: "fill_form", values: [
+            { target: "Email", value: "e2e@example.com" },
+            { target: "Password", value: "" },
+            { target: "Card number", value: "" },
+          ] },
+          { type: "done", response: "Filled what I could — review the card." },
+        ],
+      });
+      return streamSse(res, [textStart(envelope), completed()], { delayMs: 40 });
+    }
     if (scenario === "fill") {
       const envelope = JSON.stringify({
-        reasoning: "I will fill the name, email, and plan, then submit.",
+        reasoning: "Filling the form fields. The user will review and submit.",
         actions: [
           { type: "fill", selector: "#name", value: "E2E Tester" },
           { type: "fill", selector: "#email", value: "e2e@example.test" },
           { type: "fill", selector: "#plan", value: "pro" },
-          { type: "click", selector: "#submit-btn" },
-          { type: "done", response: "Form filled and submitted." },
+          { type: "done", response: "Form filled — review it and submit when ready." },
         ],
       });
       return streamSse(res, [textStart(envelope), completed()], { delayMs: 40 });

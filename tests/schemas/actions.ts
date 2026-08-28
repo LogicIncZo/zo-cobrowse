@@ -20,6 +20,20 @@ export const FillAction = z.object({
   value: z.string(),
 });
 
+// Batch form fill (#26): one action, N fields. `target` is a human-facing
+// cue (label text, aria-label, placeholder, name); `selector` is an optional
+// disambiguator. Preferred over N `fill` actions for 2+ fields.
+export const FillFormValue = z.object({
+  target: z.string().min(1),
+  value: z.string(),
+  selector: z.string().optional(),
+});
+
+export const FillFormAction = z.object({
+  type: z.literal("fill_form"),
+  values: z.array(FillFormValue).min(1),
+});
+
 export const ExtractAction = z.object({
   type: z.literal("extract"),
   selector: z.string(),
@@ -70,6 +84,7 @@ export const Action = z.discriminatedUnion("type", [
   NavigateAction,
   ClickAction,
   FillAction,
+  FillFormAction,
   ExtractAction,
   ScrollAction,
   WaitAction,
@@ -89,6 +104,7 @@ export const ACTION_TYPES = [
   "navigate",
   "click",
   "fill",
+  "fill_form",
   "extract",
   "scroll",
   "wait",

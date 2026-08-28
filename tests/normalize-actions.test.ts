@@ -153,9 +153,9 @@ describe("normalizeActions — robustness / non-conforming input", () => {
 });
 
 describe("ACTION_TYPE_NAMES", () => {
-  it("lists all seven executor action types", () => {
+  it("lists all eight executor action types", () => {
     expect(ACTION_TYPE_NAMES.sort()).toEqual(
-      ["click", "done", "extract", "fill", "navigate", "scroll", "wait"],
+      ["click", "done", "extract", "fill", "fill_form", "navigate", "scroll", "wait"],
     );
   });
 });
