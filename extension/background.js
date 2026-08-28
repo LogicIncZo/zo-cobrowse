@@ -204,6 +204,7 @@ const DEFAULTS = {
   zoActiveMode: 'cobrowse', // active Mode id (replaces personaMode + presets)
   zoAccessToken: '',
   enableScreenshots: true,  // global kill-switch; per-Mode tiers also gate capture
+  enableWriteAssist: true,  // textarea write-assist floating icon (content script)
   enabledMenus: {        // which context menu items are active
     page: true,
     selection: true,
@@ -246,13 +247,14 @@ function senderTabId(sender) {
 
 // ---- Init ----
 chrome.storage.sync.get(
-  ['zoApiUrl', 'zoModel', 'zoPersonaId', 'zoActiveMode', 'enableScreenshots', 'enabledMenus'],
+  ['zoApiUrl', 'zoModel', 'zoPersonaId', 'zoActiveMode', 'enableScreenshots', 'enableWriteAssist', 'enabledMenus'],
   (result) => {
     if (result.zoApiUrl) config.zoApiUrl = result.zoApiUrl;
     if (result.zoModel) config.zoModel = result.zoModel;
     if (result.zoPersonaId) config.zoPersonaId = result.zoPersonaId;
     if (result.zoActiveMode) config.zoActiveMode = result.zoActiveMode;
     if (result.enableScreenshots !== undefined) config.enableScreenshots = result.enableScreenshots;
+    if (result.enableWriteAssist !== undefined) config.enableWriteAssist = result.enableWriteAssist;
       if (result.enabledMenus) config.enabledMenus = { ...config.enabledMenus, ...result.enabledMenus };
   }
 );
@@ -276,6 +278,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   else if (changes.zoSpaceEndpoint?.oldValue && !changes.zoSpaceEndpoint?.newValue) config.zoSpaceEndpoint = undefined;
     if (changes.enabledMenus?.newValue) { config.enabledMenus = { ...config.enabledMenus, ...changes.enabledMenus.newValue }; recreateContextMenus(); }
   if (changes.enableScreenshots?.newValue !== undefined) config.enableScreenshots = changes.enableScreenshots.newValue;
+  if (changes.enableWriteAssist?.newValue !== undefined) config.enableWriteAssist = changes.enableWriteAssist.newValue;
 });
 
 // Open side panel on toolbar icon click (global scope — takes effect on every SW wake-up).
@@ -419,6 +422,7 @@ function sanitizedConfig() {
     zoPersonaId: config.zoPersonaId,
     zoActiveMode: config.zoActiveMode,
     enableScreenshots: config.enableScreenshots,
+    enableWriteAssist: config.enableWriteAssist,
     enabledMenus: config.enabledMenus,
     zoSpaceEndpoint: config.zoSpaceEndpoint,
     hasToken: !!config.zoAccessToken,
@@ -2292,6 +2296,9 @@ Read the skill's SKILL.md and follow its instructions.`;
 // call — never rotates the ambient zoConversationId), and returns the parsed
 // improved text. A 60s AbortController bounds long generations.
 async function enhanceText(request) {
+  if (config.enableWriteAssist === false) {
+    return { ok: false, error: 'Write assist is disabled in the extension options.' };
+  }
   if (!config.zoAccessToken) {
     return { ok: false, error: 'No access token configured. Save one in the extension options.' };
   }

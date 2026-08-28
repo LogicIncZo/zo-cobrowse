@@ -91,6 +91,16 @@
   "omnibox": {
     "keyword": "zo"
   },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "icons/icon.svg"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"
   }
