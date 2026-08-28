@@ -2308,6 +2308,7 @@ async function enhanceText(request) {
     instruction: req.instruction,
     field: req.field,
     page: req.page,
+    acceptsMarkdown: !!(req.field && req.field.markdown),
   });
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 60000);

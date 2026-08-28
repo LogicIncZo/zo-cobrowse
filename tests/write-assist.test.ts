@@ -58,11 +58,27 @@ describe("buildEnhancePrompt", () => {
   it("embeds the stable routing marker", () => {
     expect(buildEnhancePrompt(input())).toContain(WRITE_ASSIST_MARKER);
   });
-  it("bakes in the honest-copy + plain-text rules", () => {
+  it("bakes in the honest-copy rules", () => {
     const p = buildEnhancePrompt(input());
     expect(p).toMatch(/do NOT invent/i);
-    expect(p).toMatch(/ONLY the improved text/i);
     expect(p).toMatch(/first-person/i);
+  });
+  it("bans tools and narration, and mandates the tag protocol", () => {
+    const p = buildEnhancePrompt(input());
+    expect(p).toMatch(/do not use tools, run commands, or search/i);
+    expect(p).toContain("<write-assist>");
+    expect(p).toContain("</write-assist>");
+    expect(p).toMatch(/no narration/i);
+  });
+  it("plain fields forbid markdown; markdown-accepting fields welcome it", () => {
+    const plain = buildEnhancePrompt(input());
+    expect(plain).toMatch(/field is plain text/i);
+    expect(plain).toMatch(/no markdown, no headings, no bullet lists/i);
+    expect(plain).not.toMatch(/accepts Markdown/i);
+
+    const md = buildEnhancePrompt(input({ field: { markdown: true }, acceptsMarkdown: true }));
+    expect(md).toMatch(/accepts Markdown/i);
+    expect(md).not.toMatch(/field is plain text/i);
   });
   it("includes field label + placeholder when present", () => {
     const p = buildEnhancePrompt(input({
@@ -109,21 +125,27 @@ describe("parseEnhanceResponse", () => {
     expect(ParsedEnhanceSchema.safeParse(r).success).toBe(true);
     expect(r.text).toBe("improved text");
   });
-  it("strips a wrapping code fence", () => {
+  it("keeps ONLY tag content — narration outside the tags is intermediate thought, dropped", () => {
+    const r = parseEnhanceResponse(
+      'Let me quickly ground this in the data model before expanding.\n' +
+      '<write-assist>\nFinal answer for the field.\n</write-assist>\nDone — review it.',
+    );
+    expect(r.text).toBe("Final answer for the field.");
+  });
+  it("tag content preserves markdown when the field accepts it", () => {
+    const r = parseEnhanceResponse("<write-assist>## Heading\n- one\n- **two**</write-assist>");
+    expect(r.text).toBe("## Heading\n- one\n- **two**");
+  });
+  it("handles fence inside tags and narration outside", () => {
+    expect(parseEnhanceResponse('warm-up here\n<write-assist>```\nquoted body\n```</write-assist>').text).toBe("quoted body");
+  });
+  it("untagged replies fall back to trim/fence/quote stripping", () => {
     expect(parseEnhanceResponse("```\nLed a 6-month migration\n```").text).toBe("Led a 6-month migration");
-    expect(parseEnhanceResponse("```text\nbody\n```").text).toBe("body");
-  });
-  it("strips one pair of wrapping straight quotes", () => {
     expect(parseEnhanceResponse('"Led a migration"').text).toBe("Led a migration");
-  });
-  it("strips one pair of wrapping curly quotes", () => {
     expect(parseEnhanceResponse("\u201cLed a migration\u201d").text).toBe("Led a migration");
   });
   it("keeps inner quotes intact", () => {
     expect(parseEnhanceResponse('He said "ship it" and we did').text).toBe('He said "ship it" and we did');
-  });
-  it("handles fence + quotes together", () => {
-    expect(parseEnhanceResponse('```\n"quoted body"\n```').text).toBe("quoted body");
   });
   it("tolerates null/undefined/empty", () => {
     expect(parseEnhanceResponse(null).text).toBe("");

@@ -442,6 +442,7 @@
       label: nearestQuestion(el) || '',
       placeholder,
       maxLength: (!ce && typeof el.maxLength === 'number' && el.maxLength > 0) ? el.maxLength : null,
+      markdown: ce, // contenteditable editors (GitHub et al.) render Markdown; plain textareas don't
     };
   }
 

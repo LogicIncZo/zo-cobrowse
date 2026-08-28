@@ -4,11 +4,13 @@ import { z } from "zod";
 // (extension/lib/write-assist.js). The ENHANCE_TEXT message envelope itself is
 // passthrough in schemas/messages.ts; these validate the lib functions.
 
-/** Field metadata the content script gathers about the focused textarea. */
+/** Field metadata the content script gathers about the focused field. */
 export const EnhanceFieldSchema = z.object({
   label: z.string(),
   placeholder: z.string(),
   maxLength: z.number().nullable(),
+  /** Target renders Markdown (contenteditable editors); textareas don't. */
+  markdown: z.boolean().optional(),
 });
 
 /** Page cues (token-cheap: URL/title only, never DOM text). */

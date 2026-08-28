@@ -58,7 +58,8 @@ test.describe("write-assist (feature/textarea-fill)", () => {
         .poll(async () => h.site.evaluate(() => (document.getElementById("apply-result") as HTMLElement).dataset.proj))
         .toBe(ENHANCED);
 
-      // Wire contract: a one-shot enhance call, threadless (no conversation_id).
+      // Wire contract: a one-shot enhance call, threadless (no conversation_id),
+      // plain-text rule for a textarea (markdown NOT allowed).
       const asks = await recordedAsks();
       const enhance = asks.filter((r: any) => String(r.body?.input || "").includes("write-assist"));
       expect(enhance.length).toBeGreaterThanOrEqual(1);
@@ -66,6 +67,7 @@ test.describe("write-assist (feature/textarea-fill)", () => {
       expect(body.conversation_id).toBeUndefined();
       expect(body.input).toContain("Led migration of 40 dashboards to DuckDB");
       expect(body.input).toContain("Describe your project");
+      expect(body.input).toMatch(/field is plain text/i);
     } finally {
       await h.context.close();
     }
@@ -95,6 +97,13 @@ test.describe("write-assist (feature/textarea-fill)", () => {
       await pop.locator("button", { hasText: "Accept" }).click();
       await expect(rich).toHaveText(ENHANCED, { timeout: 10_000 });
       await expect(pop).toBeHidden({ timeout: 10_000 });
+
+      // CE fields accept markdown: the prompt says so (and never the plain rule).
+      const asks = await recordedAsks();
+      const enhance = asks.filter((r: any) => String(r.body?.input || "").includes("write-assist"));
+      const last = enhance[enhance.length - 1].body;
+      expect(last.input).toMatch(/accepts Markdown/i);
+      expect(last.input).not.toMatch(/field is plain text/i);
     } finally {
       await h.context.close();
     }

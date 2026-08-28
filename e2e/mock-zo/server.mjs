@@ -222,11 +222,16 @@ const server = http.createServer(async (req, res) => {
     // Write-assist one-shot (feature/textarea-fill): the in-page widget's
     // ENHANCE_TEXT handler calls /zo/ask NON-streaming and parses JSON
     // ({output}), so reply with a plain JSON body — not SSE. Routed on the
-    // stable write-assist marker baked into the enhance prompt.
+    // stable write-assist marker baked into the enhance prompt. The reply
+    // follows the prompt's tag protocol with narration outside the tags —
+    // the widget must preview ONLY the tag content.
     if (String(body.input || "").includes("write-assist")) {
       res.writeHead(200, { "content-type": "application/json", ...cors });
       return res.end(JSON.stringify({
-        output: "I led the migration of 40 dashboards to DuckDB, unifying our analytics stack and cutting p95 query times roughly in half.",
+        output: "Let me quickly ground this in the data model before expanding.\n" +
+          "<write-assist>" +
+          "I led the migration of 40 dashboards to DuckDB, unifying our analytics stack and cutting p95 query times roughly in half." +
+          "</write-assist>",
         conversation_id: "e2e-enhance-conv",
       }));
     }

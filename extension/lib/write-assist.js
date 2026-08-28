@@ -27,18 +27,22 @@ export function isEnhanceableField(info) {
 
 /**
  * Build the one-shot enhance prompt. Honest-copy by design: Zo may expand the
- * lead into a full answer but must not invent specifics the lead doesn't imply,
- * and must reply with ONLY plain text (it is written straight into a form
- * field). Field + page context are included as lightweight cues only.
+ * lead into a full answer but must not invent specifics the lead doesn't imply.
+ * The reply uses a TAG PROTOCOL — final text between <write-assist> tags,
+ * nothing outside — because Zo otherwise treats the call as a full agent turn
+ * (live-observed: a "Let me quickly ground this…" warm-up + a `cat` command
+ * before the answer, with the narration riding into the returned text). Tools
+ * are explicitly off: this is a field-scoped one-shot, not a research turn.
  *
  * @param {object} args
  * @param {string} [args.text]        the current textarea value (the lead)
  * @param {string} [args.instruction] optional one-line user instruction
- * @param {{label?:string,placeholder?:string,maxLength?:number|null}} [args.field]
+ * @param {{label?:string,placeholder?:string,maxLength?:number|null,markdown?:boolean}} [args.field]
  * @param {{url?:string,title?:string}} [args.page]
+ * @param {boolean} [args.acceptsMarkdown] target renders Markdown (contenteditable editors)
  * @returns {string} the prompt to send as `input`
  */
-export function buildEnhancePrompt({ text, instruction, field, page } = {}) {
+export function buildEnhancePrompt({ text, instruction, field, page, acceptsMarkdown } = {}) {
   const lead = String(text == null ? '' : text).trim();
   const instr = String(instruction == null ? '' : instruction).trim();
   const f = field || {};
@@ -57,8 +61,14 @@ export function buildEnhancePrompt({ text, instruction, field, page } = {}) {
   lines.push('Rules:');
   lines.push("- Keep the user's voice and first-person point of view.");
   lines.push('- Expand the lead into a full answer, but do NOT invent specific facts, numbers, names, or dates that the lead does not imply.');
-  lines.push('- Reply with ONLY the improved text. No markdown, no headings, no bullet lists, no preamble, and no surrounding quotes.');
-  if (maxLength) lines.push(`- Keep the result within ${maxLength} characters (the field's limit).`);
+  lines.push('- Work only from the draft and the context above — do not use tools, run commands, or search.');
+  lines.push(`- Put the final text for the field between <${WRITE_ASSIST_MARKER}> and </${WRITE_ASSIST_MARKER}> tags, and NOTHING outside the tags: no narration, no warm-ups ("Let me..."), no commentary.`);
+  if (acceptsMarkdown) {
+    lines.push('- The field accepts Markdown: headings, lists, bold, and links are welcome where they help.');
+  } else {
+    lines.push('- The field is plain text: no markdown, no headings, no bullet lists.');
+  }
+  if (maxLength) lines.push(`- Keep the final text within ${maxLength} characters (the field's limit).`);
   lines.push('');
   if (label || placeholder) {
     lines.push('Field being filled:');
@@ -84,14 +94,23 @@ export function buildEnhancePrompt({ text, instruction, field, page } = {}) {
 }
 
 /**
- * Normalize Zo's reply into bare text safe to write into a field: trim, drop a
- * wrapping code fence, and strip ONE wrapping pair of matching quotes (straight
- * or curly). Never strips inner quotes.
+ * Normalize Zo's reply into bare field text. With the tag protocol, anything
+ * OUTSIDE <write-assist>…</write-assist> is intermediate agent narration
+ * (thought warm-ups, tool summaries) and is dropped; untagged replies fall
+ * back to trim + strip a wrapping code fence and ONE wrapping quote pair
+ * (never inner quotes).
  * @param {string} raw
  * @returns {{text:string}}
  */
 export function parseEnhanceResponse(raw) {
   let t = String(raw == null ? '' : raw).trim();
+  const openTag = `<${WRITE_ASSIST_MARKER}>`;
+  const closeTag = `</${WRITE_ASSIST_MARKER}>`;
+  const open = t.indexOf(openTag);
+  if (open !== -1) {
+    const close = t.lastIndexOf(closeTag);
+    if (close > open) t = t.slice(open + openTag.length, close).trim();
+  }
   const fence = t.match(/^```[a-zA-Z0-9_-]*\s*\n?([\s\S]*?)\n?\s*```$/);
   if (fence) t = String(fence[1] || '').trim();
   if (t.length >= 2) {

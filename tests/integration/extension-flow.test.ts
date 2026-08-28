@@ -660,7 +660,12 @@ describe("write-assist ENHANCE_TEXT round-trip (content → background → Zo)",
       if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
       const input = req.body && req.body.input != null ? String(req.body.input) : "";
       if (input.includes("write-assist")) {
-        return jsonResponse({ output: "ENHANCED BY ZO", conversation_id: "conv_enhance_x" });
+        // Narration + tagged final text, mirroring Zo's live agent-turn shape —
+        // the popover must preview ONLY the tag content.
+        return jsonResponse({
+          output: "Let me quickly ground this in the data model before expanding.\n<write-assist>ENHANCED BY ZO</write-assist>\nRan command: cat AGENTS.md",
+          conversation_id: "conv_enhance_x",
+        });
       }
       return sseResponse(zoSseText({ text: "It is a test page." }));
     });
@@ -702,6 +707,8 @@ describe("write-assist ENHANCE_TEXT round-trip (content → background → Zo)",
     expect(enhanceReqs.length).toBeGreaterThanOrEqual(1);
     const req = enhanceReqs[enhanceReqs.length - 1];
     expect(req.body.conversation_id).toBeUndefined();
+    expect(req.body.input).toContain("<write-assist>");       // tag protocol shipped
+    expect(req.body.input).toMatch(/do not use tools/i);      // one-shot, not an agent turn
     expect(req.body.input).toContain("Led migration of 40 dashboards");
     expect(req.body.input).toContain("Describe your project");
     expect(req.headers.authorization).toBe(`Bearer ${MOCK_ZO_TOKEN}`);

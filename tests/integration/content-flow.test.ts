@@ -351,7 +351,7 @@ describe("content.js — write-assist widget", () => {
     expect(sent[0]).toMatchObject({
       type: "ENHANCE_TEXT",
       text: "Led migration of 40 dashboards to DuckDB",
-      field: { label: "Describe your project", placeholder: "Tell us about a project", maxLength: 500 },
+      field: { label: "Describe your project", placeholder: "Tell us about a project", maxLength: 500, markdown: false },
       page: { url: "https://jobs.example.test/apply", title: "Job Application" },
     });
     // result state previews the improved text with Accept/Retry
@@ -454,10 +454,12 @@ describe("content.js — write-assist widget", () => {
     [...pop.querySelectorAll("button")].find((b: any) => b.textContent === "Enhance").click();
     await tick();
     await tick();
-    // Lead + placeholder came from the contenteditable (aria-placeholder, not .placeholder).
+    // Lead + placeholder came from the contenteditable (aria-placeholder, not .placeholder);
+    // CE fields flag Markdown acceptance.
     expect(sent[0].text).toBe("Led migration of 40 dashboards");
     expect(sent[0].field.placeholder).toBe("Type your description here...");
     expect(sent[0].field.maxLength).toBeNull();
+    expect(sent[0].field.markdown).toBe(true);
     // Accept writes back through the textContent fallback (happy-dom has no
     // execCommand; real Chromium uses the execCommand pipeline) + fires input.
     [...pop.querySelectorAll("button")].find((b: any) => b.textContent === "Accept").click();
