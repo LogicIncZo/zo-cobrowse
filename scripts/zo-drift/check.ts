@@ -101,10 +101,13 @@ async function main(): Promise<number> {
     report.findings = findings;
 
     const hard = findings.filter((f) => f.severity === 'hard').length;
-    console.log('drift check: ' + findings.length + ' finding(s), ' + hard + ' hard');
     if (jsonOut) {
+      // stdout carries ONLY the report so `> drift-report.json` is valid JSON;
+      // diagnostics go to stderr.
+      console.error('drift check: ' + findings.length + ' finding(s), ' + hard + ' hard');
       console.log(JSON.stringify(report, null, 2));
     } else {
+      console.error('drift check: ' + findings.length + ' finding(s), ' + hard + ' hard');
       printSummary(report);
     }
     return hard > 0 ? 1 : 0;
