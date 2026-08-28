@@ -353,6 +353,7 @@
 
   const WA_CSS = `
     :host { all: initial; }
+    [hidden] { display: none !important; }
     .zo-wa-icon {
       position: fixed; display: none; width: ${WA_ICON_BOX}px; height: ${WA_ICON_BOX}px;
       padding: 2px; box-sizing: border-box; align-items: center; justify-content: center;
