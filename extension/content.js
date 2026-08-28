@@ -497,15 +497,33 @@
     if (waIcon) waIcon.style.display = 'none';
   }
 
+  /** Anchor the popover INSIDE the field's own box whenever the field is tall
+   *  enough (bottom-aligned, near the icon) — it then never covers page
+   *  content outside the field and never extends past the viewport, so opening
+   *  it forces no scroll. Small fields fall back to below (flipping above,
+   *  viewport-clamped). */
   function waPositionPop() {
     if (!waActiveEl || !waPop) return;
     const rect = waActiveEl.getBoundingClientRect();
     const pw = waPop.offsetWidth || 340;
     const ph = waPop.offsetHeight || 200;
-    let top = rect.bottom + 8;
-    let left = rect.left;
-    if (top + ph > window.innerHeight - 8) top = Math.max(8, rect.top - ph - 8);
-    if (left + pw > window.innerWidth - 8) left = Math.max(8, window.innerWidth - pw - 8);
+    const m = 8; // inset from the field's edges / viewport
+    let top;
+    let left;
+    if (rect.height >= ph + m * 2) {
+      // Inside the field, bottom-aligned; clamp to what's actually visible so
+      // a field taller than the viewport keeps the popover fully on screen.
+      top = rect.bottom - m - ph;
+      if (top + ph > window.innerHeight - m) top = window.innerHeight - m - ph;
+      if (top < rect.top + m) top = rect.top + m;
+      left = rect.left + m;
+    } else {
+      top = rect.bottom + m;
+      left = rect.left;
+      if (top + ph > window.innerHeight - m) top = Math.max(m, rect.top - ph - m);
+    }
+    if (left + pw > window.innerWidth - m) left = Math.max(m, window.innerWidth - pw - m);
+    if (top < m) top = m;
     waPop.style.top = top + 'px';
     waPop.style.left = left + 'px';
   }
@@ -514,9 +532,8 @@
     if (!waReady || !waActiveEl) return;
     if (waHideTimer) { clearTimeout(waHideTimer); waHideTimer = null; }
     waView = { mode: 'compose', result: '', error: '', instruction: waView.instruction || '' };
+    waPop.hidden = false; // shown before render so waRender can measure + position
     waRender();
-    waPop.hidden = false;
-    waPositionPop();
   }
 
   function waClose() {
@@ -612,6 +629,9 @@
       foot.appendChild(retry);
       waPop.appendChild(foot);
     }
+    // State renders change the popover's height (compose → loading → result) —
+    // re-anchor so it stays inside the field.
+    if (!waPop.hidden) waPositionPop();
   }
 
   function waEnhance() {

@@ -22,17 +22,28 @@ test.describe("write-assist (feature/textarea-fill)", () => {
       const icon = h.site.locator(".zo-wa-icon");
       await expect(icon).toBeVisible({ timeout: 10_000 });
 
-      // Click the icon → popover opens in the compose state.
+      // Click the icon → popover opens in the compose state, INSIDE the
+      // field's box (large field) — never past the field's bottom edge, so
+      // opening it forces no scroll.
       await icon.click();
       const pop = h.site.locator(".zo-wa-pop");
       await expect(pop).toBeVisible({ timeout: 10_000 });
       await expect(pop.locator(".zo-wa-instr")).toBeVisible();
+      const inFieldBox = async () => {
+        const f = await ta.boundingBox();
+        const p = await pop.boundingBox();
+        expect(p.y).toBeGreaterThanOrEqual(f!.y + 4);
+        expect(p.y + p!.height).toBeLessThanOrEqual(f!.y + f!.height + 4);
+      };
+      await inFieldBox();
 
-      // Enhance → loading → result preview (the mock's improved text).
+      // Enhance → loading → result preview (the mock's improved text). The
+      // result state is taller — must re-anchor and stay inside the field.
       await pop.locator("button", { hasText: "Enhance" }).click();
       const result = pop.locator(".zo-wa-result");
       await expect(result).toBeVisible({ timeout: 20_000 });
       await expect(result).toHaveText(ENHANCED);
+      await inFieldBox();
 
       // Nothing written to the page yet — preview gates the fill.
       await expect(ta).toHaveValue("Led migration of 40 dashboards to DuckDB");

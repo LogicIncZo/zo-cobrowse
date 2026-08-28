@@ -47,7 +47,7 @@ This is the first **page-injected UI** in the repo: content.js today never creat
 
 Icon: 16–18px Zo mark, offset inward from the textarea's bottom-right corner so it never covers usable area; `tabindex=0`, Enter opens the popover (keyboard parity); tooltip "Enhance with Zo".
 
-Popover (same shadow root, anchored near the textarea, clamped to the viewport):
+Popover (same shadow root): anchored **inside the field's own box** (bottom-aligned, near the icon) whenever the field is tall enough to contain it — it then never covers page content outside the field and never extends past the viewport, so opening it forces no scroll (owner request: "keep the popup inside the textarea so as to not make any extra scroll"). Fields taller than the viewport clamp the popover to the visible part; small fields fall back to below-the-field (flipping above, viewport-clamped). Re-anchored after every state render (compose → loading → result change the height) and on scroll/resize. States:
 1. **Compose state** — truncated preview of the lead text, a one-line optional instruction input, **Enhance** button, ✕.
 2. **Loading state** — spinner + "Zo is writing…", cancel (aborts the fetch via AbortController).
 3. **Result state** — scrollable preview of the improved text, **Accept** / **Retry** / ✕.

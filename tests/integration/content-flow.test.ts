@@ -465,4 +465,43 @@ describe("content.js — write-assist widget", () => {
     expect(ce.textContent).toBe("IMPROVED RESULT");
     expect(events).toContain("input:IMPROVED RESULT");
   });
+
+  it("anchors the popover inside a large field; small fields keep the below fallback", async () => {
+    const win = makeWindow();
+    const { chromeObj } = makeWidgetChrome();
+    loadContentScript(win, chromeObj);
+    await tick();
+    const ta = win.document.querySelector("#proj");
+
+    // Large field (taller than the popover): bottom-aligned INSIDE the rect.
+    ta.getBoundingClientRect = () => ({ width: 500, height: 600, top: 50, left: 20, right: 520, bottom: 650, x: 20, y: 50 });
+    ta.focus();
+    await tick();
+    const root = shadow(win);
+    root.querySelector(".zo-wa-icon").click();
+    await tick();
+    let pop = root.querySelector(".zo-wa-pop");
+    let top = parseFloat(pop.style.top);
+    expect(top).toBeGreaterThanOrEqual(50 + 8);      // inside the field's top edge
+    expect(top + 200).toBeLessThanOrEqual(650 - 8);  // bottom-aligned within the field (happy-dom ph fallback = 200)
+
+    // Re-anchor on state render (result is taller than compose): still inside.
+    [...pop.querySelectorAll("button")].find((b: any) => b.textContent === "Enhance").click();
+    await tick();
+    await tick();
+    top = parseFloat(pop.style.top);
+    expect(top).toBeGreaterThanOrEqual(50 + 8);
+    expect(top + 200).toBeLessThanOrEqual(650 - 8);
+
+    // Small field: popover cannot fit inside — below-the-field fallback.
+    [...pop.querySelectorAll("button")].find((b: any) => b.textContent === "Accept").click();
+    await tick();
+    ta.getBoundingClientRect = () => ({ width: 120, height: 32, top: 0, left: 0, right: 120, bottom: 32, x: 0, y: 0 });
+    ta.focus();
+    await tick();
+    root.querySelector(".zo-wa-icon").click();
+    await tick();
+    pop = root.querySelector(".zo-wa-pop");
+    expect(parseFloat(pop.style.top)).toBe(32 + 8); // rect.bottom + 8
+  });
 });
