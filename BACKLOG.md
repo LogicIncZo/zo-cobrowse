@@ -1,6 +1,6 @@
 # Zo Co-browse — Backlog
 
-> Updated 2026-08-20 — v0.1.0 released 2026-08-19; **0.2.0 planned** (see the 🎯 section).
+> Updated 2026-08-28 — **v0.2.0 releasing** (form-fill #26 shipped; see the 🎯 section).
 > All QA-report findings from the 2026-08-08 round are **resolved**
 > (see `QA_REPORT.md` remediation log). Remaining items are feature work.
 > An **infrastructure round** (2026-08-09) added the loop-engineering gate, CI on

@@ -7,6 +7,83 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.2.0] - 2026-08-28
+
+Form filling (#26) — the co-browse contract: **Zo fills, you review and
+submit.** Everything in this release was driven against live target forms
+(a Typeform application, a RoboForm 30-field test page) rather than invented
+fixtures, so "any form" is the actual test bar.
+
+### Added — batch fill_form + confirm-before-fill (#26)
+- **`fill_form {values:[{target,value}]}`** — one action, N fields, resolved
+  by human-facing cues (label text → aria-label/labelledby → placeholder →
+  name/id → optional CSS selector passthrough) in the content script and the
+  executeScript fallback; one timeline card with per-field ✓/✗.
+- **Two-phase sensitivity gate** — before any fill batch executes, the
+  background re-captures the LIVE form (`get_form` shape) and runs
+  `lib/formfill.js#isSensitiveForm` (password/card/CVV/expiry/identity fields
+  or login/checkout/payment/account URLs; never the model's self-assessment).
+  Sensitive → the fill **parks** behind an editable review card: one row per
+  field, secret rows "left for you 🔑" with proposed values never round-tripped
+  (stripped again on confirm), user edits values, then Fill / Cancel. Benign
+  forms execute immediately; a batch-level pre-flight keeps it to one capture
+  and one card per page regardless of how many fill actions the model emits.
+- **Submit backstop** — on pages the gate flags, clicks on a form's
+  submit/pay control are refused (armed for click-only batches too); the
+  prompt rules say the same thing: fill, then `done` — never auto-submit on
+  ANY form, not just sensitive ones.
+- **Normal responses for action turns** — the raw action-JSON envelope never
+  renders as chat prose: while streaming, a "_Preparing actions…_" placeholder
+  shows (guard now tests the accumulated stream text, so multi-delta envelopes
+  can't leak chunk-by-chunk); at completion the bubble renders Zo's `done`
+  response as normal markdown above the action timeline.
+
+### Added — works on builder-style forms (the "any form" round)
+- **Question-aware capture**: every captured field carries its question text
+  (`formFields[].question`) on all three capture paths — explicit label/aria
+  first, then the title-above-field convention live-probed on Typeform (plain
+  div, input wrapper's previous sibling). `compactForm` renders it into the
+  prompt and the `get_form` pull: `[input#uuid type=text "Type your answer
+  here..."] — First name*`.
+- **Question-scoped resolution** (`resolveByQuestion`): fill targets match
+  question text (normalized: case, whitespace, trailing `*`/`:`) and resolve
+  to the field under that title — forms where every input shares one
+  placeholder and carries no label/name now fill correctly.
+- **Viewport preference** (`pickVisible`): equal cues resolve to the field the
+  user can see — the current section of a one-question-per-screen form.
+- **Section-by-section pacing**: on multi-screen forms Zo fills only the
+  visible section per turn and stops; the user reviews, advances themselves,
+  and asks Zo to continue.
+- **Select fills by visible option text**: Zo sends "Visa (Preferred)"; the
+  executors fall back to text matching when the value attribute doesn't match.
+
+### Fixed — live-form hardening
+- Playwright-style `:has-text()`/`:text()` selectors in click actions resolve
+  by button/link text instead of throwing `querySelector` SyntaxErrors.
+- Zo's occasionally-invalid action JSON (unescaped double quotes inside CSS
+  attribute selectors — `input[name="\30 x"]`) is repaired in a parse
+  fallback instead of degrading the whole envelope to plain-text chat.
+- Key-first action shapes (`{"fill":{...}}`) normalize alongside `type`-first.
+- Secrets proposed by the model despite the prompt rule are stripped from the
+  confirmed batch (live-observed; the review card's "left for you" is now
+  enforced, not just displayed).
+
+### Docs / planning
+- 0.2.0 planning suite: competitive analysis (Comet/Dia/Operator/Fellou/
+  Atlas), design specs + implementation plans for #26 form-fill, #19
+  multi-tab contexts, #10 cross-tab actions, #29 page monitoring.
+
+### Tests / QA
+- **Suite: 891 tests / 0 fail (39 files, 2356 expect calls) + 24 Playwright
+  E2E tests across 14 spec files (2 demo-gated).** New e2e coverage:
+  sensitive-checkout review card (park → edit → confirm, secrets untouched),
+  builder-style any-form (question targeting + pacing), RoboForm-class
+  classic form (digit-leading names, broken JSON repair, gate → review →
+  fill → select-by-text → no submit), and multi-delta envelope streaming
+  (normal prose response, zero JSON in chat).
+- Demo recordings: `demo-fill-form` (review card → edit → confirm, panel +
+  page stitched) joins `demo-open-all` (both `ZO_DEMO=1`-gated).
+
 ## [v0.1.0] - 2026-08-19
 
 First minor bump: everything since v0.0.2 — chat tabs, cold-start research
