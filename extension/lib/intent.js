@@ -154,7 +154,13 @@ export function shouldDowngradeToJsonDisabled(mode, query) {
  * @returns {boolean}
  */
 export function looksLikeActionJson(text) {
-  const t = typeof text === 'string' ? text.trimStart() : '';
+  let t = typeof text === 'string' ? text.trimStart() : '';
+  if (!t) return false;
+  // Cobrowse models sometimes fence the envelope (```json …). A fenced blob
+  // starts with backticks, so strip the opening fence before the { test.
+  if (t.startsWith('```')) {
+    t = t.replace(/^```[a-zA-Z0-9]*\s*\n?/, '');
+  }
   if (!t.startsWith('{')) return false;
   // Reached the "actions" key while still inside the opening object. Matches
   // both partial (`{"actions":`) and complete (`{"actions":[...]}`) envelopes.

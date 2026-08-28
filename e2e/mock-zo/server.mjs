@@ -80,6 +80,7 @@ function pickScenario(input) {
   if (q.includes("schema")) return "pull-form";
   if (q.includes("checkout")) return "fill-form";
   if (q.includes("classic form")) return "classic-form";
+  if (q.includes("chunked")) return "fill-chunked";
   if (q.includes("application")) return "app-section-1";
   if (q.includes("continue") || q.includes("next section")) return "app-section-2";
   if (q.includes("fill")) return "fill";
@@ -236,6 +237,23 @@ const server = http.createServer(async (req, res) => {
         ],
       });
       return streamSse(res, [textStart(envelope), completed()], { delayMs: 40 });
+    }
+    if (scenario === "fill-chunked") {
+      // Real Zo streams the action envelope as MANY small text deltas (the
+      // e2e textStart blocks are single-chunk, which hid a leak: the panel
+      // tested each delta for action-JSON, and every delta after the first
+      // rendered as chat prose). Split mid-string like a real token stream.
+      const envelope = JSON.stringify({
+        actions: [
+          { type: "fill", selector: "#name", value: "Chunked E2E" },
+          { type: "fill", selector: "#email", value: "chunked@example.test" },
+          { type: "done", response: "Filled the two visible fields — review them and submit when ready." },
+        ],
+      });
+      const step = 14;
+      const deltas = [];
+      for (let i = 0; i < envelope.length; i += step) deltas.push(envelope.slice(i, i + step));
+      return streamSse(res, [textStart(deltas[0]), ...deltas.slice(1).map(textDelta), completed()], { delayMs: 15 });
     }
     if (scenario === "classic-form") {
       // "Any form" hardening round: a RoboForm-shaped classic form. The mock

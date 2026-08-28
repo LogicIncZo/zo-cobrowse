@@ -3394,20 +3394,38 @@ function handleStreamMessage(msg) {
       if (!streamSession.active) return;
       // Co-browse streams the action envelope as text deltas: the raw JSON
       // accumulates here. Never render it as prose; show a placeholder instead.
-      const isActionJson = looksLikeActionJson(msg.text);
+      // The test runs on the ACCUMULATED text — testing the delta alone leaks
+      // every chunk after the first (real Zo streams many small deltas; only
+      // chunk 1 starts with '{').
+      streamSession.fullText += safeText(msg.text);
+      const isActionJson = looksLikeActionJson(streamSession.fullText);
       if (streamIsBackground()) {
         // Background chat: accumulate only; the bubble re-creates on switch-back.
-        streamSession.fullText += safeText(msg.text);
         break;
       }
       if (!streamSession.msgEl) {
         const thinking = msgsEl.querySelector('.msg-thinking');
         if (thinking) thinking.remove();
         streamSession.msgEl = addMessageDOM('assistant', isActionJson ? '_Preparing actions…_' : '', { streaming: true });
+        if (isActionJson) {
+          // Tag the placeholder so STREAM_DONE can swap it for the done response.
+          // The markdown renderer may leave the underscore text as a BARE text
+          // node (no <p>/<em>), so wrap matching text nodes in a tagged span.
+          const phBody = streamSession.msgEl.querySelector('.msg-body');
+          const hits = [...(phBody?.childNodes || [])].filter((n) => /Preparing actions/.test(n.textContent || ''));
+          for (const n of hits) {
+            if (n.nodeType === 3) { // TEXT_NODE — wrap it
+              const span = document.createElement('span');
+              span.className = 'msg-actions-placeholder';
+              span.textContent = n.textContent;
+              phBody.replaceChild(span, n);
+            } else {
+              n.classList?.add('msg-actions-placeholder');
+            }
+          }
+        }
         startStreamTimer(streamSession.msgEl);
-        streamSession.fullText = safeText(msg.text);
       } else {
-        streamSession.fullText += safeText(msg.text);
         const body = streamSession.msgEl.querySelector('.msg-body');
         if (body && !isActionJson) {
           // During streaming: append plain text for immediate feedback.
@@ -3512,11 +3530,18 @@ function handleStreamMessage(msg) {
       if (streamSession.msgEl) {
         const body = streamSession.msgEl.querySelector('.msg-body');
         if (body) {
+          // For action turns the accumulated stream text is the raw JSON
+          // envelope — render the done response as normal prose instead (and
+          // swap the _Preparing actions…_ placeholder for it).
+          const leakedJson = looksLikeActionJson(streamSession.fullText);
+          const finalText = leakedJson ? responseText : streamSession.fullText;
           const streamingTexts = body.querySelectorAll('.msg-streaming-text');
-          if (streamingTexts.length > 0 && streamSession.fullText) {
+          const placeholders = body.querySelectorAll('.msg-actions-placeholder');
+          if (finalText && (streamingTexts.length > 0 || placeholders.length > 0)) {
             // Replace all streaming text spans with a single fully-rendered markdown block
-            const renderedHtml = markdownToHtml(streamSession.fullText);
+            const renderedHtml = markdownToHtml(finalText);
             streamingTexts.forEach(el => el.remove());
+            placeholders.forEach(el => el.remove());
             body.insertAdjacentHTML('beforeend', renderedHtml);
           }
         }
