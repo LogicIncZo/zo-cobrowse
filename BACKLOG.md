@@ -1,6 +1,6 @@
 # Zo Co-browse — Backlog
 
-> Updated 2026-08-28 — **v0.2.0 releasing** (form-fill #26 shipped; see the 🎯 section).
+> Updated 2026-08-28 — **v0.2.0 RELEASED** (tag `v0.2.0`, 2026-08-28; form-fill #26 shipped — see the 🎯 section).
 > All QA-report findings from the 2026-08-08 round are **resolved**
 > (see `QA_REPORT.md` remediation log). Remaining items are feature work.
 > An **infrastructure round** (2026-08-09) added the loop-engineering gate, CI on
@@ -8,13 +8,13 @@
 
 ## Current state
 
-- **Branches:** `Rewritet` merged → `main` (fast-forward, 22 commits); working tree clean
-- **Tests:** ✅ **534 pass / 0 fail** (24 files, 1381 expect() calls)
+- **Branches:** git-flow (`dev` integration, `main` releases); local branch tree pruned 2026-08-28 after v0.2.0 (15 merged/stale branches deleted)
+- **Tests:** ✅ **855 pass / 0 fail** (37 files, 2234 expect() calls) + 19 Playwright e2e across 10 specs
 - **Loop engineering:** `bun run verify` gate + committed hard-gate pre-commit hook (`bun run setup-hooks` to install)
 - **CI/CD:** CI runs on every branch push + PR to `main` (tests + transpile + release checks + zip artifact); `.github/workflows/release.yml` publishes `v*` tag releases (used for v0.0.2)
 - **Streaming:** hardened end-to-end (sessionId isolation, port-disconnect safety, retry correctness, 60s liveness timeout)
 - **P0/P1/P2/P3 QA findings:** all closed (P2-31 deferred by design — see below)
-- **Release:** ✅ **v0.1.0** tagged + GitHub release published (2026-08-19). Next milestone: **v0.2.0** (section below); Chrome Web Store submission (#11) stays its own 0.2.x milestone
+- **Release:** ✅ **v0.2.0** tagged + released (2026-08-28; v0.1.0 was 2026-08-19). Next milestone: **v0.2.1** — candidate slate per the 0.2.0 build order: **#19 → #10 → #29**; Chrome Web Store submission (#11) stays its own 0.2.x milestone
 
 ## ✅ Completed this round
 
@@ -66,6 +66,8 @@ Scope chosen in-session ("Everything" option) against a full competitive scan of
 
 **Build order: #19 → #26 → #10 → #29** (each independently shippable; #29's bridge consumes the other three). Deferred past 0.2.0 with rationale (analysis §5): memory, voice, post-hoc undo, payment rails, #15/#18 shared sessions, cloud/browser-closed checks (FCM), #20, #21, #11.
 
+**Status 2026-08-28 (v0.2.0 shipped):** #26 **DONE** (batch `fill_form` + review card + submit backstop + no-action-click-after-fill rule; e2e 11–15 + demo). **#19, #10, #29 carry into 0.2.x** — build order unchanged, #19 first.
+
 ## 🧪 Proposed 2026-08-15 — brainstormed, pending triage
 
 > Design-exploration outcomes (approach already chosen, not yet spec'd or built).
@@ -80,3 +82,17 @@ Scope chosen in-session ("Everything" option) against a full competitive scan of
 | #26 | Form filling: batch + robust + confirm | **DONE 2026-08-21 (`feature/form-fill`)**: batch `fill_form {values:[{target,value,selector?}]}` action resolved by human-facing cues (label text → aria-label/labelledby → placeholder → name/id → optional CSS selector) in content.js + the executeScript fallback; two-phase sensitivity gate in the background (`lib/formfill.js#isSensitiveForm` over a live `get_form`-shape pre-flight capture — password/card/CVV/expiry fields or login/checkout/payment/account URLs) parks sensitive fills behind an **editable review card** (secret rows = "left for you 🔑", values never round-tripped; confirm re-sends `confirmed:true` with edits spliced in; cancel drops with a note); **submit backstop** refuses clicks on a form's submit/pay control on pages the gate flagged (prompt rule + hard check — confirming a FILL never authorizes a SUBMIT); prompt rules teach fill_form + no-secrets + no-submit. One timeline card with per-field ✓/✗. Coverage: unit (`tests/formfill.test.ts`), integration (gate park/confirm/backstop in background-flow; review card in extension-flow), Playwright e2e (`e2e/11-fill-form.spec.ts` — park → edit → confirm → page filled, secrets untouched; cancel path). **"Any form" round (2026-08-21, same PR):** live-probed a real Typeform (inputs carry no label/name and share one placeholder; question text = a plain div above each field; OK outside any form) → generic question-aware capture (`formFields[].question` on all 3 capture paths via nearestQuestion — label/aria then title-above-field sibling climb), question-scoped `resolveByQuestion` fallback in both executors (normalized exact cue match → shared-wrapper field), viewport preference when equal cues match several fields, and the co-browse pacing rule (one visible section per turn, user reviews + advances). e2e: `e2e/12-any-form.spec.ts`. Layer (1) of the original proposal — the `get_form` pull — shipped earlier with #24. | **Saved profiles/identities explicitly out of scope** (owner decision 2026-08-15). Design: `docs/superpowers/specs/2026-08-20-form-fill-design.md` + plan: `docs/superpowers/plans/2026-08-20-form-fill.md` (PR #35). |
 | #27 | Cold-start research → "open all" tabs | **SHIPPED 2026-08-15 — see the DONE row in the table above** (kept here only as the original proposal text). | Superseded by the feature-backlog row. |
 | #28 | Composer reference pickers: `/` skills + `%` Zo files | **DONE 2026-08-18 (`feature/composer-pickers`)**: both pickers ship over Zo's **live MCP server** (`api.zo.computer/mcp` — discovered 2026-08-18, superseding the "no listing API" constraint below). `/` enumerates `/home/workspace/Skills` (SKILL.md frontmatter → name/description) via one `bash` round-trip (`LIST_SKILLS`, 5-min cache); selecting arms a send-once ⚡ chip that rides the turn as a `## Skills to Run` prompt section (Zo reads its own SKILL.md server-side). `%` browses the workspace via validated `ls -1F` calls (`LIST_WORKSPACE_DIR`, dirs navigate, `⬆ ..` climbs, paths confined to `/home/workspace` — traversal rejected client-side); picked files ride as a paths-only `## Referenced Files` manifest. Chips preview in the prompt inspector; `lib/mcp.js` + `lib/pickers.js` are the pure halves. Original proposal text: mimic Zo's UI reference affordances reusing the `@` tab-autocomplete machinery as the template; `@` stays tabs; Zo-UI's `@`-files maps to `%`. | **Follow-up not built:** the optional `read_file {path}` pull action (would mirror `read_tab` through #24's generalized pull loop). **MCP facts (live-verified):** server `zo-tools v1.0.0`, 96 tools, initialize → `mcp-session-id` header → tools/call; `list_directory` recurses + truncates at 1000 entries (why the pickers use `bash`); the `bash` tool wraps stdout in a Python-repr `CmdResult(...)`; **no skills-listing tool** — skills are folders, `/root/.agents/skills` is other-agent CLIs (excluded by owner decision). |
+
+## 🧪 Proposed 2026-08-28 — external SDK evaluation (zocomputer-ts / zocomputer-tools), pending triage
+
+Evaluated 2026-08-28 (repo audit of both). **Decision: neither becomes a runtime dependency** — our hand-rolled transport stays. Both are unofficial single-maintainer repos by EthanThatOneKid; zocomputer-tools was spun out of zocomputer-ts PR #3 (originally contributed by @srikanthlogic — i.e. this project's maintainer — renamed from `zocomputer-mcp-ts` on 2026-08-27).
+
+**[zocomputer-ts](https://github.com/EthanThatOneKid/zocomputer-ts)** (npm `zocomputer` v0.1.5, MIT) — unofficial TS client regenerated nightly from Zo's public OpenAPI spec (@hey-api/openapi-ts); covers `/zo/ask`, `/models/available`, `/models/catalog`, `/personas/available`. Zero-dep pure-ESM browser-safe fetch (MV3-compatible).
+- *Pros:* nightly spec-sync tracks API drift; typed `/models/catalog` (media capabilities w/ `mime_types`, reasoning levels/ranges, `deprecation_map`) is directly relevant to `lib/vision.js`; custom-fetch/interceptor/async-auth escape hatches fit our storage-backed token.
+- *Cons:* **`zoAsk()` cannot stream** — the spec declares only `application/json`, so `stream:true` silently buffers the whole SSE stream into one string; real streaming requires the generic untyped `client.sse.post()` (no Zo envelope types, no `x-conversation-id` surfacing). Adopting it would forfeit our QA-hardened streaming layer (sessionId isolation, `isRetriableStreamError`/`STREAM_RECONNECT`, `safePost`, 60s liveness — see `QA_REPORT.md`). No MCP coverage; no action-envelope concept; 2 stars, no tests, no CI beyond the nightly publish.
+- *Verdict:* **reference-only** — consult its generated `types.gen.ts` as documentation when the catalog shape matters; do not import.
+
+**[zocomputer-tools](https://github.com/EthanThatOneKid/zocomputer-tools)** (v0.1.0, **not yet on npm** — issue #8 tracks publishing) — hand-written typed MCP client for `api.zo.computer/mcp` (JSON-RPC 2.0 streamable HTTP via `@modelcontextprotocol/sdk`); 25 commits in its first week, nightly-sync workflow refreshing the tool inventory from the live server.
+- *Pros:* **`openapi/mcp-tools.json` is the standout asset** — a nightly-refreshed snapshot of all 93 Zo MCP tool `inputSchema`s (`bash`, `read_file`, `list_directory`, …), consumable as pure data (test fixtures, argument validation, prompt/tool-docs generation). Its nightly-sync commits double as a **free Zo-API drift canary** for our `lib/mcp.js` (live-verified 2026-08-18, but blind to server-side change). Real quality: 14 offline tests + golden files, CI, TypeDoc; useful idioms to crib (`listTools` cursor pagination, isError-as-result, OAuth 2.1+PKCE provider if we ever outgrow static tokens).
+- *Cons:* as a dependency it's a poor MV3 fit — Node ≥22 engines, GitHub-only install (git on PATH + `prepare`-hook TS compile), full MCP SDK dependency vs our 98-line zero-dep `lib/mcp.js`. Client-only (no new runtime capability — we already initialize + callTool); no output schemas so types cover request args only; `LICENSE` file is just the SPDX line.
+- *Verdict:* **data-source/reference-only**. Vendor `mcp-tools.json` into `tests/fixtures/` (or a sync script) only when a feature needs tool-schema validation; until then, watch the repo's nightly-sync commits for MCP drift.
