@@ -433,4 +433,36 @@ describe("content.js — write-assist widget", () => {
     await tick();
     expect(win.document.getElementById("zo-write-assist-host")).toBeNull();
   });
+
+  it("works on contenteditable rich editors (GitHub's CodeMirror issue form)", async () => {
+    const win = makeWindow();
+    win.document.body.insertAdjacentHTML("beforeend",
+      '<div id="rich" contenteditable="true" aria-placeholder="Type your description here...">Led migration of 40 dashboards</div>');
+    const { chromeObj, sent } = makeWidgetChrome();
+    loadContentScript(win, chromeObj);
+    await tick();
+    const ce = win.document.querySelector("#rich");
+    const events: string[] = [];
+    ce.addEventListener("input", () => events.push(`input:${ce.textContent}`));
+    ce.focus();
+    await tick();
+    const root = shadow(win);
+    expect(root.querySelector(".zo-wa-icon").style.display).toBe("flex");
+    root.querySelector(".zo-wa-icon").click();
+    await tick();
+    const pop = root.querySelector(".zo-wa-pop");
+    [...pop.querySelectorAll("button")].find((b: any) => b.textContent === "Enhance").click();
+    await tick();
+    await tick();
+    // Lead + placeholder came from the contenteditable (aria-placeholder, not .placeholder).
+    expect(sent[0].text).toBe("Led migration of 40 dashboards");
+    expect(sent[0].field.placeholder).toBe("Type your description here...");
+    expect(sent[0].field.maxLength).toBeNull();
+    // Accept writes back through the textContent fallback (happy-dom has no
+    // execCommand; real Chromium uses the execCommand pipeline) + fires input.
+    [...pop.querySelectorAll("button")].find((b: any) => b.textContent === "Accept").click();
+    await tick();
+    expect(ce.textContent).toBe("IMPROVED RESULT");
+    expect(events).toContain("input:IMPROVED RESULT");
+  });
 });

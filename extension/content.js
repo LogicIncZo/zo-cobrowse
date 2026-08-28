@@ -415,16 +415,33 @@
     } catch { return false; }
   }
 
-  /** Mirror of lib/write-assist.js#isEnhanceableField (content scripts can't import). */
+  /** Mirror of lib/write-assist.js#isEnhanceableField (content scripts can't import).
+   *  Textareas plus contenteditable rich editors (CodeMirror — GitHub's new
+   *  issue form — ProseMirror, Lexical…). */
   function waEligible(el) {
-    return !!el && el.tagName === 'TEXTAREA' && !el.disabled && !el.readOnly;
+    if (!el) return false;
+    if (el.tagName === 'TEXTAREA') return !el.disabled && !el.readOnly;
+    return !!el.isContentEditable;
+  }
+
+  /** Current text of an enhanceable field (textarea value / editor innerText). */
+  function waGetText(el) {
+    if (!el) return '';
+    if (el.isContentEditable) return String(el.innerText || el.textContent || '');
+    return String(el.value || '');
   }
 
   function waFieldInfo(el) {
+    const ce = !!el.isContentEditable;
+    let placeholder = el.placeholder || '';
+    if (ce) {
+      placeholder = el.getAttribute('aria-placeholder') ||
+        (el.closest && el.closest('[data-placeholder]')?.getAttribute('data-placeholder')) || '';
+    }
     return {
       label: nearestQuestion(el) || '',
-      placeholder: el.placeholder || '',
-      maxLength: (typeof el.maxLength === 'number' && el.maxLength > 0) ? el.maxLength : null,
+      placeholder,
+      maxLength: (!ce && typeof el.maxLength === 'number' && el.maxLength > 0) ? el.maxLength : null,
     };
   }
 
@@ -531,7 +548,7 @@
 
     if (waView.mode === 'compose') {
       const lead = waEl('div', 'zo-wa-lead');
-      const leadTxt = String((waActiveEl && waActiveEl.value) || '').trim();
+      const leadTxt = waGetText(waActiveEl).trim();
       lead.textContent = leadTxt
         ? (leadTxt.length > 140 ? leadTxt.slice(0, 140) + '\u2026' : leadTxt)
         : '(empty field \u2014 Zo will draft from your instruction)';
@@ -605,7 +622,7 @@
     waRender();
     const payload = {
       type: 'ENHANCE_TEXT',
-      text: el.value || '',
+      text: waGetText(el),
       instruction: waView.instruction || '',
       field: waFieldInfo(el),
       page: { url: location.href, title: document.title },
@@ -637,10 +654,21 @@
     });
   }
 
-  /** Framework-safe write-back: use the element's own native value setter (so
-   *  React's value tracker sees the change), then fire input + change. */
+  /** Framework-safe write-back. Textareas: use the element's own native value
+   *  setter (so React's value tracker sees the change), then fire input +
+   *  change. Contenteditable editors (CodeMirror/ProseMirror/Lexical): go
+   *  through the editor's own input pipeline (select-all + execCommand
+   *  insertText/insertLineBreak) so its internal state stays in sync — a
+   *  direct textContent write would be clobbered by the next editor update. */
   function setEnhancedValue(el, text) {
     el.focus();
+    if (el.isContentEditable) {
+      if (waInsertEditableText(el, text)) return;
+      el.textContent = text; // fallback (no execCommand: old engines/tests)
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return;
+    }
     let setter = null;
     let proto = Object.getPrototypeOf(el);
     while (proto && !setter) {
@@ -652,6 +680,29 @@
     else el.value = text;
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  /** Select-all + insert via execCommand, one insertText per line with
+   *  insertLineBreak between (execCommand('insertText') mangles '\n' in some
+   *  editors). Returns false when unsupported — caller falls back. */
+  function waInsertEditableText(el, text) {
+    try {
+      if (typeof document.execCommand !== 'function') return false;
+      const sel = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      const lines = String(text).split('\n');
+      let ok = document.execCommand('insertText', false, lines[0]);
+      for (let i = 1; ok && i < lines.length; i++) {
+        ok = document.execCommand('insertLineBreak') &&
+          document.execCommand('insertText', false, lines[i]);
+      }
+      return ok;
+    } catch {
+      return false;
+    }
   }
 
   function waAccept() {

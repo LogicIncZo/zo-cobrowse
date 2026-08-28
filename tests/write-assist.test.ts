@@ -38,6 +38,11 @@ describe("isEnhanceableField", () => {
     expect(isEnhanceableField({ tag: "textarea", disabled: true })).toBe(false);
     expect(isEnhanceableField({ tag: "textarea", readOnly: true })).toBe(false);
   });
+  it("accepts contenteditable rich editors regardless of tag", () => {
+    // GitHub's new issue form description is a CodeMirror .cm-content div.
+    expect(isEnhanceableField({ tag: "div", editable: true })).toBe(true);
+    expect(isEnhanceableField({ editable: true })).toBe(true);
+  });
   it("tolerates null/undefined", () => {
     expect(isEnhanceableField(null)).toBe(false);
     expect(isEnhanceableField(undefined)).toBe(false);

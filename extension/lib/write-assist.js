@@ -11,12 +11,14 @@
 export const WRITE_ASSIST_MARKER = 'write-assist';
 
 /** Eligibility rule for the floating icon. A field is enhanceable when it is a
- *  textarea that the user can edit. Mirrored inline in content.js (which can't
- *  import this module); keep the two in sync.
- *  @param {{tag?:string,disabled?:boolean,readOnly?:boolean}|null} info
+ *  textarea or a contenteditable rich editor (CodeMirror — GitHub's new issue
+ *  form, ProseMirror, Lexical…) that the user can edit. Mirrored inline in
+ *  content.js (which can't import this module); keep the two in sync.
+ *  @param {{tag?:string,disabled?:boolean,readOnly?:boolean,editable?:boolean}|null} info
  *  @returns {boolean} */
 export function isEnhanceableField(info) {
   const i = info || {};
+  if (i.editable) return true; // contenteditable rich editor
   if (String(i.tag || '').toUpperCase() !== 'TEXTAREA') return false;
   if (i.disabled) return false;
   if (i.readOnly) return false;

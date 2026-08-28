@@ -60,6 +60,35 @@ test.describe("write-assist (feature/textarea-fill)", () => {
     }
   });
 
+  test("contenteditable rich editors (GitHub's new issue form) enhance + fill back", async () => {
+    const h = await openHarness({ freshProfile: true, sitePath: "/writing.html" });
+    try {
+      const rich = h.site.locator("#rich");
+      await rich.focus();
+      const icon = h.site.locator(".zo-wa-icon");
+      await expect(icon).toBeVisible({ timeout: 10_000 });
+
+      await icon.click();
+      const pop = h.site.locator(".zo-wa-pop");
+      await expect(pop).toBeVisible({ timeout: 10_000 });
+      await pop.locator("button", { hasText: "Enhance" }).click();
+      const result = pop.locator(".zo-wa-result");
+      await expect(result).toBeVisible({ timeout: 20_000 });
+      await expect(result).toHaveText(ENHANCED);
+
+      // Preview gates the write here too.
+      await expect(rich).toHaveText("Led migration of 40 dashboards to DuckDB");
+
+      // Accept routes through the editor's own input pipeline (select-all +
+      // execCommand) — real Chromium exercises the real path here.
+      await pop.locator("button", { hasText: "Accept" }).click();
+      await expect(rich).toHaveText(ENHANCED, { timeout: 10_000 });
+      await expect(pop).toBeHidden({ timeout: 10_000 });
+    } finally {
+      await h.context.close();
+    }
+  });
+
   test("no icon appears when the toggle is disabled", async () => {
     const h = await openHarness({ freshProfile: true, sitePath: "/writing.html" });
     try {

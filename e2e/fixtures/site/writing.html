@@ -14,6 +14,9 @@
       <textarea id="proj" name="proj" placeholder="Tell us about a project you worked on" maxlength="500">Led migration of 40 dashboards to DuckDB</textarea>
       <label for="cover">Anything else?</label>
       <textarea id="cover" name="cover" placeholder="Optional"></textarea>
+      <label for="rich">Describe your project (rich editor)</label>
+      <div id="rich" contenteditable="true" aria-placeholder="Type your description here..."
+        style="border:1px solid #888; min-height:5rem; width:32rem; padding:.5rem; box-sizing:border-box;">Led migration of 40 dashboards to DuckDB</div>
       <button id="apply-submit" type="button">Submit application</button>
     </form>
     <div id="apply-result" aria-live="polite"></div>
