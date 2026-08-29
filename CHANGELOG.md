@@ -61,6 +61,13 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - **⬇ Latest pill** — appears when the chat log is scrolled away from the
   bottom (e.g. while reading during a stream); clicks snap back.
 
+### Fixed — tier-0 prompt bloat (#70)
+- **Exactly ONE content-not-attached disclaimer per tier-0 turn**: Lean turns and
+  read-downgraded turns stacked the generic honesty tail on top of a disclaimer already present
+  in the prompt (~120 tokens of pure duplication every tier-0 turn). The generic tail is now
+  suppressed when Lean's contract instructions or the read-downgrade short variant already
+  disclaimed. `lean-pointer` eval cache refreshed live.
+
 ### Fixed — 📷 screenshots never reached Zo on real Chrome
 - **`<all_urls>` host permission**: `chrome.tabs.captureVisibleTab` requires the literal
   `<all_urls>` pattern (or an activeTab gesture) — the manifest's scoped wildcards

@@ -205,12 +205,15 @@ function _compose(mode, pageContext, userQuery, opts) {
     push('tail', mode.instructions);
     push('tail', wantJson ? ACTION_SCHEMA_COMPACT : PLAIN_RESPONSE_HINT);
   }
-  // Tier-0 honesty: when no page content rides, say so. Stock Mode
-  // instructions assume attached content; Zo must learn it may fetch the URL
-  // itself (or pull via read_page on action-mode follow-up turns) instead of
-  // guessing from the pointer. Skipped when there is no page pointer at all.
+  // Tier-0 honesty: when no page content rides, say so — exactly ONCE (#70).
+  // Suppressed when an earlier part already disclaimed (Lean's instructions
+  // carry their own not-attached contract; the read-downgrade tier-0 short
+  // variant covers downgraded turns). Skipped when there is no page pointer.
   if (tier === 0 && !noPagePointer) {
-    push('tail', "Page content was not attached this turn — only the URL and title above. If you need the page's content, fetch it yourself (web fetch, or read_page).");
+    const alreadyDisclaimed = parts.some((p) => /NOT attached|Only the page URL and title are attached/i.test(p.text));
+    if (!alreadyDisclaimed) {
+      push('tail', "Page content was not attached this turn — only the URL and title above. If you need the page's content, fetch it yourself (web fetch, or read_page).");
+    }
   }
 
   return { parts, tier, intent: detectIntent(userQuery), expectJson: wantJson, downgradeApplied: jsonDisabled };
