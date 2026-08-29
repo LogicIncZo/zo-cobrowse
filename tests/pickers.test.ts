@@ -17,6 +17,14 @@ import {
 } from "../extension/lib/pickers.js";
 import { mcpRequest, mcpNotification, initializeParams, toolCallParams, parseMcpMessage, toolText, isToolError } from "../extension/lib/mcp.js";
 import {
+  McpInitializeParamsSchema,
+  McpNotificationMessageSchema,
+  McpRequestMessageSchema,
+  McpResponseMessageSchema,
+  McpToolCallParamsSchema,
+  McpToolResultSchema,
+} from "./schemas/mcp.js";
+import {
   SkillEntrySchema,
   FileEntrySchema,
   ListSkillsResponseSchema,
@@ -290,5 +298,60 @@ describe("picker payload assembly", () => {
     expect(prompt).toContain('"ok"');
     expect(prompt).not.toContain("nope");
     expect(prompt).toContain("/home/workspace/ok.md");
+  });
+});
+
+// ---- schema conformance: MCP JSON-RPC envelopes (tests/schemas/mcp.ts) ----
+
+describe("mcp — schema conformance", () => {
+  it("mcpRequest bodies parse into McpRequestMessageSchema with matching ids", () => {
+    const { body, id } = mcpRequest("tools/call", toolCallParams("bash", { cmd: "ls" }));
+    const msg = JSON.parse(body);
+    const parsed = McpRequestMessageSchema.safeParse(msg);
+    if (!parsed.success) throw new Error(`mcpRequest body failed schema:\n${parsed.error.message}`);
+    expect(msg.id).toBe(id);
+  });
+
+  it("mcpNotification bodies satisfy McpNotificationMessageSchema (no id)", () => {
+    const body = mcpNotification("notifications/initialized");
+    const parsed = McpNotificationMessageSchema.safeParse(JSON.parse(body));
+    if (!parsed.success) throw new Error(`notification failed schema:\n${parsed.error.message}`);
+    expect(JSON.parse(body).id).toBeUndefined();
+  });
+
+  it("initializeParams + toolCallParams satisfy their schemas", () => {
+    expect(McpInitializeParamsSchema.safeParse(initializeParams()).success).toBe(true);
+    expect(McpToolCallParamsSchema.safeParse(toolCallParams("bash", { cmd: "ls" })).success).toBe(true);
+    expect(McpToolCallParamsSchema.safeParse(toolCallParams("bash", null)).success).toBe(true);
+  });
+
+  it("parseMcpMessage outputs (plain + SSE) satisfy McpResponseMessageSchema; nulls pass through", () => {
+    const ok = parseMcpMessage(JSON.stringify({ jsonrpc: "2.0", id: 3, result: { content: [] } }));
+    expect(ok).not.toBeNull();
+    expect(McpResponseMessageSchema.safeParse(ok).success).toBe(true);
+
+    const sse = parseMcpMessage('event: message\ndata: {"jsonrpc":"2.0","id":4,"error":{"code":-32601,"message":"no"}}\n\n');
+    expect(sse).not.toBeNull();
+    expect(McpResponseMessageSchema.safeParse(sse).success).toBe(true);
+
+    for (const junk of [null, "", "event: ping", "[1,2]", "{not json"]) {
+      expect(parseMcpMessage(junk as never)).toBeNull();
+    }
+  });
+
+  it("tools/call results satisfy McpToolResultSchema for toolText/isToolError inputs", () => {
+    const results = [
+      { content: [{ type: "text", text: "hi" }] },
+      { content: [{ type: "image", data: "..." }], isError: true },
+      {},
+      null,
+    ];
+    for (const r of results) {
+      if (r && typeof r === "object") {
+        expect(McpToolResultSchema.safeParse(r).success).toBe(true);
+      }
+      expect(typeof toolText(r as never)).toBe("string");
+      expect(typeof isToolError(r as never)).toBe("boolean");
+    }
   });
 });

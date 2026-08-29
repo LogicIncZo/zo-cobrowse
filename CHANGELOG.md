@@ -29,6 +29,13 @@ and this project uses [Semantic Versioning](https://semver.org/).
   click handler previously sent the display label and ignored `prompt`), and
   the defaults are cut to two non-duplicative entries (Fill forms with test
   data, Extract links); custom chips in Options are untouched.
+### Added — typed-schema coverage completed
+- Every module in `extension/lib/` now has a Zod contract under `tests/schemas/`:
+  five new schema files (parse-output, mcp, vision, intent, zo-prompts) cover the
+  Zo response parser's channel triple, the MCP JSON-RPC envelopes, the live
+  `/models/catalog` entries + vision-gate outputs, the intent classification,
+  and the generate-mode reply (external Zo data). Schema-conformance blocks were
+  wired into the corresponding test files; the runtime stays plain JS by design.
 
 ### Added — UX polish + context transparency
 - **📷 Image toggle (send-once screenshot)** — a chip at the end of the tab

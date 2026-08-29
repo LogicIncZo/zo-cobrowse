@@ -1,4 +1,5 @@
 import { describe, it, expect } from "bun:test";
+import { ModelCatalogSchema, VisionSuggestionSchema } from "./schemas/vision.js";
 import {
   CATALOG_TTL_MS,
   VISION_FIELD,
@@ -134,5 +135,30 @@ describe("visionModelSuggestion", () => {
     expect(s.kind).toBe("warn");
     expect(s.currentModel).toBe("text");
     expect(s).not.toHaveProperty("suggestedModel");
+  });
+});
+
+// ---- schema conformance (tests/schemas/vision.ts) ----
+
+describe("vision — schema conformance", () => {
+  it("the CATALOG fixture satisfies ModelCatalogSchema (live upstream shape)", () => {
+    const parsed = ModelCatalogSchema.safeParse(CATALOG);
+    if (!parsed.success) throw new Error(`CATALOG fixture failed schema:\n${parsed.error.message}`);
+  });
+
+  it("every visionModelSuggestion output satisfies the discriminated union", () => {
+    const inputs: Array<[unknown, string]> = [
+      [CATALOG, "text-only"],
+      [CATALOG, ""],
+      [CATALOG, null],
+      [{ model_name: "text", label: "Text", supports_images: false }, "text"],
+      [null, "anything"],
+    ];
+    for (const [catalog, model] of inputs) {
+      const s = visionModelSuggestion(catalog as never, model as string);
+      if (s === null) continue;
+      const parsed = VisionSuggestionSchema.safeParse(s);
+      if (!parsed.success) throw new Error(`suggestion(${model}) failed schema:\n${parsed.error.message}`);
+    }
   });
 });

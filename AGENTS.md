@@ -97,6 +97,13 @@ Contracts are defined as **Zod schemas** in `tests/schemas/` and used by the tes
 | `tests/schemas/modes.ts` | Mode objects + sparse `OverrideSchema` (builtin override catalog) | `tests/modes.test.ts`, `tests/mode-overrides.test.ts` |
 | `tests/schemas/tab-contexts.ts` | TabContext, tab manifest, `read_tab` action, follow-up output, history `tabRefs` | `tests/tab-contexts.test.ts` |
 | `tests/schemas/chat-tabs.ts` | TabsState, Conversation (with `zoThreadId`/`pendingActions`), ChatSummary, RenameResult | `tests/chat-tabs.test.ts` |
+| `tests/schemas/parse-output.ts` | `parseZoOutput()` channel triple (reasoning/actions/rawOutput/plainText) + the envelope-vs-plain channel invariant | `tests/sse-parsing.test.ts` |
+| `tests/schemas/mcp.ts` | MCP JSON-RPC 2.0 envelopes — requests, notifications, initialize/tool-call params, responses, `tools/call` results | `tests/pickers.test.ts` (mcp block), `tests/integration/mcp-flow.test.ts` |
+| `tests/schemas/vision.ts` | `/models/catalog` entries (optional/passthrough — live upstream data) + the vision gate's support enum + suggestion union | `tests/vision.test.ts` |
+| `tests/schemas/intent.ts` | `detectIntent()` classification (`'action'`\|`'read'`) + downgrade decision | `tests/intent.test.ts` |
+| `tests/schemas/zo-prompts.ts` | generate-mode REPLY (external Zo data background.generateMode JSON.parses) + `generateMode()` result union | `tests/typed-schemas.test.ts` |
+
+The five 2026-08-29 additions (parse-output, mcp, vision, intent, zo-prompts) complete the net: every module in `extension/lib/` now has a schema contract for its exported shapes. The extension runtime itself stays plain JS — schemas are the test-layer regression net, not runtime validation.
 
 **Two contract tests guard the boundaries:**
 - `tests/message-contract.test.ts` — asserts background.js has a `case` for **every** message type in the schema, AND that the schema isn't missing any handler background.js already implements. Add a new message type → add it to the schema or this test fails.
