@@ -56,6 +56,27 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - **Search highlighting** — history search matches are `<mark>`-highlighted
   in titles and snippets.
 
+### Fixed — vision gate never matched the live catalog (#25 follow-up)
+- **`lib/vision.js#findModelEntry` now matches `value`-keyed entries** —
+  `/models/catalog` keys models on `value` (e.g. `zo:openai/gpt-5.6-sol`) and
+  carries no `model_name`, so the vision gate previously never matched any
+  entry and always fell back to 'unknown' (capturing regardless). Also
+  `visionModelSuggestion` now reports the `value` identifier when
+  `model_name` is absent.
+- **`visual-describe` prompt eval actually tests the screenshot now** — the
+  case set `ctx.screenshot` instead of `ctx.screenshotDataUrl`, so the
+  `## Screenshot` section never rendered; cache refreshed against a live run.
+
+### Verified — screenshot transport reaches vision models (#25 live probe)
+- **The tier-3 screenshot pipeline is confirmed working end-to-end**: the
+  markdown data-URL embed inside the string-only `/zo/ask` `input` is
+  extracted by Zo's backend and passed to vision models. Live probe
+  (`tests/test-prompts/probe-vision.ts`) with shape/color fixtures at
+  26KB–589KB (up to 825K chars of base64): models named all shapes/colors and
+  contradicted conflicting text context; no size ceiling found. API facts
+  recorded in `extension/AGENTS.md`; findings in BACKLOG #25 and the
+  2026-08-29 vision-transport design spec. (test(vision): live probe proves the screenshot embed transport works (#25))
+
 ## [v0.2.0] - 2026-08-28
 
 Form filling (#26) — the co-browse contract: **Zo fills, you review and

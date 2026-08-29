@@ -5,6 +5,41 @@
 **Milestone:** v0.2.2, after the v0.2.1 slate (#19 → #10 → #29)
 **Branches:** `feature/vision-probe` (Phase 0) → `feature/vision-transport` (Phase 1–2), PRs into `dev`
 
+## FINDINGS (2026-08-29, Phase 0 executed) — Phase 1 obsolete
+
+The probe ran before any transport code was written, and the result **inverts the
+project's premise**:
+
+1. **Drift check: 0 findings** — the OpenAPI still pins `/zo/ask` to `input: string`
+   with no image fields and no upload endpoints (as of 2026-08-29).
+2. **Despite that, the markdown data-URL embed transport WORKS.** `probe-vision.ts`
+   (P1/P2) sent shape/color fixtures (teal field, yellow stripe, red square, blue
+   disc) embedded as `![page](data:image/jpeg;base64,…)` inside `input`; the model
+   (`zo:zai/glm-5.3-flash`, catalog `supports_images: true`) named all 4 shapes/colors
+   and explicitly contradicted the conflicting text context — the image is genuinely
+   consulted, not ignored.
+3. **Size tolerance:** 26KB → 589KB JPEGs (35K–825K chars of base64) all pass.
+   One transient HTTP 500 "Agent run failed" at 785K chars did not reproduce on
+   retry. No size ceiling found. Real `captureVisibleTab` captures sit well within
+   the tested range.
+4. **Live catalog confirms the `findModelEntry` bug was real**: `/models/catalog`
+   entries carry `value` only (no `model_name`); `/models/available` uses
+   `model_name` with the same `zo:vendor/model` identifier format. Before the fix
+   the gate never matched any entry and always fell back to 'unknown'.
+5. The `visual-describe` prompt-eval case was indeed broken (`ctx.screenshot` ≠
+   `ctx.screenshotDataUrl`); fixed and cache refreshed — the response now describes
+   the actual red-pixel image ("solid dark maroon/burgundy block"), independently
+   re-confirming the transport.
+
+**Decision:** per the plan's own contingency logic, no speculative transport code.
+Phase 1 (`vision-transport.js`, downscaling, config keys, payload rebuilding) is
+**dropped** — the existing transport is correct and works. Shipped instead: the two
+bug fixes, the committed probe harness (`tests/test-prompts/probe-vision.ts`,
+`probe-vision-size.ts`), and documentation updates. The `feature/vision-transport`
+branch will not be created.
+
+---
+
 ## Problem
 
 Backlog #25 shipped the capture + gate half of vision support:
