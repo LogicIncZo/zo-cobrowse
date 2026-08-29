@@ -61,6 +61,13 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - **⬇ Latest pill** — appears when the chat log is scrolled away from the
   bottom (e.g. while reading during a stream); clicks snap back.
 
+### Added — TTS voice picker (#64)
+- Settings → Speech gains a **TTS Voice** dropdown (the speak path already passed `voiceName`
+  from `zoTtsVoice` — there was just no way to set it). Populated from `chrome.tts.getVoices()`,
+  filtered by the configured language prefix, "System default" when unset; re-filters when the
+  language changes. Zero-voice systems (headless, minimal Linux) get an honest disabled state
+  with a hint instead of an empty list.
+
 ### Fixed — 📷 screenshots never reached Zo on real Chrome
 - **`<all_urls>` host permission**: `chrome.tabs.captureVisibleTab` requires the literal
   `<all_urls>` pattern (or an activeTab gesture) — the manifest's scoped wildcards
