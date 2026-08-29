@@ -31,3 +31,6 @@ playwright-report/
 # Demo recording output (ZO_DEMO=1 run of e2e/demo-open-all.spec.ts)
 e2e/demo-video/
 demo/
+
+# Vision probe artifact (regenerated per run by tests/test-prompts/probe-vision.ts)
+tests/test-prompts/fixtures/vision-probe-image.jpeg

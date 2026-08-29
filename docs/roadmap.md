@@ -9,8 +9,8 @@ at the repo root — this page is a snapshot for the docs site.
 - **Release:** ✅ **v0.2.0** tagged + released (2026-08-28). Git-flow model:
   `dev` (integration) → `main` (release); releases are deliberate
   (`git tag vX.Y.Z` → `release.yml`).
-- **Tests:** ✅ **972 pass / 0 fail** (42 files, 2641 `expect()` calls) +
-  30 Playwright e2e across 16 numbered specs (+2 ZO_DEMO-gated demo specs)
+- **Tests:** ✅ **977 pass / 0 fail** (42 files, 2662 `expect()` calls) +
+  32 Playwright e2e across 17 numbered specs (+2 ZO_DEMO-gated demo specs)
 - **Loop engineering:** `bun run verify` gate + committed hard-gate pre-commit
   hook (`bun run setup-hooks` to install)
 - **CI/CD:** CI on every branch push + PRs into `main`/`dev` (tests +

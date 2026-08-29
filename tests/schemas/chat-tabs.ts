@@ -12,6 +12,8 @@ export const ChatMessageSchema = z
     timestamp: z.number(),
     reasoning: z.string().optional(),
     durationMs: z.number().optional(),
+    /** True when this turn's prompt carried a page screenshot (📷 footer chip). */
+    screenshot: z.boolean().optional(),
     healed: z.boolean().optional(),
     // Context policy outcome for the turn (footer chip + tooltip). Optional —
     // messages predating the chip don't carry it.
@@ -20,6 +22,8 @@ export const ChatMessageSchema = z
     tabRefs: z
       .array(z.object({ ref: z.string(), host: z.string(), title: z.string() }))
       .optional(),
+    /** True when the user armed the 📷 Image toggle for this turn (📷 pill). */
+    shot: z.boolean().optional(),
   })
   .passthrough();
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;

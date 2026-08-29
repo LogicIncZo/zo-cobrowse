@@ -115,7 +115,7 @@ const TINY_PNG =
 
 function visualCtx(tier: number) {
   const ctx: any = pageCtx(tier);
-  if (tier >= 3) ctx.screenshot = TINY_PNG;
+  if (tier >= 3) ctx.screenshotDataUrl = TINY_PNG;
   return ctx;
 }
 

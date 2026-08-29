@@ -99,6 +99,42 @@ document.addEventListener('DOMContentLoaded', async () => {
     themeSelect.addEventListener('change', () => applyOptionsTheme(themeSelect.value));
   }
 
+  // ── Section tabs: one pane visible at a time (no page-long scroll) ──
+  // Each .settings-tab shows its .tab-pane and hides the others; the last
+  // visited tab persists in localStorage so reopening Settings lands where
+  // you left off. Deep links (#card-*) still work: a matching card's pane
+  // is activated.
+  const nav = document.getElementById('settings-nav');
+  if (nav) {
+    const tabs = [...nav.querySelectorAll('.settings-tab')];
+    const activate = (paneId, save = true) => {
+      const pane = document.getElementById(paneId);
+      if (!pane) return false;
+      for (const t of tabs) t.classList.toggle('active', t.dataset.pane === paneId);
+      for (const p of document.querySelectorAll('.tab-pane')) p.hidden = p.id !== paneId;
+      if (save) { try { localStorage.setItem('cobrowse_settings_tab', paneId); } catch { /* storage unavailable */ } }
+      return true;
+    };
+    for (const t of tabs) t.addEventListener('click', () => activate(t.dataset.pane));
+    // Same-document #card-* navigations (hash clicks/updates after load).
+    window.addEventListener('hashchange', () => {
+      if (!location.hash.startsWith('#card-')) return;
+      const card = document.querySelector(location.hash);
+      const pane = card && card.closest('.tab-pane');
+      if (pane) activate(pane.id, false);
+    });
+    // A #card-* deep link (e.g. from an old bookmark) opens that card's pane.
+    if (location.hash.startsWith('#card-')) {
+      const card = document.querySelector(location.hash);
+      const pane = card && card.closest('.tab-pane');
+      if (pane) activate(pane.id, false);
+    } else {
+      let initial = 'pane-connection';
+      try { initial = localStorage.getItem('cobrowse_settings_tab') || initial; } catch { /* storage unavailable */ }
+      if (!activate(initial, false)) activate('pane-connection', false);
+    }
+  }
+
   // Quick Actions management
   let quickActions = [];
 

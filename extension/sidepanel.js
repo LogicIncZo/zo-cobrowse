@@ -741,7 +741,7 @@ function renderCurrentConversation() {
   for (const msg of conv.messages) {
     const m = msg.role === 'assistant' ? healAssistantMessage(msg) : msg;
     const opts = m.role === 'assistant'
-      ? { timestamp: m.timestamp, durationMs: m.durationMs, contextTier: m.contextTier, contextReason: m.contextReason }
+      ? { timestamp: m.timestamp, durationMs: m.durationMs, contextTier: m.contextTier, contextReason: m.contextReason, screenshot: m.screenshot }
       : {};
     const el = addMessageDOM(m.role, m.text, opts);
     if (m.role === 'assistant' && m.reasoning) addReasoningBubble(el, m.reasoning);
@@ -755,6 +755,7 @@ function renderCurrentConversation() {
       if (userBody) {
         for (const s of (m.skillRefs || [])) appendMentionPill(userBody, `⚡ ${safeText(s && s.name)}`);
         for (const f of (m.fileRefs || [])) appendMentionPill(userBody, `📄 ${safeText(f && f.path).split('/').pop()}`);
+        if (m.shot) appendMentionPill(userBody, '📷 Screenshot');
       }
     }
   }
@@ -1252,7 +1253,15 @@ function renderPromptInspector() {
     pageHash,
     pageBlank: isBlankPage(currentContext?.url || ''),
   });
-  const described = describePrompt(mode, currentContext, query, { effectiveTier: decision.effectiveTier, tabContexts: previewTabContexts({ includeActive: decision.effectiveTier === 0 }), skills: pickedSkills, workspaceFiles: pickedFiles });
+  // Mirror sendQuery's 📷-toggle force so the preview can't diverge from the
+  // send: armed toggle = tier 3 this turn, same reason string.
+  let effTier = decision.effectiveTier;
+  let effReason = decision.reason;
+  if (shotArmed && effTier < 3) {
+    effTier = 3;
+    effReason = '📷 Image toggle — screenshot forced this turn';
+  }
+  const described = describePrompt(mode, currentContext, query, { effectiveTier: effTier, tabContexts: previewTabContexts({ includeActive: effTier === 0 }), skills: pickedSkills, workspaceFiles: pickedFiles });
 
   summary.textContent = `🔎 Prompt preview · ~${described.approxTokens} tokens`;
   meta.replaceChildren();
@@ -1265,9 +1274,14 @@ function renderPromptInspector() {
     return span;
   };
   meta.appendChild(chip('Mode:', `${mode.icon} ${mode.name}`));
-  meta.appendChild(chip('Context:', TIER_NAMES[decision.effectiveTier] || `Tier ${decision.effectiveTier}`));
+  meta.appendChild(chip('Context:', TIER_NAMES[effTier] || `Tier ${effTier}`));
+  // Actual attachment, not tier intent: the screenshot section renders only
+  // when a capture really produced a data URL (vision gate + captureVisibleTab).
+  if (described.sections.some(s => s.id === 'screenshot')) {
+    meta.appendChild(chip('📷', 'screenshot attached'));
+  }
   const reasonSpan = document.createElement('span');
-  reasonSpan.textContent = decision.reason;
+  reasonSpan.textContent = effReason;
   meta.appendChild(reasonSpan);
   pre.textContent = described.prompt;
 }
@@ -1449,7 +1463,7 @@ function relativeTime(ts, now = Date.now()) {
 // locally on the history entry (no backend).
 function addMessageFooter(parentMsgEl, opts = {}) {
   if (!parentMsgEl || parentMsgEl.querySelector('.msg-footer')) return null;
-  const { timestamp, modeName, modelName, durationMs, contextTier, contextReason } = opts;
+  const { timestamp, modeName, modelName, durationMs, contextTier, contextReason, screenshot } = opts;
   const footer = document.createElement('div');
   footer.className = 'msg-footer';
 
@@ -1490,13 +1504,20 @@ function addMessageFooter(parentMsgEl, opts = {}) {
   // Context-tier chip: shows how much page context this turn actually sent
   // (the decideTurn policy outcome) — makes the token story visible per turn.
   if (Number.isInteger(contextTier)) {
-    const CTX_ICONS = ['🔗', '📝', '🧩', '📷'];
+    const CTX_ICONS = ['🔗', '📝', '🧩', '🖼️'];
     const CTX_NAMES = ['URL only', 'Text', 'Elements', 'Screenshot'];
     const ctxChip = document.createElement('span');
     ctxChip.className = 'msg-footer-chip msg-footer-context';
     ctxChip.textContent = `${CTX_ICONS[contextTier] || '🔗'} ${CTX_NAMES[contextTier] || 'Tier ' + contextTier}`;
     ctxChip.title = safeText(contextReason) || 'Context sent this turn';
     footer.appendChild(ctxChip);
+  }
+  if (screenshot) {
+    const shotChip = document.createElement('span');
+    shotChip.className = 'msg-footer-chip msg-footer-shot';
+    shotChip.textContent = '📷';
+    shotChip.title = 'A page screenshot was attached to this turn';
+    footer.appendChild(shotChip);
   }
 
   if (timestamp) {
@@ -1912,7 +1933,7 @@ function addMessage(role, text, opts = {}) {
   if (role !== 'system' && role !== 'thinking') {
     const conv = conversations[chatId];
     if (conv) {
-      conv.messages.push({ role, text, timestamp: Date.now() });
+      conv.messages.push({ role, text, timestamp: Date.now(), screenshot: opts.screenshot || undefined });
       // Trim to MAX_HISTORY per conversation
       if (conv.messages.length > MAX_HISTORY) {
         conv.messages = conv.messages.slice(-MAX_HISTORY);
@@ -2102,6 +2123,7 @@ function addMessageDOM(role, text, opts = {}) {
       durationMs: opts.durationMs,
       contextTier: opts.contextTier,
       contextReason: opts.contextReason,
+      screenshot: opts.screenshot,
     });
   }
 
@@ -2148,6 +2170,62 @@ let openTabsQuerySeq = 0;         // latest-issued query owns the strip (stale
                                   // responses must not overwrite fresher ones)
 let tabStripCollapsed = false;
 
+// #25 vision UX — send-once screenshot toggle (#shot-toggle). Arming forces
+// tier 3 (screenshot) on the NEXT send only, and flips the Mode to Visual so
+// the prompt expects an image; unchecking before sending restores the
+// previous Mode. Like the picker chips, the toggle auto-clears after the
+// send it armed. shotModeAuto guards applyMode() re-entry while we switch
+// Modes programmatically (a manual Mode change while armed drops the
+// restore memory — the user owns the Mode then).
+let shotArmed = false;
+let shotPrevModeId = null;
+let shotModeAuto = false;
+
+/** Re-render the toggle chip's pressed state + label. Also keeps the
+ * tab-contexts row visible when armed even if no tabs are open (the row
+ * hides itself when the strip is empty). */
+function renderShotToggle() {
+  const btn = document.getElementById('shot-toggle');
+  if (!btn) return;
+  btn.setAttribute('aria-pressed', String(shotArmed));
+  btn.classList.toggle('shot-toggle-on', shotArmed);
+  btn.textContent = shotArmed ? '📷 Image ✓' : '📷 Image';
+  btn.title = shotArmed
+    ? 'Screenshot armed — attaches to your NEXT message, then turns off (click to cancel)'
+    : 'Attach a screenshot of this tab to the NEXT message (one turn only — switches Mode to Visual while armed)';
+  const wrap = document.getElementById('tab-contexts');
+  if (wrap && shotArmed) wrap.classList.remove('hidden');
+}
+
+function toggleShotArmed() {
+  shotArmed = !shotArmed;
+  if (shotArmed) {
+    const cur = resolveMode(activeModeId, customModes, modeOverrides);
+    if ((cur?.contextTier ?? 0) < 3) {
+      shotPrevModeId = activeModeId;
+      shotModeAuto = true;
+      modeSelect.value = 'visual';
+      applyMode();
+      shotModeAuto = false;
+    }
+  } else if (shotPrevModeId) {
+    shotModeAuto = true;
+    modeSelect.value = shotPrevModeId;
+    applyMode();
+    shotModeAuto = false;
+    shotPrevModeId = null;
+  }
+  renderShotToggle();
+  renderPromptInspector();
+}
+
+function initShotToggle() {
+  const btn = document.getElementById('shot-toggle');
+  if (!btn) return;
+  btn.addEventListener('click', toggleShotArmed);
+  renderShotToggle();
+}
+
 function initTabStrip() {
   if (typeof chrome === 'undefined' || !chrome?.runtime?.sendMessage) return;
   const collapseBtn = document.getElementById('tab-strip-collapse');
@@ -2160,6 +2238,7 @@ function initTabStrip() {
     });
   }
   refreshOpenTabs();
+  initShotToggle();
   // Keep the strip fresh when the user refocuses the panel.
   window.addEventListener('focus', refreshOpenTabs);
   // Track browser-tab switches: adopt the newly active tab for DISPLAY (page
@@ -2216,7 +2295,7 @@ function renderTabStrip() {
   const strip = document.getElementById('tab-strip');
   const countEl = document.getElementById('tab-strip-count');
   if (!wrap || !strip) return;
-  if (!openTabs.length) {
+  if (!openTabs.length && !shotArmed) {
     wrap.classList.add('hidden');
     return;
   }
@@ -3009,6 +3088,12 @@ async function saveCustomModes() {
 
 function applyMode() {
   const id = modeSelect.value || DEFAULT_MODE_ID;
+  // #25 vision UX: if the user manually changes the Mode while the shot
+  // toggle is armed (and we didn't switch it ourselves), they own the Mode
+  // now — drop the restore-on-uncheck memory.
+  if (!shotModeAuto && shotArmed && shotPrevModeId && id !== shotPrevModeId) {
+    shotPrevModeId = null;
+  }
   const mode = resolveMode(id, customModes);
   activeModeId = id;
   chrome.storage.sync.set({ zoActiveMode: id });
@@ -3664,7 +3749,7 @@ function handleStreamMessage(msg) {
           if (msg.conversationId) conv.zoThreadId = msg.conversationId;
           if (responseText) {
             const reasoningVal = safeText(msg.reasoning) || safeText(streamSession.reasoningText) || undefined;
-            conv.messages.push({ role: 'assistant', text: responseText, reasoning: reasoningVal, timestamp: doneTimestamp, durationMs: doneDuration || undefined, contextTier: streamSession.effectiveTier, contextReason: streamSession.contextReason });
+            conv.messages.push({ role: 'assistant', text: responseText, reasoning: reasoningVal, timestamp: doneTimestamp, durationMs: doneDuration || undefined, contextTier: streamSession.effectiveTier, contextReason: streamSession.contextReason, screenshot: streamSession.hadScreenshot || undefined });
             if (conv.messages.length > MAX_HISTORY) {
               conv.messages = conv.messages.slice(-MAX_HISTORY);
             }
@@ -3775,6 +3860,7 @@ function handleStreamMessage(msg) {
           durationMs: doneDuration,
           contextTier: streamSession.effectiveTier,
           contextReason: streamSession.contextReason,
+          screenshot: streamSession.hadScreenshot,
         });
         // Code blocks in the final rendered markdown get their Copy buttons.
         const doneBody = streamSession.msgEl.querySelector('.msg-body');
@@ -3793,7 +3879,7 @@ function handleStreamMessage(msg) {
         if (responseText) {
           const reasoningVal = safeText(msg.reasoning) || safeText(streamSession.reasoningText) || undefined;
           // Persist to conversation (chronological feed is already in the body; just save reasoning)
-          conv.messages.push({ role: 'assistant', text: responseText, reasoning: reasoningVal, timestamp: doneTimestamp, durationMs: doneDuration || undefined, contextTier: streamSession.effectiveTier, contextReason: streamSession.contextReason });
+          conv.messages.push({ role: 'assistant', text: responseText, reasoning: reasoningVal, timestamp: doneTimestamp, durationMs: doneDuration || undefined, contextTier: streamSession.effectiveTier, contextReason: streamSession.contextReason, screenshot: streamSession.hadScreenshot || undefined });
           if (conv.messages.length > MAX_HISTORY) {
             conv.messages = conv.messages.slice(-MAX_HISTORY);
           }
@@ -4050,6 +4136,14 @@ sendQuery = async function() {
   pickedSkills.length = 0;
   pickedFiles.length = 0;
   renderPickerChips();
+  // #25 vision UX: the 📷 Image toggle is send-once the same way — it arms
+  // exactly one turn (tier-3 forced in the policy step below), then clears.
+  const turnShot = shotArmed;
+  if (shotArmed) {
+    shotArmed = false;
+    shotPrevModeId = null;
+    renderShotToggle();
+  }
 
   const userMsgEl = addMessage('user', query);
   // When a page is captured for this turn, show a Zo-style mention pill
@@ -4077,17 +4171,19 @@ sendQuery = async function() {
     addMessage('system', `📎 ${dropped.length} referenced tab${dropped.length === 1 ? '' : 's'} closed — skipped.`);
   }
   // Picker pills (send-once chips re-render as mention pills, like tab refs).
-  if (turnSkills.length || turnFiles.length) {
+  if (turnSkills.length || turnFiles.length || turnShot) {
     const userBody = userMsgEl && userMsgEl.querySelector ? userMsgEl.querySelector('.msg-body') : null;
     if (userBody) {
       for (const s of turnSkills) appendMentionPill(userBody, `⚡ ${s.name}`);
       for (const f of turnFiles) appendMentionPill(userBody, `📄 ${f.path.split('/').pop()}`);
+      if (turnShot) appendMentionPill(userBody, '📷 Screenshot');
     }
     const conv = getActiveConversation();
     if (conv && conv.messages.length) {
       const last = conv.messages[conv.messages.length - 1];
       if (turnSkills.length) last.skillRefs = turnSkills.map((s) => ({ name: s.name }));
       if (turnFiles.length) last.fileRefs = turnFiles.map((f) => ({ path: f.path }));
+      if (turnShot) last.shot = true;
       saveCurrentConversation();
     }
   }
@@ -4127,7 +4223,22 @@ sendQuery = async function() {
   });
   contextState = turnDecision.newState;
   saveConversationState(activeId, contextState);
-  const effectiveTier = turnDecision.effectiveTier;
+  // #25 vision UX: an armed 📷 Image toggle forces tier 3 regardless of the
+  // policy decision — the user explicitly asked for pixels this turn. The
+  // capture itself is still truthful: the background's vision gate may skip
+  // it (model can't take images) and turnHadScreenshot stays honest.
+  let effectiveTier = turnDecision.effectiveTier;
+  let turnReason = turnDecision.reason;
+  if (turnShot && effectiveTier < 3) {
+    effectiveTier = 3;
+    turnReason = '📷 Image toggle — screenshot forced this turn';
+  }
+
+  // Truthful per-turn screenshot flag: the prompt embeds the image only when
+  // the policy attaches tier-3 context AND the capture actually produced a
+  // data URL (the vision gate may skip it, or captureVisibleTab may fail).
+  // Drives the 📷 footer chip + its persistence on the assistant message.
+  const turnHadScreenshot = effectiveTier >= 3 && !!currentContext?.screenshotDataUrl;
 
   // ---- Auto-reference the active tab on tier-0 turns ----
   // Whenever the policy thins this turn to URL-only (reads, same-page
@@ -4158,7 +4269,7 @@ sendQuery = async function() {
   // context-tier chip and the correct post-bang mode name) and the persisted
   // assistant record.
   streamSession.effectiveTier = effectiveTier;
-  streamSession.contextReason = turnDecision.reason;
+  streamSession.contextReason = turnReason;
   streamSession.modeId = modeId;
 
   // --- Streaming path: (re)connect port if needed ---
@@ -4171,6 +4282,7 @@ sendQuery = async function() {
     streamSession.msgEl = null;
     streamSession.fullText = '';
     streamSession.reasoningText = '';
+    streamSession.hadScreenshot = turnHadScreenshot;
     streamSession.startTime = Date.now();
     try {
       streamPort.postMessage({
@@ -4265,14 +4377,14 @@ sendQuery = async function() {
   if (!actions.length) {
     // Show reasoning or the raw output text, with "Done." only as last resort
     const fallbackText = reasoning || doneResponse || output || '';
-    const el = addMessage('assistant', fallbackText || 'Done.');
+    const el = addMessage('assistant', fallbackText || 'Done.', { screenshot: turnHadScreenshot });
     addReasoningBubble(el, reasoning);
   } else {
     handleStreamActions(actions, reasoning);
     // handleStreamActions already adds the done response for navigate actions
     // (via its own setTimeout). For non-navigate scenarios, display it here.
     if (doneAction && !hasNavigate) {
-      const el = addMessage('assistant', doneResponse || reasoning || output || 'Done.');
+      const el = addMessage('assistant', doneResponse || reasoning || output || 'Done.', { screenshot: turnHadScreenshot });
       addReasoningBubble(el, reasoning);
     } else if (reasoningVal) {
       // navigate-only actions: persist reasoning with the navigate status message

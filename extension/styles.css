@@ -2390,6 +2390,28 @@ body.options-page {
   border-color: var(--border-focus, var(--amber, #f0a832));
   color: var(--text, #fff);
 }
+/* #25 vision UX: send-once screenshot toggle, sits at the end of the tab
+   strip row — same chip language, amber when armed. */
+.shot-toggle {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-family: inherit;
+  border-radius: 999px;
+  border: 1px solid var(--border, #333);
+  background: transparent;
+  color: var(--text-secondary, var(--text, #9aa));
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+.shot-toggle:hover { border-color: var(--border-focus, var(--amber, #f0a832)); color: var(--text, #fff); }
+.shot-toggle-on,
+.shot-toggle[aria-pressed="true"] {
+  background: var(--amber-glow, rgba(240,168,50,0.15));
+  border-color: var(--border-focus, var(--amber, #f0a832));
+  color: var(--text, #fff);
+}
 .tab-autocomplete {
   position: absolute;
   bottom: calc(var(--input-h, 44px) + 56px);

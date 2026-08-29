@@ -309,6 +309,8 @@ describe("message footer — Zo parity", () => {
     expect(sidepanel).toContain("msg-footer-copy");
     expect(sidepanel).toContain("msg-footer-mode");
     expect(sidepanel).toContain("msg-footer-model");
+    // 📷 chip marks turns whose prompt carried a page screenshot
+    expect(sidepanel).toContain("msg-footer-shot");
     // Feedback icons removed - no longer present in footer
     expect(sidepanel).not.toContain("msg-footer-feedback");
   });
