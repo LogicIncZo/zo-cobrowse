@@ -28,6 +28,19 @@ This page mirrors everything **unreleased** on `dev`.
 - **⬇ Latest pill** — appears when the chat log is scrolled away from the
   bottom (e.g. while reading during a stream); clicks snap back.
 
+### Fixed — 📷 screenshots never reached Zo on real Chrome
+- **`<all_urls>` host permission**: `chrome.tabs.captureVisibleTab` requires the literal
+  `<all_urls>` pattern (or an activeTab gesture) — the manifest's scoped wildcards
+  (`http://*/*` + `https://*/*`) do NOT qualify, so every tier-3 turn silently failed
+  capture with "Either the '<all_urls>' or 'activeTab' permission is required." and
+  shipped text-only context while the UI implied pixels were attached. The manifest now
+  declares `<all_urls>`.
+- **Honest failure surfacing**: a failed or skipped capture on a tier-3 turn is recorded
+  in `pageContext.screenshotError` (vision-gate skip, disabled setting, or the capture
+  error itself). The 📷 Screenshot pill on the user bubble now renders only when the
+  image actually rode the turn; otherwise an inline system warning explains what
+  happened instead of silently degrading to text-only.
+
 ### Fixed — follow-up context (token optimization)
 - **Send-once tab excerpts**: referenced-tab manifests re-sent their 500-char
   excerpt on EVERY turn for unchanged pages. Tabs already sent at the same

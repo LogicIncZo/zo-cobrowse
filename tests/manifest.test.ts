@@ -28,6 +28,13 @@ describe("manifest.json — full schema validation", () => {
     expect(manifest.host_permissions).toContain("https://*.zo.space/*");
   });
 
+  it("declares <all_urls> — captureVisibleTab requires it (scoped wildcards don't qualify)", () => {
+    // Without the literal <all_urls> pattern, tier-3 capture fails with
+    // "Either the '<all_urls>' or 'activeTab' permission is required." on
+    // real Chrome — the silent no-image bug triaged 2026-08-29.
+    expect(manifest.host_permissions).toContain("<all_urls>");
+  });
+
   it("icons exist at 16/48/128 and reference PNG files", () => {
     expect(manifest.icons["16"]).toMatch(/\.png$/);
     expect(manifest.icons["48"]).toMatch(/\.png$/);

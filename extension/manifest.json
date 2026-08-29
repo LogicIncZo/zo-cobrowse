@@ -15,11 +15,10 @@
     "tts"
   ],
   "host_permissions": [
+    "<all_urls>",
     "https://api.zo.computer/*",
     "https://*.zo.space/*",
-    "https://*.zocomputer.io/*",
-    "http://*/*",
-    "https://*/*"
+    "https://*.zocomputer.io/*"
   ],
   "side_panel": {
     "default_path": "sidepanel.html"

@@ -28,8 +28,10 @@ Copy / mode / model / time / feedback controls.
   mode hunting. Arming flips the MODE dropdown to Visual (unchecking before
   you send restores it); the next send attaches the screenshot — and a 📷
   Screenshot pill on your message — then the toggle switches itself off.
-  The capture is honest: if the selected model can't take images, Zo's footer
-  📷 chip stays off.
+  The capture is honest: if it fails for any reason (the selected model can't
+  take images, screenshots are disabled in settings, or the page can't be
+  captured), an inline warning tells you and the turn goes out as text-only —
+  the pill and Zo's footer 📷 chip only ever show when pixels really shipped.
 - **⬇ Latest pill** — appears when the chat log is scrolled away from the
   bottom; click to snap back.
 - **Cancel** — press `Esc` while Zo is responding to interrupt the stream.

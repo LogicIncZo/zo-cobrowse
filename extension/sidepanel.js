@@ -4171,19 +4171,20 @@ sendQuery = async function() {
     addMessage('system', `📎 ${dropped.length} referenced tab${dropped.length === 1 ? '' : 's'} closed — skipped.`);
   }
   // Picker pills (send-once chips re-render as mention pills, like tab refs).
+  // The 📷 pill is NOT rendered here — whether the screenshot actually rode
+  // the turn is only known after the capture result comes back (below), and
+  // the pill must never claim pixels that didn't ship.
   if (turnSkills.length || turnFiles.length || turnShot) {
     const userBody = userMsgEl && userMsgEl.querySelector ? userMsgEl.querySelector('.msg-body') : null;
     if (userBody) {
       for (const s of turnSkills) appendMentionPill(userBody, `⚡ ${s.name}`);
       for (const f of turnFiles) appendMentionPill(userBody, `📄 ${f.path.split('/').pop()}`);
-      if (turnShot) appendMentionPill(userBody, '📷 Screenshot');
     }
     const conv = getActiveConversation();
     if (conv && conv.messages.length) {
       const last = conv.messages[conv.messages.length - 1];
       if (turnSkills.length) last.skillRefs = turnSkills.map((s) => ({ name: s.name }));
       if (turnFiles.length) last.fileRefs = turnFiles.map((f) => ({ path: f.path }));
-      if (turnShot) last.shot = true;
       saveCurrentConversation();
     }
   }
@@ -4239,6 +4240,23 @@ sendQuery = async function() {
   // data URL (the vision gate may skip it, or captureVisibleTab may fail).
   // Drives the 📷 footer chip + its persistence on the assistant message.
   const turnHadScreenshot = effectiveTier >= 3 && !!currentContext?.screenshotDataUrl;
+
+  // The 📷 pill marks a screenshot that SHIPPED, not intent: render it (and
+  // persist `shot`) only when the capture produced a data URL. An armed
+  // toggle whose capture failed/skipped gets an inline warning instead —
+  // the background records why in currentContext.screenshotError.
+  if (turnShot && turnHadScreenshot) {
+    const userBody = userMsgEl && userMsgEl.querySelector ? userMsgEl.querySelector('.msg-body') : null;
+    if (userBody) appendMentionPill(userBody, '📷 Screenshot');
+    const conv = getActiveConversation();
+    if (conv && conv.messages.length) {
+      conv.messages[conv.messages.length - 1].shot = true;
+      saveCurrentConversation();
+    }
+  } else if (turnShot) {
+    const why = safeText(currentContext?.screenshotError || 'the page could not be captured');
+    addMessage('system', `📷 Screenshot did not ride this turn (${why}) — it went out as text only.`);
+  }
 
   // ---- Auto-reference the active tab on tier-0 turns ----
   // Whenever the policy thins this turn to URL-only (reads, same-page
