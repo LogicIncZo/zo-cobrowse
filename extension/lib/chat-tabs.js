@@ -115,9 +115,11 @@ export function renameConversation(convos, chatId, title) {
 /**
  * Case-insensitive substring search over conversations — matches the title or
  * any message's text. Empty query returns every summary (updatedAt desc),
- * same shape as the history view's list.
+ * same shape as the history view's list. Each summary carries a one-line
+ * `snippet` (the first user message, whitespace-collapsed + truncated) so the
+ * chat list can show what the conversation is about without opening it.
  *
- * @returns {Array<{id,title,createdAt,updatedAt,messageCount,isActive}>}
+ * @returns {Array<{id,title,snippet,createdAt,updatedAt,messageCount,isActive}>}
  */
 export function searchConversations(convos, query, { activeId = null } = {}) {
   const map = convos || {};
@@ -135,9 +137,20 @@ export function searchConversations(convos, query, { activeId = null } = {}) {
     .map((c) => ({
       id: c.id,
       title: txt(c.title).trim() || 'New Chat',
+      snippet: snippetOf(c),
       createdAt: c.createdAt || 0,
       updatedAt: c.updatedAt || 0,
       messageCount: Array.isArray(c.messages) ? c.messages.length : 0,
       isActive: c.id === activeId,
     }));
+}
+
+const SNIPPET_MAX = 90;
+
+/** One-line preview of a conversation: its first user message, collapsed. */
+function snippetOf(convo) {
+  const msgs = Array.isArray(convo.messages) ? convo.messages : [];
+  const firstUser = msgs.find((m) => m && m.role === 'user' && txt(m.text).trim());
+  const s = txt(firstUser && firstUser.text).replace(/\s+/g, ' ').trim();
+  return s.length > SNIPPET_MAX ? s.slice(0, SNIPPET_MAX - 1) + '…' : s;
 }

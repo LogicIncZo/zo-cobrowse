@@ -9,15 +9,22 @@ Copy / mode / model / time / feedback controls.
 
 - **Composer** — type a query; the Send button stays disabled until you type
   something.
+- **Starter chips** — a fresh chat shows four clickable starting points
+  (summarize, `!context` peek, extract links, research) that prefill the
+  composer; the card retires itself on the first message.
 - **Assistant messages** — rendered as escaped Markdown (nothing is injected
-  as raw HTML).
+  as raw HTML); fenced code blocks get a **Copy** button.
 - **Thinking** — when Zo returns a `reasoning` field alongside actions, it
   renders as muted inline prose for short reasoning, or collapses into a
   "💭 Thought" trace for longer reasoning.
 - **Action cards** — browser actions surface as a grouped, sticky timeline
   with per-action status (pending → running → done).
-- **Per-turn footer** — Copy, mode, model, timestamp (relative), and feedback
-  on every assistant message.
+- **Per-turn footer** — Copy, mode, model, timestamp (relative), feedback, and
+  a **context-tier chip** (🔗 URL only / 📝 Text / 🧩 Elements / 📷 Screenshot)
+  showing exactly how much page context that turn sent — hover for the
+  policy's reason.
+- **⬇ Latest pill** — appears when the chat log is scrolled away from the
+  bottom; click to snap back.
 - **Cancel** — press `Esc` while Zo is responding to interrupt the stream.
 
 ## Bang commands
@@ -118,13 +125,33 @@ Co-browse (the default) runs at tier 2, so Zo gets clickable elements and form
 fields with selectors to act on. The Visual mode runs at tier 3. See
 [Modes](../guide/modes) for the full mapping.
 
+**Follow-ups are cheap by design.** Within a conversation, full context is
+attached at most once per stable page — same-page follow-ups send the URL/title
+pointer only and rely on Zo's conversation threading. Every assistant footer's
+context-tier chip shows what the turn actually sent (hover for the reason), and
+the [prompt inspector](#context-capture) previews the
+exact prompt before you send. If a stream died before Zo's thread was
+established, the next action turn re-attaches full context automatically — a
+fresh thread holds nothing.
+
+Referenced tabs follow the same send-once rule: a tab's 500-char excerpt is
+billed once; unchanged pages ride as a pointer line ("already provided above")
+on later turns.
+
 ## Conversation history
 
-- Chat history is stored locally in `chrome.storage.local` (key
-  `zo_cobrowse_history`, capped at 50 messages) for continuity.
-- Zo's `conversation_id` is tracked by the background service worker and sent
-  on every `/zo/ask` call so the **thread** continues on Zo's side too.
-- **New Chat** clears both: it resets the Zo thread and clears stored history.
+- Several chats stay open at once as **chat tabs** above the composer (≤8, LRU
+  evicted; a pulsing dot marks a backgrounded chat that's still streaming).
+  Each chat has its own Zo thread and its own context-dedup state.
+- **History** (☰) lists past conversations grouped by date with a one-line
+  **preview snippet** of each chat's opening ask, live search with match
+  highlighting, ✎ inline rename, and ✕ delete (with confirmation).
+- Chat history is stored locally in `chrome.storage.local`
+  (`cobrowse_convos`, capped at 50 messages per chat) for continuity.
+- Zo's `conversation_id` is tracked **per chat** and sent on every `/zo/ask`
+  call so the thread continues on Zo's side too.
+- **New Chat** (✚) starts a fresh chat: new Zo thread, fresh context state —
+  previous chats stay in History.
 
 ## Error handling
 

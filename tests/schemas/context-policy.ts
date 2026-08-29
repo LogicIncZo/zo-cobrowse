@@ -12,6 +12,10 @@ export const ConversationStateSchema = z.object({
   // Tab contexts (send-once per tab): { [tabId]: pageHash }. Optional so
   // legacy persisted states still validate.
   tabsSent: z.record(z.string(), z.string()).optional(),
+  // Referenced-tab manifest dedup: { [tabId]: contentKey } — an unchanged
+  // tab's excerpt is NOT re-sent on follow-ups (manifest line only). Optional
+  // so legacy persisted states still validate.
+  tabManifestSent: z.record(z.string(), z.string()).optional(),
 }).passthrough();
 export type ConversationState = z.infer<typeof ConversationStateSchema>;
 

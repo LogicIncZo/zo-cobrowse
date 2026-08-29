@@ -12,7 +12,7 @@ import {
   saveConversationState,
 } from './lib/context-policy.js';
 import { describePrompt } from './lib/prompt.js';
-import { assignRefs, ensureActiveTabRef, isBlankPage } from './lib/tab-contexts.js';
+import { assignRefs, ensureActiveTabRef, isBlankPage, thinTabExcerpts } from './lib/tab-contexts.js';
 import { visionModelSuggestion, modelVisionSupport, findModelEntry } from './lib/vision.js';
 import { extractUrls, MAX_LINK_CHIPS } from './lib/links.js';
 import { WORKSPACE_ROOT, filterPickerEntries } from './lib/pickers.js';
@@ -246,6 +246,7 @@ async function finishInit() {
     await loadQuickActions();
     await loadTtsConfig();
     initTabStrip();
+    initJumpToLatest();
     connectStreamingPort();
     chrome.storage.onChanged.addListener((changes) => {
       if (changes[STORAGE_ACTIONS_KEY]) {
@@ -570,6 +571,7 @@ async function loadConversations() {
   // If no active conversation, create one
   if (!activeId || !conversations[activeId]) {
     createNewConversation();
+    renderCurrentConversation(); // fresh chat: system message + empty-state chips
   } else {
     if (!tabsState.openIds.length) tabsState = openChatTab(tabsState, activeId);
     renderCurrentConversation();
@@ -669,16 +671,78 @@ async function ensureActiveConversation() {
   }
 }
 
+// ---- Empty-state starter chips ----
+// An empty chat shows mode-agnostic starting points as clickable chips that
+// prefill the composer — the panel answers "what can I even ask?" at a glance.
+// The card removes itself the moment a real message lands.
+const EMPTY_STATE_CHIPS = [
+  { label: '📝 Summarize this page', value: 'Summarize this page' },
+  { label: '❓ What is on this page?', value: '!context What are the main points on this page?' },
+  { label: '📥 Extract the links', value: 'Extract all links on this page as a list' },
+  { label: '🔬 Research this topic', value: 'Research this page\'s topic and give me the key facts' },
+];
+function renderEmptyState() {
+  let card = document.getElementById('empty-state');
+  if (card) card.remove();
+  card = document.createElement('div');
+  card.id = 'empty-state';
+  card.className = 'empty-state';
+  const hint = document.createElement('div');
+  hint.className = 'empty-state-hint';
+  hint.textContent = 'Try asking:';
+  card.appendChild(hint);
+  const chipRow = document.createElement('div');
+  chipRow.className = 'empty-state-chips';
+  for (const chip of EMPTY_STATE_CHIPS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'empty-state-chip';
+    btn.textContent = chip.label;
+    btn.title = chip.value;
+    btn.addEventListener('click', () => {
+      input.value = chip.value;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.focus();
+    });
+    chipRow.appendChild(btn);
+  }
+  card.appendChild(chipRow);
+  msgsEl.appendChild(card);
+}
+
+// ---- Jump to latest ----
+// While a stream is live (or after new content lands) the log no longer
+// force-scrolls under the user's finger; a ⬇ pill appears whenever the view
+// is scrolled away from the bottom and snaps back on click.
+const JUMP_LATEST_THRESHOLD = 240;
+function msgsNearBottom() {
+  return msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < JUMP_LATEST_THRESHOLD;
+}
+function initJumpToLatest() {
+  const btn = document.getElementById('jump-latest');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    msgsEl.scrollTop = msgsEl.scrollHeight;
+    btn.classList.add('hidden');
+  });
+  msgsEl.addEventListener('scroll', () => {
+    btn.classList.toggle('hidden', msgsNearBottom());
+  }, { passive: true });
+}
+
 function renderCurrentConversation() {
   msgsEl.innerHTML = '';
   const conv = getActiveConversation();
   if (!conv || !conv.messages.length) {
     addMessageDOM('system', 'Connected to Zo. Ask me about this page, or tell me what to do.');
+    renderEmptyState();
     return;
   }
   for (const msg of conv.messages) {
     const m = msg.role === 'assistant' ? healAssistantMessage(msg) : msg;
-    const opts = m.role === 'assistant' ? { timestamp: m.timestamp, durationMs: m.durationMs } : {};
+    const opts = m.role === 'assistant'
+      ? { timestamp: m.timestamp, durationMs: m.durationMs, contextTier: m.contextTier, contextReason: m.contextReason }
+      : {};
     const el = addMessageDOM(m.role, m.text, opts);
     if (m.role === 'assistant' && m.reasoning) addReasoningBubble(el, m.reasoning);
     if (m.role === 'assistant' && m.tools) addExploredRegion(el, m.tools);
@@ -728,6 +792,7 @@ async function startNewConversation() {
   // Clear UI
   msgsEl.innerHTML = '';
   addMessageDOM('system', 'Connected to Zo. Ask me about this page, or tell me what to do.');
+  renderEmptyState();
 
   // If in history view, switch back
   if (isHistoryView) {
@@ -950,7 +1015,19 @@ function renderHistoryView() {
 
       const titleEl = document.createElement('div');
       titleEl.className = 'history-card-title';
-      titleEl.textContent = item.title;
+      appendHighlighted(titleEl, item.title, query);
+
+      // Main column: title + one-line preview of the opening ask (identifying
+      // a chat without opening it). No snippet → title-only, layout unchanged.
+      const mainEl = document.createElement('div');
+      mainEl.className = 'history-card-main';
+      mainEl.appendChild(titleEl);
+      if (item.snippet) {
+        const snippetEl = document.createElement('div');
+        snippetEl.className = 'history-card-snippet';
+        appendHighlighted(snippetEl, item.snippet, query);
+        mainEl.appendChild(snippetEl);
+      }
 
       const metaEl = document.createElement('div');
       metaEl.className = 'history-card-meta';
@@ -977,7 +1054,7 @@ function renderHistoryView() {
         }
       });
 
-      card.appendChild(titleEl);
+      card.appendChild(mainEl);
       card.appendChild(metaEl);
       card.appendChild(renameBtn);
       card.appendChild(deleteBtn);
@@ -988,6 +1065,30 @@ function renderHistoryView() {
     }
 
     historyList.appendChild(groupEl);
+  }
+}
+
+/** Append `text` into `el`, wrapping case-insensitive `query` matches in
+ * <mark> (safe DOM nodes only — no innerHTML). No query → plain text. */
+function appendHighlighted(el, text, query) {
+  const q = (query || '').trim().toLowerCase();
+  if (!q) {
+    el.textContent = text;
+    return;
+  }
+  const lower = text.toLowerCase();
+  let i = 0;
+  for (;;) {
+    const idx = lower.indexOf(q, i);
+    if (idx === -1) {
+      el.appendChild(document.createTextNode(text.slice(i)));
+      break;
+    }
+    el.appendChild(document.createTextNode(text.slice(i, idx)));
+    const mark = document.createElement('mark');
+    mark.textContent = text.slice(idx, idx + q.length);
+    el.appendChild(mark);
+    i = idx + q.length;
   }
 }
 
@@ -1348,7 +1449,7 @@ function relativeTime(ts, now = Date.now()) {
 // locally on the history entry (no backend).
 function addMessageFooter(parentMsgEl, opts = {}) {
   if (!parentMsgEl || parentMsgEl.querySelector('.msg-footer')) return null;
-  const { timestamp, modeName, modelName, durationMs } = opts;
+  const { timestamp, modeName, modelName, durationMs, contextTier, contextReason } = opts;
   const footer = document.createElement('div');
   footer.className = 'msg-footer';
 
@@ -1384,6 +1485,18 @@ function addMessageFooter(parentMsgEl, opts = {}) {
     modelChip.textContent = safeText(modelDisplay);
     modelChip.title = 'Model';
     footer.appendChild(modelChip);
+  }
+
+  // Context-tier chip: shows how much page context this turn actually sent
+  // (the decideTurn policy outcome) — makes the token story visible per turn.
+  if (Number.isInteger(contextTier)) {
+    const CTX_ICONS = ['🔗', '📝', '🧩', '📷'];
+    const CTX_NAMES = ['URL only', 'Text', 'Elements', 'Screenshot'];
+    const ctxChip = document.createElement('span');
+    ctxChip.className = 'msg-footer-chip msg-footer-context';
+    ctxChip.textContent = `${CTX_ICONS[contextTier] || '🔗'} ${CTX_NAMES[contextTier] || 'Tier ' + contextTier}`;
+    ctxChip.title = safeText(contextReason) || 'Context sent this turn';
+    footer.appendChild(ctxChip);
   }
 
   if (timestamp) {
@@ -1789,7 +1902,7 @@ function addMessage(role, text, opts = {}) {
   const isBackground = !!chatId && chatId !== activeId;
   let div = null;
   if (!isBackground) {
-    div = addMessageDOM(role, text);
+    div = addMessageDOM(role, text, opts);
     // Auto-read assistant messages via TTS
     if (role === 'assistant' && ttsAutoRead && text) {
       speakText(text);
@@ -1811,9 +1924,33 @@ function addMessage(role, text, opts = {}) {
 }
 
 
+/** Upgrade every <pre> in a rendered message with a Copy button. Idempotent —
+ * safe to call again on containers that already got their buttons. */function enhanceCodeBlocks(container) {
+  if (!container || !container.querySelectorAll) return;
+  for (const pre of container.querySelectorAll('pre')) {
+    if (pre.querySelector('.code-copy-btn')) continue;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'code-copy-btn';
+    btn.textContent = 'Copy';
+    btn.title = 'Copy code';
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const code = (pre.querySelector('code') || pre).textContent || '';
+      try {
+        await navigator.clipboard.writeText(code);
+        btn.textContent = 'Copied ✓';
+      } catch {
+        btn.textContent = '✕';
+      }
+      setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+    });
+    pre.appendChild(btn);
+  }
+}
+
 function markdownToHtml(md) {
-  if (!md) return '';
-  // Escape HTML to prevent XSS
+  if (!md) return '';  // Escape HTML to prevent XSS
   var html = escapeHtml(md);
 
   // Horizontal rules
@@ -1826,10 +1963,12 @@ function markdownToHtml(md) {
   html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
   html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
 
-  // Code blocks: triple backtick with optional language
+  // Code blocks: triple backtick with optional language. `html` is ALREADY
+  // fully escaped above — re-escaping the code here would double-escape
+  // (&#39; showing up literally in the block and in Copy).
   html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
     var cls = lang ? ' class="lang-' + escapeHtml(lang) + '"' : '';
-    return '<pre><code' + cls + '>' + escapeHtml(code.trim()) + '</code></pre>';
+    return '<pre><code' + cls + '>' + code.trim() + '</code></pre>';
   });
   // Inline code
   html = html.replace(/`([^`]+)`/g, function(_, c) { return '<code>' + escapeHtml(c) + '</code>'; });
@@ -1917,6 +2056,11 @@ function markdownToHtml(md) {
 
 function addMessageDOM(role, text, opts = {}) {
   text = safeText(text);
+  // First real message retires the empty-state starter card.
+  if (role !== 'system' && role !== 'thinking') {
+    const emptyCard = document.getElementById('empty-state');
+    if (emptyCard) emptyCard.remove();
+  }
   const div = document.createElement('div');
   div.className = `msg msg-${role}`;
   const body = document.createElement('div');
@@ -1927,6 +2071,7 @@ function addMessageDOM(role, text, opts = {}) {
   // safeText keep every text sink escaped — never raw innerHTML of
   // untrusted text.
   body.innerHTML = markdownToHtml(text);
+  enhanceCodeBlocks(body);
 
   div.appendChild(body);
 
@@ -1955,6 +2100,8 @@ function addMessageDOM(role, text, opts = {}) {
       modeName: mode.name,
       modelName: config.selectedModel || undefined,
       durationMs: opts.durationMs,
+      contextTier: opts.contextTier,
+      contextReason: opts.contextReason,
     });
   }
 
@@ -2135,7 +2282,11 @@ function previewTabContexts({ includeActive = false } = {}) {
   }
   const list = [...(autoActive ? [autoActive] : []), ...picked];
   if (!list.length) return [];
-  return assignRefs(list.map((t) => ({
+  // Mirror the send path's send-once excerpt dedup so the preview shows the
+  // same "already provided above" pointer lines the real prompt will carry
+  // (tabContentKey is url|title — both available here).
+  const thinned = thinTabExcerpts(list, contextState && contextState.tabManifestSent);
+  return assignRefs(thinned.contexts.map((t) => ({
     tabId: t.tabId,
     title: t.title || '',
     url: t.url || '',
@@ -2145,6 +2296,7 @@ function previewTabContexts({ includeActive = false } = {}) {
     excerpt: '',
     isActive: !!t.active,
     available: true,
+    ...(t.pointerOnly ? { pointerOnly: true } : {}),
   })));
 }
 
@@ -3502,7 +3654,7 @@ function handleStreamMessage(msg) {
           if (msg.conversationId) conv.zoThreadId = msg.conversationId;
           if (responseText) {
             const reasoningVal = safeText(msg.reasoning) || safeText(streamSession.reasoningText) || undefined;
-            conv.messages.push({ role: 'assistant', text: responseText, reasoning: reasoningVal, timestamp: doneTimestamp, durationMs: doneDuration || undefined });
+            conv.messages.push({ role: 'assistant', text: responseText, reasoning: reasoningVal, timestamp: doneTimestamp, durationMs: doneDuration || undefined, contextTier: streamSession.effectiveTier, contextReason: streamSession.contextReason });
             if (conv.messages.length > MAX_HISTORY) {
               conv.messages = conv.messages.slice(-MAX_HISTORY);
             }
@@ -3550,6 +3702,11 @@ function handleStreamMessage(msg) {
             streamingTexts.forEach(el => el.remove());
             placeholders.forEach(el => el.remove());
             body.insertAdjacentHTML('beforeend', renderedHtml);
+          } else if (finalText && !body.textContent.trim()) {
+            // Single-chunk stream (PartStart carried the whole answer → one
+            // chunk created the bubble but no span) — render the full markdown
+            // into the still-empty body rather than shipping an empty bubble.
+            body.insertAdjacentHTML('beforeend', markdownToHtml(finalText));
           }
         }
         // Add TTS button if not already present (only if there's actual content).
@@ -3598,13 +3755,20 @@ function handleStreamMessage(msg) {
       if (streamSession.msgEl) {
         const timerLine = streamSession.msgEl.querySelector('.msg-processing-timer');
         if (timerLine) timerLine.remove();
-        const mode = resolveMode(activeModeId, customModes);
+        // Resolve the TURN's mode (a !mode bang may differ from the active
+        // select) so the footer chip names what actually ran.
+        const mode = resolveMode(streamSession.modeId || activeModeId, customModes, modeOverrides);
         addMessageFooter(streamSession.msgEl, {
           timestamp: doneTimestamp,
           modeName: mode.name,
           modelName: config.selectedModel || undefined,
           durationMs: doneDuration,
+          contextTier: streamSession.effectiveTier,
+          contextReason: streamSession.contextReason,
         });
+        // Code blocks in the final rendered markdown get their Copy buttons.
+        const doneBody = streamSession.msgEl.querySelector('.msg-body');
+        if (doneBody) enhanceCodeBlocks(doneBody);
         // Research answers: link chips + Open all (prose answers only — an
         // action turn's links already ran as navigate/click).
         if (!hasActions && responseText) {
@@ -3619,7 +3783,7 @@ function handleStreamMessage(msg) {
         if (responseText) {
           const reasoningVal = safeText(msg.reasoning) || safeText(streamSession.reasoningText) || undefined;
           // Persist to conversation (chronological feed is already in the body; just save reasoning)
-          conv.messages.push({ role: 'assistant', text: responseText, reasoning: reasoningVal, timestamp: doneTimestamp, durationMs: doneDuration || undefined });
+          conv.messages.push({ role: 'assistant', text: responseText, reasoning: reasoningVal, timestamp: doneTimestamp, durationMs: doneDuration || undefined, contextTier: streamSession.effectiveTier, contextReason: streamSession.contextReason });
           if (conv.messages.length > MAX_HISTORY) {
             conv.messages = conv.messages.slice(-MAX_HISTORY);
           }
@@ -3641,6 +3805,9 @@ function handleStreamMessage(msg) {
       streamSession.fullText = '';
       streamSession.reasoningText = '';
       streamSession.chatId = null;
+      streamSession.effectiveTier = undefined;
+      streamSession.contextReason = undefined;
+      streamSession.modeId = undefined;
       break;
     }
     case 'STREAM_ERROR': {
@@ -3930,6 +4097,15 @@ sendQuery = async function() {
   // (in the background) thins what actually reaches Zo using effectiveTier.
   const pageHash = computePageHash(currentContext, mode.contextTier);
   const pageBlank = isBlankPage(currentContext?.url || '');
+  // Per-chat threading: send the chat's stored Zo thread id (the background
+  // echoes the effective id back on STREAM_DONE / the fallback response).
+  // Read BEFORE the policy decision — follow-up dedup ("context already sent")
+  // is only safe when the Zo thread actually exists; a fresh thread (e.g. a
+  // retry after a stream that died before the conversation_id echo) holds
+  // nothing, so the decision re-attaches instead of trusting a thread that
+  // isn't there.
+  const activeConvPre = getActiveConversation();
+  const threadId = (activeConvPre && activeConvPre.zoThreadId) || undefined;
   const turnDecision = decideTurn({
     mode,
     query: effectiveQuery,
@@ -3937,6 +4113,7 @@ sendQuery = async function() {
     state: contextState,
     pageHash,
     pageBlank,
+    hasThread: !!threadId,
   });
   contextState = turnDecision.newState;
   saveConversationState(activeId, contextState);
@@ -3955,12 +4132,24 @@ sendQuery = async function() {
     if (activeRef) sendTabContexts = assignRefs(ensureActiveTabRef(tabContexts, activeRef));
   }
 
+  // ---- Follow-up excerpt dedup (send-once tab manifests) ----
+  // Tabs whose content key was already sent ride as pointer-only manifest
+  // lines — Zo's conversation threading retains the 500-char excerpts, so
+  // re-sending them every turn is pure duplicate tokens. The dedup map lives
+  // in the per-chat context state and persists with it.
+  const thinned = thinTabExcerpts(sendTabContexts, contextState.tabManifestSent);
+  sendTabContexts = assignRefs(thinned.contexts);
+  contextState = { ...contextState, tabManifestSent: thinned.sentMap };
+  saveConversationState(activeId, contextState);
+
   renderPromptInspector(); // dedup state advanced — refresh the preview
 
-  // Per-chat threading: send the chat's stored Zo thread id (the background
-  // echoes the effective id back on STREAM_DONE / the fallback response).
-  const activeConv = getActiveConversation();
-  const threadId = (activeConv && activeConv.zoThreadId) || undefined;
+  // Stash the turn's context decision + mode for the STREAM_DONE footer (the
+  // context-tier chip and the correct post-bang mode name) and the persisted
+  // assistant record.
+  streamSession.effectiveTier = effectiveTier;
+  streamSession.contextReason = turnDecision.reason;
+  streamSession.modeId = modeId;
 
   // --- Streaming path: (re)connect port if needed ---
   if (!streamPort) connectStreamingPort();
@@ -4021,8 +4210,8 @@ sendQuery = async function() {
   });
 
   // Persist the echoed thread id for this chat (before any early return).
-  if (resp && resp.conversationId && activeConv) {
-    activeConv.zoThreadId = resp.conversationId;
+  if (resp && resp.conversationId && activeConvPre) {
+    activeConvPre.zoThreadId = resp.conversationId;
     saveConversationById(activeId);
   }
 

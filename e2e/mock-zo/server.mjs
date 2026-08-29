@@ -78,6 +78,7 @@ function pickScenario(input) {
   if (String(input || "").includes("## Auto-fetched:")) return "pull-followup";
   const q = userRequest(input);
   if (q.includes("schema")) return "pull-form";
+  if (q.includes("code sample")) return "code-sample";
   if (q.includes("checkout")) return "fill-form";
   if (q.includes("classic form")) return "classic-form";
   if (q.includes("chunked")) return "fill-chunked";
@@ -237,6 +238,12 @@ const server = http.createServer(async (req, res) => {
     }
 
     const scenario = pickScenario(body.input);
+    if (scenario === "code-sample") {
+      // UX-polish spec: a prose answer containing a fenced code block (the
+      // sidepanel renders <pre><code> with a Copy button at STREAM_DONE).
+      const text = "Here is a sample:\n```js\nconsole.log('hello zo');\n```\nThat is the code.";
+      return streamSse(res, [textStart(text), completed()], { delayMs: 40 });
+    }
     if (scenario === "pull-form") {
       // Zo asks for the complete form schema before acting (#24 pull loop).
       const envelope = JSON.stringify({

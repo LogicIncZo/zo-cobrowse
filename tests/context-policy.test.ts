@@ -42,6 +42,7 @@ describe("createConversationState", () => {
       lastCaptureTier: null,
       turnsSinceFullCapture: 0,
       tabsSent: {},
+      tabManifestSent: {},
     });
   });
 
@@ -324,5 +325,45 @@ describe("loadConversationState / saveConversationState (per chat)", () => {
     const fresh = await loadConversationState("chat1");
     expect(fresh.lastCaptureHash).toBeNull();
     await expect(saveConversationState("chat1", createConversationState())).resolves.toBeUndefined();
+  });
+});
+
+describe("decideTurn — hasThread guard (follow-up dedup safety)", () => {
+  const mode = { expectJson: true, contextTier: 2 };
+  const hash = "u|t|1|2|0";
+  const captured = { ...createConversationState(), lastCaptureHash: hash, lastCaptureTier: 2 };
+
+  it("re-attaches when the Zo thread is not established even on an unchanged page", () => {
+    // Retry-after-failure: the previous turn recorded the capture hash but
+    // died before the conversation_id echo — a fresh thread holds nothing.
+    const d = decideTurn({ mode, query: "click submit", state: captured, pageHash: hash, hasThread: false });
+    expectValidDecision(d);
+    expect(d.attach).toBe(true);
+    expect(d.effectiveTier).toBe(2);
+    expect(d.reason).toContain("No thread yet");
+  });
+
+  it("keeps the follow-up dedup when the thread exists (default behavior preserved)", () => {
+    const withThread = decideTurn({ mode, query: "click submit", state: captured, pageHash: hash, hasThread: true });
+    expectValidDecision(withThread);
+    expect(withThread.attach).toBe(false);
+    expect(withThread.effectiveTier).toBe(0);
+    expect(withThread.reason).toContain("Follow-up");
+    // Legacy callers that don't pass hasThread at all behave identically.
+    const legacy = decideTurn({ mode, query: "click submit", state: captured, pageHash: hash });
+    expect(legacy.attach).toBe(false);
+  });
+
+  it("hasThread does not override explicit attaches or blank-page suppression", () => {
+    const explicit = decideTurn({ mode, query: "q", state: captured, pageHash: hash, hasThread: false, forceRefresh: true });
+    expect(explicit.attach).toBe(true);
+    const blank = decideTurn({ mode, query: "click submit", state: captured, pageHash: hash, pageBlank: true, hasThread: false });
+    expect(blank.attach).toBe(false);
+  });
+
+  it("creates fresh state carrying an empty tabManifestSent map", () => {
+    const st = createConversationState();
+    expect(st.tabManifestSent).toEqual({});
+    expectValidState(st);
   });
 });

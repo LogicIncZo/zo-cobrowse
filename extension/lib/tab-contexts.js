@@ -85,6 +85,8 @@ export function assignRefs(tabContexts) {
  * prompt assembler owns section headers). One line per tab plus an optional
  * excerpt line, applying the shared excerpt budget in order:
  *   - available background tab → stats + excerpt
+ *   - pointerOnly (excerpt already sent on an earlier turn) →
+ *     "already provided above" and no excerpt (threading retains it)
  *   - active tab already attached by the context policy this turn →
  *     "(this tab, attached above)" and no excerpt (content rides in
  *     ## Page Content — no double-send)
@@ -107,6 +109,8 @@ export function buildTabManifest(tabContexts, opts) {
 
     if (t.isActive && activeAttached) {
       line = `- [${t.ref}] ${quoted} — ${host} — (this tab, attached above)`;
+    } else if (t.pointerOnly) {
+      line = `- [${t.ref}] ${quoted} — ${host} — already provided above`;
     } else if (!t.available) {
       line = `- [${t.ref}] ${quoted} — ${host} — unavailable, URL only`;
       line += t.url ? ` — ${t.url}` : '';
@@ -206,6 +210,51 @@ export function noteTabSent(state, tabId, pageHash) {
 /** True when this tab's content was already sent at exactly this page hash. */
 export function isTabSentAt(state, tabId, pageHash) {
   return !!(state && state.tabsSent && state.tabsSent[String(tabId)] === pageHash);
+}
+
+/**
+ * Cheap content key for an already-captured TabContext: the manifest-excerpt
+ * dedup compares these (url + title — the same navigation-signal precision
+ * computePageHash uses; mid-page content changes ride under it, which is
+ * acceptable: threading retains the stale 500-char hint and `read_tab` /
+ * `read_page` re-pull full content on demand).
+ */
+export function tabContentKey(t) {
+  if (!t || typeof t !== 'object') return '';
+  return `${t.url || ''}|${t.title || ''}`;
+}
+
+/**
+ * Follow-up token thinning for referenced tabs (send-once excerpts): a tab
+ * whose content key was already sent to Zo — recorded in the per-chat
+ * conversation state's `tabManifestSent` — rides as a pointer-only manifest
+ * line ("already provided above") instead of re-sending its 500-char
+ * excerpt. Zo's conversation threading retains the excerpt; the manifest line
+ * keeps the T-ref alive for read_tab escalation.
+ *
+ * Pure. Returns { contexts, sentMap }: the thinned per-turn array (inputs not
+ * mutated) and the updated dedup map to persist (every sent tab is recorded,
+ * so a LATER turn's unchanged tab dedups even if THIS turn is the first send).
+ *
+ * @param {Array<object>} tabContexts  this turn's tab contexts (pre-ref assignment)
+ * @param {Record<string,string>|undefined} sentMap  prior `tabManifestSent`
+ */
+export function thinTabExcerpts(tabContexts, sentMap) {
+  const prior = sentMap && typeof sentMap === 'object' ? sentMap : {};
+  const contexts = [];
+  const next = { ...prior };
+  for (const t of Array.isArray(tabContexts) ? tabContexts : []) {
+    if (!t || typeof t !== 'object' || t.tabId == null) continue;
+    const key = tabContentKey(t);
+    const alreadySent = key && prior[String(t.tabId)] === key;
+    if (alreadySent) {
+      contexts.push({ ...t, pointerOnly: true, excerpt: '' });
+    } else {
+      contexts.push({ ...t });
+      if (key) next[String(t.tabId)] = key;
+    }
+  }
+  return { contexts, sentMap: next };
 }
 
 /**

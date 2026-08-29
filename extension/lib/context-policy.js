@@ -35,6 +35,12 @@ export function createConversationState() {
     // Tab contexts (send-once per tab): { [tabId]: pageHash }. Managed by
     // noteTabSent/isTabSentAt in lib/tab-contexts.js.
     tabsSent: {},
+    // Referenced-tab manifest dedup: { [tabId]: contentKey } — the content key
+    // (url|title|excerpt-length) each tab's excerpt was last sent at. Managed
+    // by thinTabExcerpts in lib/tab-contexts.js; an unchanged tab's excerpt is
+    // NOT re-sent on follow-ups (manifest line only) since Zo's conversation
+    // threading already holds it.
+    tabManifestSent: {},
   };
 }
 
@@ -84,17 +90,24 @@ export function stripToPointer(pageContext) {
  *     page hash changed since the last attach. This covers the first turn of a
  *     conversation (lastCaptureHash is null) and any navigation. A same-page
  *     follow-up action turn sends URL-only, relying on Zo retaining the
- *     selectors it already received via conversation_id.
+ *     selectors it already received via conversation_id — UNLESS threading is
+ *     not established (`hasThread === false`, e.g. a retry after a stream that
+ *     died before the conversation_id echo): a fresh Zo thread holds nothing,
+ *     so the page re-attaches.
  *   - read intent → URL only (tier 0) unless explicitly requested.
+ *
+ * `hasThread` defaults to true so legacy callers (and the "thread will exist
+ * by the time this matters" assumption) keep today's behavior; only the
+ * sidepanel passes the live per-chat value.
  *
  * `attach === false` means effectiveTier 0; the caller captures at tier 0 and
  * buildPrompt emits only `## Page`. `newState` is the updated conversation
  * state (attach records the hash; non-attach just advances the turn counter).
  *
- * @param {{ mode: object, query: string, bang?: object, state?: object, pageHash?: string, pageBlank?: boolean, forceRefresh?: boolean }} args
+ * @param {{ mode: object, query: string, bang?: object, state?: object, pageHash?: string, pageBlank?: boolean, forceRefresh?: boolean, hasThread?: boolean }} args
  * @returns {{ effectiveTier: number, reason: string, attach: boolean, newState: object }}
  */
-export function decideTurn({ mode, query, bang, state, pageHash, pageBlank = false, forceRefresh = false }) {
+export function decideTurn({ mode, query, bang, state, pageHash, pageBlank = false, forceRefresh = false, hasThread = true }) {
   const st = state || createConversationState();
   const isAction = !!mode && !!mode.expectJson && !shouldDowngradeToJsonDisabled(mode, query);
   const contextRequested = !!bang && bang.kind === 'context';
@@ -105,7 +118,7 @@ export function decideTurn({ mode, query, bang, state, pageHash, pageBlank = fal
   let attach;
   if (pageBlank) attach = false; // cold start: nothing to attach, ever
   else if (explicit) attach = true;
-  else if (isAction) attach = pageChanged; // first turn (pageChanged) or navigation
+  else if (isAction) attach = pageChanged || !hasThread; // first turn / navigation / thread lost
   else attach = false; // reads: opt-in only
 
   const modeTier = mode && Number.isInteger(mode.contextTier) ? mode.contextTier : 0;
@@ -117,6 +130,7 @@ export function decideTurn({ mode, query, bang, state, pageHash, pageBlank = fal
   else if (contextRequested) reason = '!context · full context';
   else if (isAction && !hasCaptured) reason = 'First turn · action context';
   else if (isAction && pageChanged) reason = 'Page changed · re-attaching';
+  else if (isAction && !hasThread) reason = 'No thread yet · re-attaching (fresh Zo thread holds nothing)';
   else if (isAction && !pageChanged) reason = 'Follow-up · URL only (context already sent)';
   else reason = 'Read · URL only (type !context to attach)';
 
