@@ -14,7 +14,7 @@
 - **CI/CD:** CI runs on every branch push + PR to `main` (tests + transpile + release checks + zip artifact); `.github/workflows/release.yml` publishes `v*` tag releases (used for v0.0.2)
 - **Streaming:** hardened end-to-end (sessionId isolation, port-disconnect safety, retry correctness, 60s liveness timeout)
 - **P0/P1/P2/P3 QA findings:** all closed (P2-31 deferred by design — see below)
-- **Release:** ✅ **v0.2.0** tagged + released (2026-08-28; v0.1.0 was 2026-08-19). Next milestone: **v0.2.1** — candidate slate per the 0.2.0 build order: **#19 → #10 → #29**; Chrome Web Store submission (#11) stays its own 0.2.x milestone
+- **Release:** ✅ **v0.2.0** tagged + released (2026-08-28; v0.1.0 was 2026-08-19). Next milestones: **v0.2.1** — carry-over slate per the 0.2.0 build order: **#19 → #10 → #29** — then **v0.3.0** (competitive round 2, issues #46–#54, see the 🎯 section below); Chrome Web Store submission (#11) stays its own milestone after 0.3.0 features land
 
 ## ✅ Completed this round
 
@@ -68,6 +68,26 @@ Scope chosen in-session ("Everything" option) against a full competitive scan of
 **Build order: #19 → #26 → #10 → #29** (each independently shippable; #29's bridge consumes the other three). Deferred past 0.2.0 with rationale (analysis §5): memory, voice, post-hoc undo, payment rails, #15/#18 shared sessions, cloud/browser-closed checks (FCM), #20, #21, #11.
 
 **Status 2026-08-28 (v0.2.0 shipped):** #26 **DONE** (batch `fill_form` + review card + submit backstop + no-action-click-after-fill rule; e2e 11–15 + demo). **#19, #10, #29 carry into 0.2.x** — build order unchanged, #19 first.
+
+## 🎯 0.3.0 — planned 2026-08-29 (competitive round 2: "Memory, Audit & Control")
+
+Slate filed as detailed GitHub issues (**#46–#54**, all in the `0.3.0` milestone, each with competitive evidence + verification criteria) against a refresh of the Aug-2026 competitive scan: **`docs/superpowers/specs/2026-08-29-0.3.0-competitive-analysis.md`**. What moved since the 0.2.0 scan: ChatGPT desktop became a cross-browser agent layer (WebMCP consumption, event-triggered tasks, Computer-History→memories); memory shipped everywhere and hardened with privacy exclusions (Dia excludes banking/incognito); Perplexity shipped "Always ask" per-connector approvals; Opera Neon pivoted to a free agent runtime via MCP. The market converged on pause-and-confirm — our #26 gate is now the validated norm, and the remaining trust surface (user-facing autonomy dial, undo) is open ground.
+
+| Issue | Feature | Priority | Depends on |
+|-------|---------|----------|------------|
+| [#46](https://github.com/LogicIncZo/zo-cobrowse/issues/46) | Memory across sessions — Zo-workspace-backed recall + `<memory>` write protocol, privacy exclusions, `/memory` viewer | 🔴 High | — |
+| [#47](https://github.com/LogicIncZo/zo-cobrowse/issues/47) | Autonomy dial + per-site/per-action permissions — `lib/permissions.js` policy engine over the #26 park/confirm machinery | 🔴 High | — |
+| [#48](https://github.com/LogicIncZo/zo-cobrowse/issues/48) | Action audit & undo — reversible fills/scroll/tabs, session audit timeline; click stays audit-only | 🟡 Medium | fill/scroll undo none; tab-undo wants #10 verbs |
+| [#49](https://github.com/LogicIncZo/zo-cobrowse/issues/49) | WebMCP spike — consume site-declared tools (or expose ours); timeboxed, real window ~Chrome 156 desktop | 🟡 Medium | — |
+| [#50](https://github.com/LogicIncZo/zo-cobrowse/issues/50) | Tab compare — side-by-side verdicts across referenced tabs (#20 promoted) | 🟡 Medium | #10 actions half (0.2.1) |
+| [#51](https://github.com/LogicIncZo/zo-cobrowse/issues/51) | Export MD/PDF — conversation/page as Markdown download + reader-view PDF (#21 promoted) | 🟢 Nice | — |
+| [#52](https://github.com/LogicIncZo/zo-cobrowse/issues/52) | `read_file` pull action — on-demand workspace file contents via MCP (#28 follow-up) | 🟢 Nice | — |
+| [#53](https://github.com/LogicIncZo/zo-cobrowse/issues/53) | Write-assist round 3 — stream into the popover, follow-up iteration chips, unify setFieldValue | 🟢 Nice | — |
+| [#54](https://github.com/LogicIncZo/zo-cobrowse/issues/54) | Chat tabs round 2 — pin, restore-on-restart, export (shares the #51 serializer) | 🟢 Nice | — |
+
+**Build order:** memory (#46) → permissions (#47) → undo (#48) in the big lane; `read_file` (#52) + chat tabs r2 (#54) as parallel quick wins; compare (#50) right after the 0.2.1 #10 actions half; export (#51) + write-assist r3 (#53) fill the tail; WebMCP (#49) timeboxed anytime.
+
+**Out of 0.3.0 (rationale unchanged):** shared sessions #15/#18 (0.4), background/cloud execution (waits on a Zo-side scheduler; #29's serializable specs keep it additive), agentic payments (watch-only), voice (gap closed — we ship STT + TTS; TTS output live-verified 2026-08-29 via `e2e/probe-tts.ts`), #11 store listing (own milestone after 0.3.0), #34 Mode revisit (needs a spec; 0.3.x candidate).
 
 ## 🧪 Proposed 2026-08-15 — brainstormed, pending triage
 
