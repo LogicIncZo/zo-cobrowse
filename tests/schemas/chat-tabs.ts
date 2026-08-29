@@ -22,6 +22,8 @@ export const ChatMessageSchema = z
     tabRefs: z
       .array(z.object({ ref: z.string(), host: z.string(), title: z.string() }))
       .optional(),
+    /** True when the user armed the 📷 Image toggle for this turn (📷 pill). */
+    shot: z.boolean().optional(),
   })
   .passthrough();
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;

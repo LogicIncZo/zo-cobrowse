@@ -428,7 +428,9 @@ describe("auto-active-tab — sidepanel wiring", () => {
   });
 
   it("mirrors the auto-reference in the inspector preview", () => {
-    expect(spCode).toMatch(/previewTabContexts\(\{ includeActive: decision\.effectiveTier === 0 \}\)/);
+    // effTier = decision.effectiveTier after the 📷-toggle force (sendQuery
+    // and the inspector share the same post-force value).
+    expect(spCode).toMatch(/previewTabContexts\(\{ includeActive: effTier === 0 \}\)/);
     expect(spCode).toMatch(/includeActive = false/);
   });
 

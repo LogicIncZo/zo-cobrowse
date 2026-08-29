@@ -586,6 +586,102 @@ describe("vision-gated screenshots (#25)", () => {
   }, 30000);
 });
 
+describe("📷 Image toggle — send-once screenshot (#25 UX)", () => {
+  const reinstallCatalogHandler = () => fm.handle((url) => {
+    if (url.includes("/models/available")) return jsonResponse({ models: [{ model_name: "trio-model", label: "Trio Model" }] });
+    if (url.includes("/models/catalog")) return jsonResponse({ models: [
+      { model_name: "trio-model", label: "Trio Model", supports_images: false },
+      { model_name: "vision-model", label: "Vision Model", supports_images: true },
+    ] });
+    if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+    return sseResponse(zoSseText({ text: "It is a test page." }));
+  });
+
+  it("arming flips Mode to Visual and forces tier 3 on the next send only", async () => {
+    reinstallCatalogHandler();
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await waitUntil(() => panelWin.document.querySelector("#messages .msg-system"));
+
+    // Vision-capable model so the gate doesn't suppress the capture.
+    let screenshotCalls = 0;
+    const origCapture = bus.tabs.captureVisibleTab;
+    bus.tabs.captureVisibleTab = () => { screenshotCalls++; return Promise.resolve("data:image/jpeg;base64,/9j/ZmFrZQ=="); };
+    await bus.storage.sync.set({ zoModel: "vision-model", zoActiveMode: "cobrowse" });
+    await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "cobrowse", 5000);
+    await new Promise((r) => setTimeout(r, 50));
+
+    try {
+      // Arm: the toggle flips the Mode dropdown to Visual + highlights.
+      const toggle = panelWin.document.querySelector("#shot-toggle");
+      toggle.click();
+      expect(toggle.getAttribute("aria-pressed")).toBe("true");
+      await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "visual", 5000);
+      // Inspector mirrors the force BEFORE the send (preview = send).
+      await waitUntil(() => panelWin.document.querySelector("#prompt-inspector-meta")?.textContent?.includes("Screenshot"), 5000);
+
+      // Send (a read query — without the toggle the policy would pick tier 0).
+      const box = armAskCapture();
+      await typeAndSend("what color is the shirt?");
+      await waitUntil(() => box.msg != null, 8000);
+      expect(box.msg.effectiveTier).toBe(3); // forced by the toggle
+      expect(box.msg.modeId).toBe("visual");
+      expect(String(box.msg.pageContext.screenshotDataUrl || "")).toMatch(/^data:image/);
+      expect(screenshotCalls).toBeGreaterThanOrEqual(1);
+
+      // The user message shows the 📷 Screenshot pill…
+      await waitUntil(() => {
+        const pills = [...panelWin.document.querySelectorAll("#messages .msg-user")].flatMap((el) =>
+          [...el.querySelectorAll(".msg-mention")].map((p) => p.textContent || ""));
+        return pills.some((t) => t.includes("Screenshot"));
+      }, 10000);
+      // …the assistant footer carries the truthful 📷 chip…
+      await waitUntil(() => panelWin.document.querySelector(".msg-footer-shot"), 15000);
+      // …and the toggle auto-cleared (send-once). Mode STAYS Visual — the
+      // user sees it in the dropdown; nothing hides.
+      expect(toggle.getAttribute("aria-pressed")).toBe("false");
+
+      // The NEXT send is not forced: same page read turn → back to tier 0.
+      const box2 = armAskCapture();
+      await typeAndSend("and now just summarize");
+      await waitUntil(() => box2.msg != null, 8000);
+      expect(box2.msg.effectiveTier).toBeLessThan(3);
+    } finally {
+      bus.tabs.captureVisibleTab = origCapture;
+      await bus.storage.sync.set({ zoModel: "trio-model", zoActiveMode: "cobrowse" });
+    }
+  }, 30000);
+
+  it("unchecking before send restores the previous Mode and forces nothing", async () => {
+    reinstallCatalogHandler();
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await waitUntil(() => panelWin.document.querySelector("#messages .msg-system"));
+
+    await bus.storage.sync.set({ zoModel: "vision-model", zoActiveMode: "cobrowse" });
+    await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "cobrowse", 5000);
+    await new Promise((r) => setTimeout(r, 50));
+
+    const toggle = panelWin.document.querySelector("#shot-toggle");
+    toggle.click();
+    await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "visual", 5000);
+    toggle.click(); // cancel
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "cobrowse", 5000);
+
+    // A manual Mode change while armed drops the restore memory (the user
+    // owns the Mode then): arm, hand-switch to summarize, disarm → no bounce.
+    toggle.click();
+    await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "visual", 5000);
+    const ms = panelWin.document.querySelector("#mode-select");
+    ms.value = "summarize";
+    ms.dispatchEvent(new panelWin.Event("change", { bubbles: true }));
+    await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "summarize", 5000);
+    toggle.click(); // disarm — must NOT restore cobrowse over the manual pick
+    expect(panelWin.document.querySelector("#mode-select").value).toBe("summarize");
+    await bus.storage.sync.set({ zoActiveMode: "cobrowse" });
+    await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "cobrowse", 5000);
+  }, 30000);
+});
+
 describe("form-fill review card (#26)", () => {
   const checkoutTabId = 43;
   const checkoutWin: any = new Window({ url: "https://example.test/checkout" });

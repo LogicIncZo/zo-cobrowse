@@ -107,6 +107,11 @@
           📎 Tabs <span id="tab-strip-count"></span> <span class="tab-strip-caret">▾</span>
         </button>
         <div id="tab-strip" class="tab-strip" role="listbox" aria-label="Open tabs — click to reference as context"></div>
+        <!-- #25 vision UX: send-once screenshot toggle — arms ONE turn (the
+             next send) with a tier-3 screenshot + flips the Mode to Visual;
+             auto-clears after that send, like the picker chips. -->
+        <button id="shot-toggle" class="shot-toggle" type="button" aria-pressed="false"
+                title="Attach a screenshot of this tab to the NEXT message (one turn only — switches Mode to Visual while armed)">📷 Image</button>
       </div>
       <div id="tab-autocomplete" class="tab-autocomplete hidden"></div>
 
