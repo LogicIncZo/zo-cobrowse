@@ -7,6 +7,8 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.5] — 2026-08-30
+
 ### Changed — mode surface rationalized (5 modes, leaner prompts)
 - **Lean Mode 🪶 (URL-only, no page interaction)** — a new built-in Mode that
   sends only the URL + title (tier 0) and a fetch-it-yourself contract: Zo
