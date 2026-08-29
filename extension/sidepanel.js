@@ -2175,6 +2175,16 @@ function initTabStrip() {
       adoptActiveTabDisplay(info.tabId);
     });
   }
+  // Tabs settle asynchronously after creation/navigation: a strip query taken
+  // mid-commit sees url:"" and isCapturableUrl silently drops the tab, leaving
+  // the strip one chip short with no later refresh. Refresh on load-complete
+  // and URL changes; the openTabsQuerySeq guard makes late/stale responses
+  // harmless.
+  if (chrome.tabs?.onUpdated) {
+    chrome.tabs.onUpdated.addListener((_tabId, info) => {
+      if (info.status === 'complete' || info.url !== undefined) refreshOpenTabs();
+    });
+  }
 }
 
 async function refreshOpenTabs() {
