@@ -1,7 +1,7 @@
 // Zo Co-browse — Side Panel Logic
 
 import { parseBangCommand, BANG_COMMANDS } from './lib/bang-commands.js';
-import { BUILTIN_MODES, DEFAULT_MODE_ID, resolveMode, presetToMode, normalizeActions, isContextAction } from './lib/modes.js';
+import { BUILTIN_MODES, DEFAULT_MODE_ID, migrateMergedModeId, migrateMergedOverrides, resolveMode, presetToMode, normalizeActions, isContextAction } from './lib/modes.js';
 import { looksLikeActionJson } from './lib/intent.js';
 import { reviewRows, fillBatchRows } from './lib/formfill.js';
 import {
@@ -144,11 +144,12 @@ function closeThemePopoverOutside(e) {
 }
 
 // ---- Quick Actions (user-manageable chips) ----
+// 2026-08 rationalization: cut to 2 non-duplicative defaults. "Summarize" and
+// "Page data" duplicated the !summarize/!extract bangs and the starter chips;
+// canned one-click reads live in the empty state instead.
 const DEFAULT_QUICK_ACTIONS = [
-  { label: 'Summarize', prompt: 'Summarize this page in 3-5 bullet points.' },
+  { label: 'Fill forms (test data)', prompt: 'Identify all form fields on this page and fill them with relevant test data.' },
   { label: 'Extract links', prompt: 'Extract all links from this page.' },
-  { label: 'Fill forms', prompt: 'Identify all form fields on this page and fill them with relevant test data.' },
-  { label: 'Page data', prompt: 'Extract all structured data (tables, lists, prices, dates, contacts) from this page.' },
 ];
 
 // ---- State ----
@@ -454,13 +455,15 @@ function bindEvents() {
     micBtn.addEventListener('click', () => { startRecording(); });
   }
 
-  // Chips (event delegation for dynamically rendered chips)
+  // Chips (event delegation for dynamically rendered chips). Sends the chip's
+  // stored prompt — the readable label is display-only (this used to send the
+  // label text and ignore `prompt` entirely).
   const chipsContainer = $('#action-chips');
   if (chipsContainer) {
     chipsContainer.addEventListener('click', (e) => {
       const chip = e.target.closest('.chip');
       if (chip) {
-        input.value = chip.textContent.trim();
+        input.value = chip.dataset.prompt || chip.textContent.trim();
         sendQuery();
       }
     });
@@ -679,7 +682,7 @@ const EMPTY_STATE_CHIPS = [
   { label: '📝 Summarize this page', value: 'Summarize this page' },
   { label: '❓ What is on this page?', value: '!context What are the main points on this page?' },
   { label: '📥 Extract the links', value: 'Extract all links on this page as a list' },
-  { label: '🔬 Research this topic', value: 'Research this page\'s topic and give me the key facts' },
+  { label: '🔬 Research this topic', value: 'Do deep research on this page\'s topic: give me the key facts, data, and sources' },
 ];
 function renderEmptyState() {
   let card = document.getElementById('empty-state');
@@ -3069,7 +3072,13 @@ async function loadModes() {
   }
   // Load per-built-in overrides (Settings editor). Hot-reload when Settings saves.
   const ov = await chrome.storage.local.get(STORAGE_OVERRIDES_KEY);
-  modeOverrides = (ov && ov[STORAGE_OVERRIDES_KEY]) || {};
+  const migratedOv = migrateMergedOverrides((ov && ov[STORAGE_OVERRIDES_KEY]) || {});
+  modeOverrides = migratedOv.next;
+  if (migratedOv.changed) {
+    // 2026-08 rationalization: drop overrides saved against merged ids
+    // (summarize/research), carrying them onto ask only if it had none.
+    await chrome.storage.local.set({ [STORAGE_OVERRIDES_KEY]: modeOverrides });
+  }
   rebuildModeOptions();
 
   // Restore last used Mode. Migrate legacy 'zoActivePreset' → 'zoActiveMode'.
@@ -3078,6 +3087,15 @@ async function loadModes() {
   let restored = activeModeSaved.zoActiveMode || activeKeys.zoActivePreset;
   if (restored === 'scrape') restored = 'extract';
   else if (restored === 'qa') restored = 'ask';
+  else {
+    // 2026-08 rationalization: Summarize/Research merged into Ask — without
+    // this, resolveMode would fall back to Co-browse (a different contract).
+    const migrated = migrateMergedModeId(restored);
+    if (migrated !== restored) {
+      restored = migrated;
+      await chrome.storage.sync.set({ zoActiveMode: restored });
+    }
+  }
   activeModeId = restored || DEFAULT_MODE_ID;
   syncModeSelect();
 }
@@ -3253,6 +3271,7 @@ function renderQuickActions(actions) {
     chip.className = 'chip';
     chip.textContent = a.label;
     chip.title = a.prompt;
+    chip.dataset.prompt = a.prompt || '';
     container.appendChild(chip);
   }
 }

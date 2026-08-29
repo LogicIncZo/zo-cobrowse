@@ -1,6 +1,6 @@
 {
   "id": "summarize-brief",
-  "promptHash": "672883cdfc0844e8e676abd957a6ab9503f8ffe6881be7cd9a95eb0e7baa6ad1",
-  "fetchedAt": "2026-08-28T23:45:38.727Z",
-  "output": "A marketing-style landing page for the Zo platform:\n\n- **Header**: Navigation links to Pricing, Features, Docs, About; search box in the top-right corner.\n- **Hero section**: Headline \"Build Smarter with Zo\" with a descriptive subheading.\n- **Features**: Three cards — Instant DuckDB Queries, Web Research Automation, and Custom Skill Builder — each with a \"Learn More\" link.\n- **Footer**: Copyright notice plus Privacy Policy and Terms of Service links.\n\nIt's a standard product landing page (likely a fixture for testing Zo's co-browsing extension) with no substantive argument, data, or conclusion beyond promoting the platform's three headline features."
+  "promptHash": "59cba3ba9db52bc302293b0ab9b98a8d28277a07f79da30c100d383667a4c632",
+  "fetchedAt": "2026-08-29T17:16:17.834Z",
+  "output": "**Zo Co-browse test page** — a demo page mimicking a product landing site:\n\n- **Header**: Nav links — Pricing, Features, Docs, About; search box top right\n- **Hero**: \"Build Smarter with Zo\" headline + platform subheading\n- **Features** (3 cards, each with \"Learn More\"): Instant DuckDB Queries, Web Research Automation, Custom Skill Builder\n- **Footer**: Copyright, Privacy Policy, Terms of Service links\n\nNothing dynamic or data-heavy here — it's structured exactly like the kind of page co-browse summaries should handle: clear sections, link inventory, no hidden content."
 }

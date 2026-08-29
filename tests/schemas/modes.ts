@@ -34,19 +34,17 @@ export const OverrideSchema = z.object({
 export const OverrideCatalogSchema = z.record(z.string(), OverrideSchema);
 
 // Built-in Mode ids — the canonical set shipped with the extension.
+// 2026-08 rationalization: Summarize/Research merged into Ask; Lean added.
 export const BUILTIN_MODE_IDS = [
   "cobrowse",
   "ask",
-  "research",
-  "summarize",
   "extract",
   "visual",
+  "lean",
 ] as const;
 
 // Bang-command Mode targets — the Mode ids a bang command may resolve to.
 export const BANG_MODE_IDS = [
-  "summarize",
   "extract",
-  "research",
   "ask",
 ] as const;

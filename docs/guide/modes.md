@@ -13,11 +13,16 @@ ES module (`extension/lib/modes.js`) so they are unit-tested directly.
 | Mode | Icon | Purpose | Context tier | Responds with |
 |------|------|---------|--------------|---------------|
 | **Co-browse** | 🤖 | Act on the page to fulfill a request | 2 — Elements | JSON actions |
-| **Ask** | 💬 | Answer a question about the page | 1 — Text | Plain Markdown |
-| **Research** | 🔬 | Deep analysis: key facts, data, sources, insights | 1 — Text | Plain Markdown |
-| **Summarize** | 📝 | Condense the page into essential points | 1 — Text | Plain Markdown |
+| **Ask** | 💬 | Answer a question about the page (absorbed Summarize & Research — just phrase the query) | 1 — Text | Plain Markdown |
 | **Extract** | 📥 | Extract structured data as tables / JSON | 2 — Elements | Plain Markdown |
 | **Visual** | 🖼️ | Describe or analyze what's visible (screenshot) | 3 — Screenshot | Plain Markdown |
+| **Lean** | 🪶 | URL-only: Zo never sees the page — it fetches the URL itself with its web tools, never acts, and can write notes on request | 0 — Pointer | Plain Markdown |
+
+> **Rationalized 2026-08:** Summarize and Research were dropped as separate
+> modes — they were tier-1 readers differing only in query phrasing, and every
+> canned entry (`!summarize`, `!research`, shortcuts, starter chips) already
+> carries that phrasing. Chats that had them active land on **Ask** after the
+> update; `!summarize` / `!research` keep working and now run in Ask.
 
 **Context tiers** (see [Using Co-browse → Context capture](../guide/using-cobrowse#context-capture)):
 
@@ -64,7 +69,7 @@ Two ways to get a custom mode:
 Custom modes are stored in `chrome.storage.local` under `cobrowse_modes`, and
 the active mode id persists in `chrome.storage.sync` under `zoActiveMode`.
 Custom modes merge over the built-ins by id — a custom mode with the id
-`summarize` replaces the built-in one.
+`extract` replaces the built-in one.
 
 ## Mode internals
 
@@ -79,7 +84,7 @@ Each mode carries:
 | `contextTier` | How much page context to capture (0–3) |
 | `textBudget` | Max characters of visible text to send |
 | `expectJson` | Whether to request the JSON action envelope |
-| `builtin` | Whether it's one of the six bundled modes |
+| `builtin` | Whether it's one of the five bundled modes |
 
 When `expectJson` is true (Co-browse only), the prompt ships a **compact action
 schema** instead of the old ~130-token commented JSON block:

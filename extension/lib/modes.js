@@ -61,33 +61,12 @@ export const BUILTIN_MODES = {
     name: 'Ask',
     icon: '💬',
     systemPrompt: "You are Zo — the user's browser companion. You see the page they're on. Keep responses concise and scannable.",
-    instructions: 'Answer the user\'s question using the page content provided.',
-    contextTier: TIER.TEXT,
-    textBudget: 2000,
-    expectJson: false,
-    builtin: true,
-  },
-  research: {
-    id: 'research',
-    name: 'Research',
-    icon: '🔬',
-    systemPrompt: "You are Zo — the user's AI research assistant. Deeply analyze the current page: extract key facts, data, sources, insights. Cite specific content.",
-    instructions: 'Extract key claims, data, named entities, sources, dates, and contradictions. Organize with clear headings.',
+    // Summarize/Research merged into Ask (2026-08 rationalization): they were
+    // tier-1 readers differing only in query phrasing, and every canned entry
+    // (!summarize, !research, shortcut, starter chip) carries its own phrasing.
+    instructions: 'Answer the request directly. Use the page content when it is attached; otherwise reason from the page pointer (URL/title) and your own tools. Organize longer answers with clear headings.',
     contextTier: TIER.TEXT,
     textBudget: 4000,
-    // Read-only: streams plain markdown (no JSON envelope) so the answer
-    // renders as prose, not a wrapped blob — matches Zo's own chat UI.
-    expectJson: false,
-    builtin: true,
-  },
-  summarize: {
-    id: 'summarize',
-    name: 'Summarize',
-    icon: '📝',
-    systemPrompt: "You are Zo — the user's summarization assistant. Condense the page into its essential points. Concise, objective, organized.",
-    instructions: 'Produce a concise summary: 3-5 bullets or a short paragraph. Cover the main argument, key evidence, and conclusion.',
-    contextTier: TIER.TEXT,
-    textBudget: 2000,
     expectJson: false,
     builtin: true,
   },
@@ -116,9 +95,61 @@ export const BUILTIN_MODES = {
     expectJson: false,
     builtin: true,
   },
+  lean: {
+    id: 'lean',
+    name: 'Lean',
+    icon: '🪶',
+    systemPrompt: "You are Zo — the user's AI companion. You receive only the current page's URL and title plus the user's request; you do NOT see the page itself.",
+    // URL-only Mode (see docs/superpowers/specs/2026-08-29-lean-mode-design.md):
+    // Zo works entirely server-side — fetches the page itself, never acts.
+    instructions: 'The page content is NOT attached. If you need the page, fetch the URL yourself with your web tools; if it is inaccessible, paywalled, or geoblocked, say so plainly instead of guessing. Never return browser actions — this Mode cannot control the page. When the request is note-shaped (note/remember/file/save this), write the note and cross-reference your memory.',
+    contextTier: TIER.POINTER,
+    textBudget: 1000, // inert at tier 0 — no text is ever attached
+    expectJson: false,
+    builtin: true,
+  },
 };
 
 export const DEFAULT_MODE_ID = 'cobrowse';
+
+/**
+ * Built-in ids removed in the 2026-08 mode rationalization (Summarize and
+ * Research merged into Ask). Persisted `zoActiveMode` values and override
+ * entries carrying these ids are migrated to MODE_MERGE_TARGETS on load —
+ * resolveMode would otherwise silently fall back to the DEFAULT Mode
+ * (Co-browse), which has a different contract than the reader the user had.
+ */
+export const MERGED_MODE_IDS = Object.freeze(['summarize', 'research']);
+export const MODE_MERGE_TARGET = 'ask';
+
+/**
+ * Migrate a persisted Mode id that points at a merged built-in. Ids outside
+ * the merge catalog pass through unchanged.
+ */
+export function migrateMergedModeId(modeId) {
+  return MERGED_MODE_IDS.includes(modeId) ? MODE_MERGE_TARGET : modeId;
+}
+
+/**
+ * Migrate a per-built-in override catalog: overrides saved against merged ids
+ * carry onto the merge target only when the target has none of its own (the
+ * user's tuned knobs win over nothing, but never clobber fresh edits); the
+ * dead entries are always dropped.
+ *
+ * @param {Record<string, object>} overrides
+ * @returns {{ next: Record<string, object>, changed: boolean }}
+ */
+export function migrateMergedOverrides(overrides) {
+  const next = (overrides && typeof overrides === 'object') ? { ...overrides } : {};
+  let changed = false;
+  for (const dead of MERGED_MODE_IDS) {
+    if (!next[dead]) continue;
+    if (!next[MODE_MERGE_TARGET]) next[MODE_MERGE_TARGET] = { ...next[dead] };
+    delete next[dead];
+    changed = true;
+  }
+  return { next, changed };
+}
 
 /**
  * The user-tunable Mode knobs. The remaining fields (id/name/icon/builtin) are

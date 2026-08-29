@@ -3,7 +3,9 @@
 
 export const BANG_COMMANDS = {
   summarize: {
-    mode: 'summarize',
+    // Summarize/Research merged into Ask (2026-08 rationalization) — the
+    // canned query carries the summarizing intent; Ask is the reader Mode.
+    mode: 'ask',
     label: 'Summarize',
     desc: 'Condense the page into a concise summary',
     buildQuery: () => 'Summarize this page concisely.',
@@ -15,21 +17,15 @@ export const BANG_COMMANDS = {
     buildQuery: (args) => args ? `Extract ${args} from this page as structured data.` : 'Extract all structured data from this page.',
   },
   research: {
-    mode: 'research',
+    mode: 'ask',
     label: 'Research',
     desc: 'Deep research on the page topic',
     buildQuery: (args) => args ? `Do deep research on: ${args}` : 'Do deep research on this page topic.',
   },
-  qa: {
-    mode: 'ask',
-    label: 'Q&A',
-    desc: 'Answer a specific question about the page',
-    buildQuery: (args) => args || 'What is this page about?',
-  },
   ask: {
     mode: 'ask',
     label: 'Ask',
-    desc: 'Alias for !qa',
+    desc: 'Answer a specific question about the page',
     buildQuery: (args) => args || 'What is this page about?',
   },
   fill: {
@@ -78,7 +74,9 @@ export function parseBangCommand(rawQuery) {
       lines.push(`• \`!${cmd}\` — ${def.desc}`);
     }
     lines.push('• `!context <question>` — Attach this page (text + elements) for one turn, then answer');
-    lines.push('• `!save` — Save this page to your Zo workspace as markdown');
+    lines.push('• `!save [path]` — Save this page to your Zo workspace as markdown');
+    lines.push('• `!auto <instruction>` — Create a scheduled Zo automation');
+    lines.push('• `!query <question>` — Natural-language DuckDB query on your data');
     lines.push('• `!help` — Show this list');
     return { handled: true, kind: 'inline', inlineReply: lines.join('\n') };
   }
@@ -113,11 +111,12 @@ export function parseBangCommand(rawQuery) {
     return { handled: true, kind: 'duckdb', isDuckdb: true, naturalQuery };
   }
 
-  // !context / !dom / !ctx — attach full page context for THIS one turn only.
-  // Does NOT switch modes (unlike the `command` kind); the active Mode's tier
-  // is what gets attached. The context policy (lib/context-policy.js) keys off
+  // !context — attach full page context for THIS one turn only. (Former
+  // aliases !dom/!ctx were dropped in the 2026-08 rationalization.) Does NOT
+  // switch modes (unlike the `command` kind); the active Mode's tier is what
+  // gets attached. The context policy (lib/context-policy.js) keys off
   // kind === 'context' to force an attach, overriding opt-in / send-once.
-  if (name === 'context' || name === 'dom' || name === 'ctx') {
+  if (name === 'context') {
     if (!args) {
       return {
         handled: true, kind: 'inline',

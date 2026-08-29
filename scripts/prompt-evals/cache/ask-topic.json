@@ -1,6 +1,6 @@
 {
   "id": "ask-topic",
-  "promptHash": "b394cced7d665686a2c5c6ccb4fefd9a688f2db2f8572f2e3c5ce36b79966658",
-  "fetchedAt": "2026-08-28T23:45:28.384Z",
-  "output": "This page is a test/demo page for the Zo co-browsing feature. Its content is a mock landing page about the Zo platform itself — highlighting features like Instant DuckDB Queries, Web Research Automation, and a Custom Skill Builder, with the hero headline \"Build Smarter with Zo.\"\n\nIt exists to verify that the co-browse extension correctly captures and transmits page context (header, hero, feature cards, footer) rather than to convey real product information."
+  "promptHash": "5d48bf4be361484921364c9b60582039221271fdf8f598baf52fe51c090e0253",
+  "fetchedAt": "2026-08-29T17:15:48.325Z",
+  "output": "This page is a **test/demo page for Zo Co-browse** — a marketing-style layout used to verify the extension's page-reading. Its content presents **Zo as an AI browser-companion platform**, covering:\n\n- **Hero**: \"Build Smarter with Zo\" pitch\n- **Three features**: Instant DuckDB Queries, Web Research Automation, Custom Skill Builder\n- **Standard chrome**: nav (Pricing/Features/Docs/About), search box, footer with Privacy/Terms links\n\nNothing substantive beyond that — it exists to test how well the companion parses structure (header, hero, cards, footer) from a page."
 }

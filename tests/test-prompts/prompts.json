@@ -41,23 +41,23 @@
   },
   {
     "id": "research",
-    "title": "Research — deep analysis",
-    "mode": "research",
+    "title": "Ask — deep research phrasing",
+    "mode": "ask",
     "query": "Research the key claims and evidence on this page",
     "tier": 1,
     "expectJson": false,
     "expectShape": "plain-markdown",
-    "note": "Exercises: longer text budget (4000); structured markdown output (headings, citations)."
+    "note": "Exercises: longer text budget (4000, Ask since the 2026-08 rationalization merged Research into it); structured markdown output (headings, citations)."
   },
   {
     "id": "summarize",
-    "title": "Summarize — concise summary",
-    "mode": "summarize",
+    "title": "Ask — concise summary phrasing",
+    "mode": "ask",
     "query": "Give me a brief summary of this page",
     "tier": 1,
     "expectJson": false,
     "expectShape": "plain-markdown",
-    "note": "Exercises: short text budget (2000); bullet or paragraph output."
+    "note": "Exercises: bullet or paragraph output (Ask mode since the 2026-08 rationalization merged Summarize into it)."
   },
   {
     "id": "extract",
@@ -78,5 +78,15 @@
     "expectJson": false,
     "expectShape": "plain-markdown",
     "note": "Exercises: tier 3 (screenshot context); vision/description output; smallest text budget (1000). Requires screenshot enabled."
+  },
+  {
+    "id": "lean",
+    "title": "Lean — URL-only, no page interaction",
+    "mode": "lean",
+    "query": "What is this page about?",
+    "tier": 0,
+    "expectJson": false,
+    "expectShape": "plain-markdown",
+    "note": "Exercises: tier 0 (URL/title pointer only); self-fetch contract (Zo fetches the URL with its own web tools); plain-markdown output. See docs/superpowers/specs/2026-08-29-lean-mode-design.md."
   }
 ]
