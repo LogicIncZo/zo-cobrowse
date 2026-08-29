@@ -47,7 +47,7 @@ import {
 import {
   shouldCaptureScreenshot,
   findModelEntry,
-  catalogIsStale,
+  CATALOG_TTL_MS,
 } from './lib/vision.js';
 import {
   mcpRequest,
@@ -223,8 +223,14 @@ const DEFAULTS = {
 
 let config = { ...DEFAULTS };
 // Vision catalog cache (#25): /models/catalog is no-auth + cheap, but we
-// don't want to block every tier-3 turn on a fetch. Cached for CATALOG_TTL_MS.
-let catalogCache = { models: null, fetchedAt: 0, inFlight: null };
+// don't want to block every tier-3 turn on a fetch. Backed by
+// chrome.storage.session so it survives MV3 SW restarts (same #73 fix as the
+// skills list). A failed fetch returns null = MISS = retried, never cached.
+const catalogCacheStore = createSessionCache({
+  storage: chrome.storage.session,
+  key: 'cobrowse_catalog_cache',
+  ttlMs: CATALOG_TTL_MS,
+});
 
 // Track Zo API conversation ID for multi-turn context. This global is the
 // AMBIENT thread (context menu / omnibox callers); the sidepanel's chat tabs
@@ -1647,33 +1653,24 @@ async function listModels() {
 /**
  * Fetch the no-auth model catalog (/models/catalog) and cache it for the
  * vision gate (#25). The catalog carries `supports_images` per model.
- * Deduplicates concurrent callers via an in-flight promise. Returns the
- * models array (possibly stale-but-usable) or null on hard failure.
+ * The session-backed cache (#73) deduplicates concurrent callers and
+ * survives SW restarts. Returns the models array or null on hard failure
+ * (null is a cache MISS — the next call retries; the gate falls back to
+ * 'unknown' → captures anyway).
  */
 async function fetchModelCatalog(force = false) {
-  const now = Date.now();
-  if (!force && !catalogIsStale(catalogCache.fetchedAt, now) && catalogCache.models) {
-    return catalogCache.models;
-  }
-  if (catalogCache.inFlight) return catalogCache.inFlight;
-  catalogCache.inFlight = (async () => {
+  return catalogCacheStore.get(async () => {
     try {
       const catalogUrl = `${apiOrigin()}/models/catalog`;
       const r = await fetch(catalogUrl);
       if (!r.ok) return null;
       const data = await r.json();
-      const models = Array.isArray(data.models) ? data.models : [];
-      catalogCache.models = models;
-      catalogCache.fetchedAt = Date.now();
-      return models;
+      return Array.isArray(data.models) ? data.models : [];
     } catch (err) {
       console.debug('fetchModelCatalog:', err.message);
-      return null; // gate falls back to 'unknown' → captures anyway
-    } finally {
-      catalogCache.inFlight = null;
+      return null;
     }
-  })();
-  return catalogCache.inFlight;
+  }, force);
 }
 
 // ---- MCP client (#28 pickers) ----
