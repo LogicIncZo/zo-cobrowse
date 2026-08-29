@@ -324,6 +324,142 @@ async function loadConfig() {
 // Reflect activeModeId into the #mode-select dropdown.
 function syncModeSelect() {
   if (modeSelect) modeSelect.value = activeModeId;
+  refreshSelectShim(modeSelect);
+}
+
+// ---- Select shim (#62) — panel-safe dropdowns ----
+// Native <select> popups don't open on mouse click inside the real side-panel
+// shell (Chromium quirk; keyboard still worked). The shim hides the native
+// select (kept in the DOM as the source of truth — every existing `change`
+// listener keeps working) and renders a custom trigger + popup reusing the
+// same popup patterns as the @//% pickers. In a normal tab the native select
+// would work fine, but the shim is identical there — one code path everywhere.
+const selectShims = new Map();
+
+function refreshSelectShim(select) {
+  selectShims.get(select)?.refresh();
+}
+
+function shimSelect(select) {
+  if (!select || selectShims.has(select)) return;
+  const shim = createSelectShim(select);
+  selectShims.set(select, shim);
+  shim.refresh();
+}
+
+function createSelectShim(select) {
+  const wrap = document.createElement('span');
+  wrap.className = 'select-shim';
+  select.parentNode.insertBefore(wrap, select);
+  wrap.appendChild(select);
+  select.classList.add('select-shim-native'); // hidden; still the data store
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'select-shim-btn';
+  btn.setAttribute('aria-haspopup', 'listbox');
+  btn.setAttribute('aria-expanded', 'false');
+  wrap.appendChild(btn);
+
+  const pop = document.createElement('div');
+  pop.className = 'select-shim-pop hidden';
+  pop.setAttribute('role', 'listbox');
+  document.body.appendChild(pop);
+
+  let activeIdx = -1;
+
+  const selectedOption = () => select.options[select.selectedIndex] || null;
+  const rows = () => [...select.options].filter((o) => !o.disabled);
+
+  function refresh() {
+    const opt = selectedOption();
+    btn.textContent = `${safeText(opt ? opt.textContent : '')} ▾`;
+  }
+
+  function renderRows() {
+    pop.replaceChildren();
+    const opts = rows();
+    activeIdx = Math.max(0, opts.indexOf(selectedOption()));
+    const current = selectedOption();
+    opts.forEach((o, i) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'select-shim-item' + (o === current ? ' select-shim-active' : '');
+      item.setAttribute('role', 'option');
+      item.textContent = safeText(o.textContent);
+      item.title = safeText(o.title || '');
+      item.addEventListener('mousedown', (ev) => { ev.preventDefault(); choose(o.value); });
+      item.addEventListener('mousemove', () => {
+        if (activeIdx !== i) {
+          activeIdx = i;
+          pop.querySelectorAll('.select-shim-item').forEach((el, j) => el.classList.toggle('select-shim-active', j === i));
+        }
+      });
+      pop.appendChild(item);
+    });
+  }
+
+  function open() {
+    renderRows();
+    const r = btn.getBoundingClientRect();
+    pop.style.left = `${Math.round(r.left)}px`;
+    pop.style.top = `${Math.round(r.bottom + 4)}px`;
+    pop.style.minWidth = `${Math.round(r.width)}px`;
+    pop.classList.remove('hidden');
+    btn.setAttribute('aria-expanded', 'true');
+  }
+
+  function close() {
+    pop.classList.add('hidden');
+    btn.setAttribute('aria-expanded', 'false');
+  }
+
+  const isOpen = () => !pop.classList.contains('hidden');
+
+  function choose(value) {
+    if (select.value !== value) {
+      select.value = value;
+      // Existing listeners (applyMode, config persistence) hang off `change`.
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    refresh();
+    close();
+    btn.focus();
+  }
+
+  function move(delta) {
+    const opts = rows();
+    if (!opts.length) return;
+    activeIdx = (activeIdx + delta + opts.length) % opts.length;
+    const items = pop.querySelectorAll('.select-shim-item');
+    items.forEach((el, i) => el.classList.toggle('select-shim-active', i === activeIdx));
+    items[activeIdx]?.scrollIntoView({ block: 'nearest' });
+  }
+
+  btn.addEventListener('mousedown', (ev) => {
+    ev.preventDefault();
+    if (isOpen()) close(); else open();
+  });
+  btn.addEventListener('keydown', (ev) => {
+    if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+      ev.preventDefault();
+      if (!isOpen()) { open(); return; }
+      move(ev.key === 'ArrowDown' ? 1 : -1);
+    } else if (ev.key === 'Enter' || ev.key === ' ') {
+      ev.preventDefault();
+      if (!isOpen()) { open(); return; }
+      const target = rows()[activeIdx];
+      if (target) choose(target.value);
+    } else if (ev.key === 'Escape') {
+      close();
+    }
+  });
+  document.addEventListener('mousedown', (ev) => {
+    if (isOpen() && !pop.contains(ev.target) && ev.target !== btn) close();
+  });
+  window.addEventListener('resize', close);
+
+  return { refresh, close };
 }
 
 // ---- Onboarding ----
@@ -1312,6 +1448,7 @@ async function fetchModelsAndPersonas() {
     cachedModels = [];
     modelSelect.innerHTML = '<option value="">Models unavailable</option>';
   }
+  refreshSelectShim(modelSelect);
 
   const personasResp = await chrome.runtime.sendMessage({ type: 'LIST_PERSONAS' });
   if (personasResp?.success && Array.isArray(personasResp.personas)) {
@@ -1324,6 +1461,7 @@ async function fetchModelsAndPersonas() {
       personaSelect.appendChild(opt);
     }
   }
+  refreshSelectShim(personaSelect);
 }
 
 // ---- Bang Commands (!) — Quick Command Templates (#07) ----
@@ -2242,6 +2380,11 @@ function initTabStrip() {
   }
   refreshOpenTabs();
   initShotToggle();
+  // #62: panel-safe dropdowns (native select popups don't open on click in
+  // the side-panel shell). The native selects stay as the data store.
+  shimSelect(modelSelect);
+  shimSelect(personaSelect);
+  shimSelect(modeSelect);
   // Keep the strip fresh when the user refocuses the panel.
   window.addEventListener('focus', refreshOpenTabs);
   // Track browser-tab switches: adopt the newly active tab for DISPLAY (page
@@ -3183,6 +3326,7 @@ function rebuildModeOptions() {
   }
 
   if (currentVal) modeSelect.value = currentVal;
+  refreshSelectShim(modeSelect);
 }
 
 async function startModeCreation() {

@@ -61,6 +61,14 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - **⬇ Latest pill** — appears when the chat log is scrolled away from the
   bottom (e.g. while reading during a stream); clicks snap back.
 
+### Fixed — Model/Persona/Mode dropdowns open on mouse click in the side panel (#62)
+- Native `<select>` popups don't open on mouse click inside the side-panel shell (a Chromium
+  quirk invisible to our tab-based e2e — keyboard still worked). The three controls-bar dropdowns
+  now render through a **select shim**: the native select stays in the DOM as the data source
+  (every existing `change` listener, including Settings-override merging, untouched) while a
+  custom trigger + popup — the same pattern as the `@`/`/`/`%` pickers — handles the interaction,
+  with full keyboard support (↑/↓/Enter/Esc).
+
 ### Fixed — 📷 screenshots never reached Zo on real Chrome
 - **`<all_urls>` host permission**: `chrome.tabs.captureVisibleTab` requires the literal
   `<all_urls>` pattern (or an activeTab gesture) — the manifest's scoped wildcards
