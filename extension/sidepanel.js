@@ -250,6 +250,10 @@ async function finishInit() {
     initJumpToLatest();
     connectStreamingPort();
     chrome.storage.onChanged.addListener((changes) => {
+      // #65: follow theme changes made in Settings (or another panel) live.
+      if (changes[THEME_STORAGE_KEY]) {
+        applyTheme(changes[THEME_STORAGE_KEY].newValue || '', true);
+      }
       if (changes[STORAGE_ACTIONS_KEY]) {
         const actions = changes[STORAGE_ACTIONS_KEY].newValue;
         renderQuickActions(actions || []);
