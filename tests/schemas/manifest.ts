@@ -27,7 +27,14 @@ export const ManifestSchema = z.object({
   version: z.string().min(1),
   description: z.string(),
   permissions: z.array(z.string()),
-  host_permissions: z.array(z.string()).optional(),
+  // <all_urls> is REQUIRED: chrome.tabs.captureVisibleTab needs the literal
+  // <all_urls> pattern (or an activeTab gesture) — scoped wildcards like
+  // http://*/* + https://*/* do not qualify, so tier-3 capture silently
+  // fails without it (2026-08-29 real-Chrome triage).
+  host_permissions: z.array(z.string()).refine(
+    (perms) => perms.includes("<all_urls>"),
+    { message: "host_permissions must include <all_urls> — captureVisibleTab requires it" },
+  ).optional(),
   background: z.object({
     service_worker: z.string(),
     type: z.literal("module").optional(),

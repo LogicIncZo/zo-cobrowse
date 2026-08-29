@@ -680,6 +680,104 @@ describe("📷 Image toggle — send-once screenshot (#25 UX)", () => {
     await bus.storage.sync.set({ zoActiveMode: "cobrowse" });
     await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "cobrowse", 5000);
   }, 30000);
+
+  it("capture failure: no 📷 pill, honest system warning, no chip, no persistence", async () => {
+    reinstallCatalogHandler();
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await waitUntil(() => panelWin.document.querySelector("#messages .msg-system"));
+
+    // Vision-capable model so the GATE passes; the capture itself rejects —
+    // the exact permission error the pre-<all_urls> manifest produced on
+    // real Chrome (captureVisibleTab requires <all_urls> or activeTab).
+    const origCapture = bus.tabs.captureVisibleTab;
+    bus.tabs.captureVisibleTab = () =>
+      Promise.reject(new Error("Either the '<all_urls>' or 'activeTab' permission is required."));
+    await bus.storage.sync.set({ zoModel: "vision-model", zoActiveMode: "cobrowse" });
+    await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "cobrowse", 5000);
+    await new Promise((r) => setTimeout(r, 50));
+
+    try {
+      const toggle = panelWin.document.querySelector("#shot-toggle");
+      toggle.click();
+      await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "visual", 5000);
+
+      const box = armAskCapture();
+      // Unique query text: the persistence assertions below scope to THIS
+      // conversation — other tests in the file legitimately persist
+      // screenshot:true records that must not leak into the check.
+      await typeAndSend("what color is the bow tie?");
+      await waitUntil(() => box.msg != null, 8000);
+      // Forced tier 3, but the background recorded WHY nothing shipped.
+      expect(box.msg.effectiveTier).toBe(3);
+      expect(String(box.msg.pageContext.screenshotError || "")).toContain("<all_urls>");
+      expect(box.msg.pageContext.screenshotDataUrl).toBeUndefined();
+
+      // No 📷 Screenshot pill on the user bubble — intent ≠ attachment.
+      const pills: string[] = [];
+      for (const el of panelWin.document.querySelectorAll("#messages .msg-user .msg-mention")) {
+        pills.push(el.textContent || "");
+      }
+      expect(pills.some((t) => t.includes("Screenshot"))).toBe(false);
+      // An honest system warning names the failure instead.
+      let warned = false;
+      for (const el of panelWin.document.querySelectorAll("#messages .msg-system")) {
+        if ((el.textContent || "").includes("Screenshot did not ride this turn")) warned = true;
+      }
+      expect(warned).toBe(true);
+
+      // Turn completes: no 📷 footer chip, nothing persisted as a screenshot.
+      await waitUntil(() => {
+        const convs: any[] = Object.values(bus.storage.local._store.cobrowse_convos || {});
+        return convs.some((c: any) => (c.messages || []).some((m: any) => m.role === "assistant"));
+      }, 15000);
+      await new Promise((r) => setTimeout(r, 200));
+      expect(panelWin.document.querySelector(".msg-footer-shot")).toBeNull();
+      const convs: any[] = Object.values(bus.storage.local._store.cobrowse_convos || {});
+      const thisConv: any = convs.find((c: any) =>
+        (c.messages || []).some((m: any) => m.role === "user" && (m.text || "").includes("bow tie")));
+      expect(thisConv).toBeTruthy();
+      expect((thisConv.messages || []).some((m: any) => m.role === "assistant" && m.screenshot)).toBe(false);
+    } finally {
+      bus.tabs.captureVisibleTab = origCapture;
+      await bus.storage.sync.set({ zoModel: "trio-model", zoActiveMode: "cobrowse" });
+    }
+  }, 30000);
+
+  it("vision-gate skip on an armed toggle also surfaces the model reason", async () => {
+    reinstallCatalogHandler();
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await waitUntil(() => panelWin.document.querySelector("#messages .msg-system"));
+
+    // Non-vision model + armed toggle: the gate suppresses the capture AND
+    // the user is told it was the model, not silent text-only degradation.
+    const origCapture = bus.tabs.captureVisibleTab;
+    let screenshotCalls = 0;
+    bus.tabs.captureVisibleTab = () => { screenshotCalls++; return Promise.resolve("data:image/jpeg;base64,/9j/ZmFrZQ=="); };
+    await bus.storage.sync.set({ zoModel: "trio-model", zoActiveMode: "cobrowse" });
+    await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "cobrowse", 5000);
+    await new Promise((r) => setTimeout(r, 50));
+
+    try {
+      const toggle = panelWin.document.querySelector("#shot-toggle");
+      toggle.click();
+      await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "visual", 5000);
+
+      const box = armAskCapture();
+      await typeAndSend("what color is the shirt?");
+      await waitUntil(() => box.msg != null, 8000);
+      expect(box.msg.effectiveTier).toBe(3);
+      expect(String(box.msg.pageContext.screenshotError || "")).toContain("support images");
+      expect(screenshotCalls).toBe(0);
+      let warned = false;
+      for (const el of panelWin.document.querySelectorAll("#messages .msg-system")) {
+        if ((el.textContent || "").includes("Screenshot did not ride this turn")) warned = true;
+      }
+      expect(warned).toBe(true);
+    } finally {
+      bus.tabs.captureVisibleTab = origCapture;
+      await bus.storage.sync.set({ zoModel: "trio-model", zoActiveMode: "cobrowse" });
+    }
+  }, 30000);
 });
 
 describe("form-fill review card (#26)", () => {

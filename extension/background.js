@@ -719,15 +719,26 @@ async function getActiveTabContext(tabId, tier, modeId, opts) {
   // would make the capture pure token waste; the catalog lookup is
   // no-auth + cached, and unknown support falls through to capture
   // (backward-compatible with pre-#25 behavior).
-  if (t >= 3 && context && !context.error && config.enableScreenshots !== false) {
-    try {
-      const catalog = await fetchModelCatalog();
-      const entry = findModelEntry(catalog, config.zoModel);
-      if (shouldCaptureScreenshot(entry, { tier: t, enableScreenshots: config.enableScreenshots })) {
-        const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg' });        context.screenshotDataUrl = dataUrl;
+  // Every non-capture path on a tier-3 turn records WHY in
+  // context.screenshotError — a forced Visual turn must never silently
+  // degrade to text-only (the 📷 toggle's honest-feedback contract).
+  if (t >= 3 && context && !context.error) {
+    if (config.enableScreenshots === false) {
+      context.screenshotError = 'Screenshots are disabled in Zo settings';
+    } else {
+      try {
+        const catalog = await fetchModelCatalog();
+        const entry = findModelEntry(catalog, config.zoModel);
+        if (shouldCaptureScreenshot(entry, { tier: t, enableScreenshots: config.enableScreenshots })) {
+          const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg' });        context.screenshotDataUrl = dataUrl;
+          if (!dataUrl) context.screenshotError = 'Screenshot capture returned empty data';
+        } else {
+          context.screenshotError = `Model “${config.zoModel || 'default'}” doesn't support images — pick a vision model to use the 📷 toggle`;
+        }
+      } catch (e) {
+        console.warn('Screenshot capture skipped:', e.message);
+        context.screenshotError = e.message;
       }
-    } catch (e) {
-      console.warn('Screenshot capture skipped:', e.message);
     }
   }
 
