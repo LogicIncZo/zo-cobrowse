@@ -12,6 +12,8 @@ export const ChatMessageSchema = z
     timestamp: z.number(),
     reasoning: z.string().optional(),
     durationMs: z.number().optional(),
+    /** True when this turn's prompt carried a page screenshot (📷 footer chip). */
+    screenshot: z.boolean().optional(),
     healed: z.boolean().optional(),
     // Context policy outcome for the turn (footer chip + tooltip). Optional —
     // messages predating the chip don't carry it.

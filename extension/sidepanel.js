@@ -741,7 +741,7 @@ function renderCurrentConversation() {
   for (const msg of conv.messages) {
     const m = msg.role === 'assistant' ? healAssistantMessage(msg) : msg;
     const opts = m.role === 'assistant'
-      ? { timestamp: m.timestamp, durationMs: m.durationMs, contextTier: m.contextTier, contextReason: m.contextReason }
+      ? { timestamp: m.timestamp, durationMs: m.durationMs, contextTier: m.contextTier, contextReason: m.contextReason, screenshot: m.screenshot }
       : {};
     const el = addMessageDOM(m.role, m.text, opts);
     if (m.role === 'assistant' && m.reasoning) addReasoningBubble(el, m.reasoning);
@@ -1266,6 +1266,11 @@ function renderPromptInspector() {
   };
   meta.appendChild(chip('Mode:', `${mode.icon} ${mode.name}`));
   meta.appendChild(chip('Context:', TIER_NAMES[decision.effectiveTier] || `Tier ${decision.effectiveTier}`));
+  // Actual attachment, not tier intent: the screenshot section renders only
+  // when a capture really produced a data URL (vision gate + captureVisibleTab).
+  if (described.sections.some(s => s.id === 'screenshot')) {
+    meta.appendChild(chip('📷', 'screenshot attached'));
+  }
   const reasonSpan = document.createElement('span');
   reasonSpan.textContent = decision.reason;
   meta.appendChild(reasonSpan);
@@ -1449,7 +1454,7 @@ function relativeTime(ts, now = Date.now()) {
 // locally on the history entry (no backend).
 function addMessageFooter(parentMsgEl, opts = {}) {
   if (!parentMsgEl || parentMsgEl.querySelector('.msg-footer')) return null;
-  const { timestamp, modeName, modelName, durationMs, contextTier, contextReason } = opts;
+  const { timestamp, modeName, modelName, durationMs, contextTier, contextReason, screenshot } = opts;
   const footer = document.createElement('div');
   footer.className = 'msg-footer';
 
@@ -1490,13 +1495,20 @@ function addMessageFooter(parentMsgEl, opts = {}) {
   // Context-tier chip: shows how much page context this turn actually sent
   // (the decideTurn policy outcome) — makes the token story visible per turn.
   if (Number.isInteger(contextTier)) {
-    const CTX_ICONS = ['🔗', '📝', '🧩', '📷'];
+    const CTX_ICONS = ['🔗', '📝', '🧩', '🖼️'];
     const CTX_NAMES = ['URL only', 'Text', 'Elements', 'Screenshot'];
     const ctxChip = document.createElement('span');
     ctxChip.className = 'msg-footer-chip msg-footer-context';
     ctxChip.textContent = `${CTX_ICONS[contextTier] || '🔗'} ${CTX_NAMES[contextTier] || 'Tier ' + contextTier}`;
     ctxChip.title = safeText(contextReason) || 'Context sent this turn';
     footer.appendChild(ctxChip);
+  }
+  if (screenshot) {
+    const shotChip = document.createElement('span');
+    shotChip.className = 'msg-footer-chip msg-footer-shot';
+    shotChip.textContent = '📷';
+    shotChip.title = 'A page screenshot was attached to this turn';
+    footer.appendChild(shotChip);
   }
 
   if (timestamp) {
@@ -1912,7 +1924,7 @@ function addMessage(role, text, opts = {}) {
   if (role !== 'system' && role !== 'thinking') {
     const conv = conversations[chatId];
     if (conv) {
-      conv.messages.push({ role, text, timestamp: Date.now() });
+      conv.messages.push({ role, text, timestamp: Date.now(), screenshot: opts.screenshot || undefined });
       // Trim to MAX_HISTORY per conversation
       if (conv.messages.length > MAX_HISTORY) {
         conv.messages = conv.messages.slice(-MAX_HISTORY);
@@ -2102,6 +2114,7 @@ function addMessageDOM(role, text, opts = {}) {
       durationMs: opts.durationMs,
       contextTier: opts.contextTier,
       contextReason: opts.contextReason,
+      screenshot: opts.screenshot,
     });
   }
 
@@ -3664,7 +3677,7 @@ function handleStreamMessage(msg) {
           if (msg.conversationId) conv.zoThreadId = msg.conversationId;
           if (responseText) {
             const reasoningVal = safeText(msg.reasoning) || safeText(streamSession.reasoningText) || undefined;
-            conv.messages.push({ role: 'assistant', text: responseText, reasoning: reasoningVal, timestamp: doneTimestamp, durationMs: doneDuration || undefined, contextTier: streamSession.effectiveTier, contextReason: streamSession.contextReason });
+            conv.messages.push({ role: 'assistant', text: responseText, reasoning: reasoningVal, timestamp: doneTimestamp, durationMs: doneDuration || undefined, contextTier: streamSession.effectiveTier, contextReason: streamSession.contextReason, screenshot: streamSession.hadScreenshot || undefined });
             if (conv.messages.length > MAX_HISTORY) {
               conv.messages = conv.messages.slice(-MAX_HISTORY);
             }
@@ -3775,6 +3788,7 @@ function handleStreamMessage(msg) {
           durationMs: doneDuration,
           contextTier: streamSession.effectiveTier,
           contextReason: streamSession.contextReason,
+          screenshot: streamSession.hadScreenshot,
         });
         // Code blocks in the final rendered markdown get their Copy buttons.
         const doneBody = streamSession.msgEl.querySelector('.msg-body');
@@ -3793,7 +3807,7 @@ function handleStreamMessage(msg) {
         if (responseText) {
           const reasoningVal = safeText(msg.reasoning) || safeText(streamSession.reasoningText) || undefined;
           // Persist to conversation (chronological feed is already in the body; just save reasoning)
-          conv.messages.push({ role: 'assistant', text: responseText, reasoning: reasoningVal, timestamp: doneTimestamp, durationMs: doneDuration || undefined, contextTier: streamSession.effectiveTier, contextReason: streamSession.contextReason });
+          conv.messages.push({ role: 'assistant', text: responseText, reasoning: reasoningVal, timestamp: doneTimestamp, durationMs: doneDuration || undefined, contextTier: streamSession.effectiveTier, contextReason: streamSession.contextReason, screenshot: streamSession.hadScreenshot || undefined });
           if (conv.messages.length > MAX_HISTORY) {
             conv.messages = conv.messages.slice(-MAX_HISTORY);
           }
@@ -4129,6 +4143,12 @@ sendQuery = async function() {
   saveConversationState(activeId, contextState);
   const effectiveTier = turnDecision.effectiveTier;
 
+  // Truthful per-turn screenshot flag: the prompt embeds the image only when
+  // the policy attaches tier-3 context AND the capture actually produced a
+  // data URL (the vision gate may skip it, or captureVisibleTab may fail).
+  // Drives the 📷 footer chip + its persistence on the assistant message.
+  const turnHadScreenshot = effectiveTier >= 3 && !!currentContext?.screenshotDataUrl;
+
   // ---- Auto-reference the active tab on tier-0 turns ----
   // Whenever the policy thins this turn to URL-only (reads, same-page
   // follow-ups), the active browser tab still rides along as T1 (manifest
@@ -4171,6 +4191,7 @@ sendQuery = async function() {
     streamSession.msgEl = null;
     streamSession.fullText = '';
     streamSession.reasoningText = '';
+    streamSession.hadScreenshot = turnHadScreenshot;
     streamSession.startTime = Date.now();
     try {
       streamPort.postMessage({
@@ -4265,14 +4286,14 @@ sendQuery = async function() {
   if (!actions.length) {
     // Show reasoning or the raw output text, with "Done." only as last resort
     const fallbackText = reasoning || doneResponse || output || '';
-    const el = addMessage('assistant', fallbackText || 'Done.');
+    const el = addMessage('assistant', fallbackText || 'Done.', { screenshot: turnHadScreenshot });
     addReasoningBubble(el, reasoning);
   } else {
     handleStreamActions(actions, reasoning);
     // handleStreamActions already adds the done response for navigate actions
     // (via its own setTimeout). For non-navigate scenarios, display it here.
     if (doneAction && !hasNavigate) {
-      const el = addMessage('assistant', doneResponse || reasoning || output || 'Done.');
+      const el = addMessage('assistant', doneResponse || reasoning || output || 'Done.', { screenshot: turnHadScreenshot });
       addReasoningBubble(el, reasoning);
     } else if (reasoningVal) {
       // navigate-only actions: persist reasoning with the navigate status message

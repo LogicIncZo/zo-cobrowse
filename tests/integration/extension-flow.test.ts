@@ -527,6 +527,11 @@ describe("vision-gated screenshots (#25)", () => {
       }, 15000);
       // The vision gate suppressed the screenshot capture.
       expect(screenshotCalls).toBe(0);
+      // No 📷 chip on the assistant footer, and nothing persisted either —
+      // the flag tracks the REAL attachment, not the tier intent.
+      expect(panelWin.document.querySelector(".msg-footer-shot")).toBeNull();
+      const convs: any[] = Object.values(bus.storage.local._store.cobrowse_convos || {});
+      expect(convs.flatMap((c: any) => c.messages || []).some((m: any) => m.role === "assistant" && m.screenshot)).toBe(false);
     } finally {
       bus.tabs.captureVisibleTab = origCapture;
       await bus.storage.sync.set({ zoModel: "trio-model", zoActiveMode: "cobrowse" });
@@ -568,6 +573,12 @@ describe("vision-gated screenshots (#25)", () => {
       // prompt builder only includes it when effectiveTier >= 3. Assert on
       // the capture count (the gate's direct effect) rather than the prompt
       // body, which is thinned independently by the context-policy layer.
+      // The 📷 footer chip reflects the same fact the user can see: the
+      // screenshot actually rode this turn's prompt (streaming + persisted).
+      await waitUntil(() => panelWin.document.querySelector(".msg-footer-shot"));
+      const convs: any[] = Object.values(bus.storage.local._store.cobrowse_convos || {});
+      const shotMsg = convs.flatMap((c: any) => c.messages || []).find((m: any) => m.role === "assistant" && m.screenshot);
+      expect(shotMsg).toBeTruthy();
     } finally {
       bus.tabs.captureVisibleTab = origCapture;
       await bus.storage.sync.set({ zoModel: "trio-model", zoActiveMode: "cobrowse" });
