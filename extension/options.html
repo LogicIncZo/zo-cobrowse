@@ -42,12 +42,8 @@
     .page-header .subtitle { font-size: 13px; color: var(--text-muted); margin: 0; }
 
     /* ── Cards ── */
-    #settings-form {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 14px;
-      align-items: start;
-    }
+    /* Panes (declared further down) are the grid containers; the form itself
+       is a plain block so only one tab pane shows at a time. */
     .card {
       background: var(--bg-surface);
       border: 1px solid var(--border-soft);
@@ -219,34 +215,42 @@
     .gap-2 { gap: 8px; }
     .items-center { align-items: center; }
 
-    /* ── Section nav (sticky) ── */
+    /* ── Section tabs (tabbed UI — one pane visible at a time, no scroll) ── */
     #settings-nav {
-      position: sticky;
-      top: 0;
-      z-index: 20;
       display: flex;
       flex-wrap: wrap;
       gap: 6px;
-      padding: 8px 0;
-      margin: 0 -28px 12px;
-      padding-left: 28px;
-      padding-right: 28px;
-      background: color-mix(in srgb, var(--bg-deep) 92%, transparent);
-      backdrop-filter: blur(6px);
+      padding: 4px 0 10px;
+      margin-bottom: 4px;
       border-bottom: 1px solid var(--border-soft);
     }
-    #settings-nav a {
-      flex: 0 0 auto;
-      font-size: 11.5px;
-      padding: 3px 10px;
+    #settings-nav .settings-tab {
+      font-size: 12px;
+      padding: 5px 12px;
       border-radius: 999px;
       border: 1px solid var(--border-soft);
+      background: transparent;
       color: var(--text-muted);
-      text-decoration: none;
+      font-family: var(--font-ui);
+      cursor: pointer;
       white-space: nowrap;
+      transition: border-color 0.15s, background 0.15s, color 0.15s;
     }
-    #settings-nav a:hover { color: var(--text); border-color: var(--indigo); }
-    .card { scroll-margin-top: 52px; }
+    #settings-nav .settings-tab:hover { color: var(--text); border-color: var(--indigo); }
+    #settings-nav .settings-tab.active {
+      background: var(--amber-glow, color-mix(in srgb, var(--amber) 15%, transparent));
+      border-color: var(--amber);
+      color: var(--text);
+    }
+    #settings-form { display: block; }
+    .tab-pane {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 14px;
+      align-items: start;
+      margin-bottom: 14px;
+    }
+    .tab-pane[hidden] { display: none; }
 
     /* ── Token reveal ── */
     .token-row { display: flex; gap: 6px; }
@@ -271,6 +275,7 @@
       z-index: 50;
       box-shadow: 0 4px 14px rgb(0 0 0 / 0.25);
     }
+    #status-message:empty { display: none; }
     .save-dirty::after {
       content: " •";
       color: var(--indigo);
@@ -284,19 +289,18 @@
     <p class="subtitle">Configure your co-browsing connection to Zo Computer</p>
   </div>
 
-  <!-- ── Sticky section nav ── -->
+  <!-- ── Section tabs: one pane visible at a time ── -->
   <nav id="settings-nav" aria-label="Settings sections">
-    <a href="#card-connection">🔌 Connection</a>
-    <a href="#card-persona">🧠 Persona &amp; Model</a>
-    <a href="#card-prompts">✎ Prompts</a>
-    <a href="#card-features">🧩 Features</a>
-    <a href="#card-speech">🎤 Speech</a>
-    <a href="#card-menus">🖱️ Menus</a>
-    <a href="#card-actions">⚡ Actions</a>
-    <a href="#card-about">ℹ️ About</a>
+    <button type="button" class="settings-tab" data-pane="pane-connection">🔌 Connection</button>
+    <button type="button" class="settings-tab" data-pane="pane-model">🧠 Model &amp; Persona</button>
+    <button type="button" class="settings-tab" data-pane="pane-prompts">✎ Prompts</button>
+    <button type="button" class="settings-tab" data-pane="pane-features">🧩 Features</button>
+    <button type="button" class="settings-tab" data-pane="pane-actions">⚡ Actions</button>
+    <button type="button" class="settings-tab" data-pane="pane-about">ℹ️ About</button>
   </nav>
 
   <form id="settings-form">
+    <div class="tab-pane" id="pane-connection">
     <!-- ── Connection ── -->
     <div class="card card-wide" id="card-connection">
       <h2>🔌 Connection</h2>
@@ -332,7 +336,9 @@
         </select>
       </div>
     </div>
+    </div><!-- /pane-connection -->
 
+    <div class="tab-pane" id="pane-model" hidden>
     <!-- ── Model & Persona ── -->
     <div class="card" id="card-persona">
       <h2>🧠 Persona</h2>
@@ -358,7 +364,9 @@
         <div id="model-status" class="inline-status"></div>
       </div>
     </div>
+    </div><!-- /pane-model -->
 
+    <div class="tab-pane" id="pane-prompts" hidden>
     <!-- ── Prompts (mode tuning) ── -->
     <div class="card card-wide" id="card-prompts">
       <h2>✎ Prompts</h2>
@@ -406,7 +414,9 @@
         <pre class="prompt-preview" id="prompt-preview-pre"></pre>
       </details>
     </div>
+    </div><!-- /pane-prompts -->
 
+    <div class="tab-pane" id="pane-features" hidden>
     <!-- ── Screenshot ── -->
     <div class="card" id="card-features">
       <h2>📷 Screenshot & Vision</h2>
@@ -479,7 +489,9 @@
         Ask Zo to fill this field
       </label>
     </div>
+    </div><!-- /pane-features -->
 
+    <div class="tab-pane" id="pane-actions" hidden>
     <!-- ── Quick Actions ── -->
     <div class="card card-wide" id="card-actions">
       <h2>⚡ Quick Actions</h2>
@@ -519,7 +531,9 @@
         </tbody>
       </table>
     </div>
+    </div><!-- /pane-actions -->
 
+    <div class="tab-pane" id="pane-about" hidden>
     <!-- ── About ── -->
     <div class="card card-wide" id="card-about">
       <h2>ℹ️ About</h2>
@@ -535,6 +549,7 @@
         <button type="button" id="reset-defaults" class="btn btn-danger" style="margin-left:auto;">Reset to Defaults</button>
       </div>
     </div>
+    </div><!-- /pane-about -->
 
     <!-- ── Save ── -->
     <div class="flex gap-2 items-center card-wide">
