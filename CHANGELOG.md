@@ -61,6 +61,11 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - **⬇ Latest pill** — appears when the chat log is scrolled away from the
   bottom (e.g. while reading during a stream); clicks snap back.
 
+### Fixed — `@` tabs and chip strip show page titles (#72)
+- The `@` tab autocomplete and the tab-context chip strip rendered bare hostnames — with two
+  `github.com` tabs open the entries were indistinguishable. Both now lead with the page title
+  (host dimmed/secondary in the popup; host + full URL in tooltips).
+
 ### Fixed — 📷 screenshots never reached Zo on real Chrome
 - **`<all_urls>` host permission**: `chrome.tabs.captureVisibleTab` requires the literal
   `<all_urls>` pattern (or an activeTab gesture) — the manifest's scoped wildcards

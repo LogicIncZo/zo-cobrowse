@@ -2313,9 +2313,12 @@ function renderTabStrip() {
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'tab-chip' + (tabRefsEnabled.has(t.tabId) ? ' tab-chip-on' : '');
-    const label = safeText(t.host || t.title || t.url).slice(0, 24);
+    // #72: title preferred over bare host — two github.com tabs must be
+    // distinguishable at a glance; host + full url live in the tooltip.
+    const label = safeText(t.title || t.host || t.url).slice(0, 24);
     chip.textContent = (t.active ? '◈ ' : '') + label;
-    chip.title = safeText(t.title || t.url) + (t.active ? ' — this tab' : '') +
+    chip.title = safeText(t.title || t.url) + (t.url ? `\n${safeText(t.url)}` : '') +
+      (t.active ? ' — this tab' : '') +
       (tabRefsEnabled.has(t.tabId) ? ' — referenced (click to remove)' : ' — click to reference as context');
     chip.setAttribute('aria-pressed', String(tabRefsEnabled.has(t.tabId)));
     chip.addEventListener('click', () => {
@@ -2456,8 +2459,19 @@ function renderTabAutocomplete(filterText) {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'tab-ac-item' + (i === tabAcIndex ? ' tab-ac-active' : '');
-    item.textContent = (t.active ? '◈ ' : '') + safeText(t.host || t.title || t.url).slice(0, 30);
-    item.title = safeText(t.title || t.url);
+    // #72: page title primary, dimmed host secondary — bare hostnames made
+    // same-site tabs indistinguishable.
+    const name = document.createElement('span');
+    name.className = 'tab-ac-name';
+    name.textContent = (t.active ? '◈ ' : '') + safeText(t.title || t.host || t.url).slice(0, 40);
+    item.appendChild(name);
+    if (t.host && (t.title || '') !== t.host) {
+      const host = document.createElement('span');
+      host.className = 'tab-ac-host';
+      host.textContent = safeText(t.host);
+      item.appendChild(host);
+    }
+    item.title = safeText(t.title || t.url) + (t.url ? `\n${safeText(t.url)}` : '');
     item.addEventListener('mousedown', (e) => { e.preventDefault(); selectTabAutocomplete(i); });
     popup.appendChild(item);
   });

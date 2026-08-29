@@ -1030,3 +1030,27 @@ describe("ux — history (chat list) snippet + search highlight", () => {
     (panelWin.document.querySelector("#history-btn") as any).click();
   });
 });
+
+describe("@ titles (#72) — chips + autocomplete distinguish same-host tabs", () => {
+  it("renders page titles for two github.com tabs, in the strip and the @ popup", async () => {
+    bus.tabs.registerTab({ id: 901, url: "https://github.com/a/repo-a", title: "Repo A · GitHub", active: false });
+    bus.tabs.registerTab({ id: 902, url: "https://github.com/b/repo-b", title: "Repo B · GitHub", active: true });
+    // refreshOpenTabs rides the window-focus listener.
+    panelWin.dispatchEvent(new panelWin.Event("focus"));
+    await waitUntil(() => panelWin.document.querySelectorAll("#tab-strip .tab-chip").length >= 3, 5000);
+    const chipLabels = [...panelWin.document.querySelectorAll("#tab-strip .tab-chip")].map((c: any) => c.textContent || "");
+    expect(chipLabels.some((l: string) => l.includes("Repo A"))).toBe(true);
+    expect(chipLabels.some((l: string) => l.includes("Repo B"))).toBe(true);
+
+    // @ popup: title primary, host secondary.
+    const composer = panelWin.document.querySelector("#query-input") as any;
+    composer.value = "@repo";
+    composer.dispatchEvent(new panelWin.Event("input", { bubbles: true }));
+    await waitUntil(() => panelWin.document.querySelectorAll("#tab-autocomplete .tab-ac-item").length >= 2, 5000);
+    const rows = [...panelWin.document.querySelectorAll("#tab-autocomplete .tab-ac-item")];
+    expect(rows.some((r: any) => (r.querySelector(".tab-ac-name")?.textContent || "").includes("Repo A"))).toBe(true);
+    expect(rows.some((r: any) => r.querySelector(".tab-ac-host")?.textContent === "github.com")).toBe(true);
+    composer.value = "";
+    composer.dispatchEvent(new panelWin.Event("input", { bubbles: true }));
+  });
+});
