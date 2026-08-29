@@ -96,6 +96,19 @@ describe("LIST_SKILLS — MCP bash enumeration of the workspace Skills folder", 
     expect(resp.ok).toBe(true);
     expect(mcpRequests().length).toBe(before);
   });
+
+  it("cache survives a simulated SW restart — no new MCP round-trips after a background reload", async () => {
+    // The earlier tests warmed the session cache via the Task-2 wiring.
+    const before = mcpRequests().length;
+    // Reload background.js as a "new service worker instance" (fresh module
+    // registry entry, same fake-chrome bus → same storage.session).
+    await import("../../extension/background.js?file=mcp-flow-restart");
+    await new Promise((r) => setTimeout(r, 25));
+    const resp = await bus.runtime.sendMessage({ type: "LIST_SKILLS" });
+    expect(resp.ok).toBe(true);
+    expect(resp.skills.length).toBeGreaterThan(0);
+    expect(mcpRequests().length).toBe(before);
+  });
 });
 
 describe("LIST_WORKSPACE_DIR — validated ls -1F of a workspace path", () => {

@@ -67,6 +67,7 @@ import {
   parseSkillsBundle,
   parseLsEntries,
 } from './lib/pickers.js';
+import { createSessionCache } from './lib/sw-cache.js';
 
 function safePost(port, msg) {
   if (!port || port._dead) return false;
@@ -1731,30 +1732,21 @@ async function mcpToolCall(name, args) {
 /**
  * #28 `/` picker source: the user's Zo skills, one bash round-trip that dumps
  * every SKILL.md head (name + description frontmatter). 5-min cache with
- * in-flight dedup — the skills list rarely changes mid-session.
+ * in-flight dedup, backed by chrome.storage.session so it SURVIVES MV3
+ * service-worker restarts (#73 — the in-memory cache was wiped ~every open).
  */
-const skillsListCache = { list: null, fetchedAt: 0, inFlight: null };
-const SKILLS_TTL_MS = 5 * 60 * 1000;
+const skillsCacheStore = createSessionCache({
+  storage: chrome.storage.session,
+  key: 'cobrowse_skills_list',
+  ttlMs: 5 * 60 * 1000,
+});
 
 async function listSkills(force = false) {
-  const now = Date.now();
-  if (!force && skillsListCache.list && now - skillsListCache.fetchedAt < SKILLS_TTL_MS) {
-    return skillsListCache.list;
-  }
-  if (skillsListCache.inFlight) return skillsListCache.inFlight;
-  skillsListCache.inFlight = (async () => {
+  return skillsCacheStore.get(async () => {
     if (!config.zoAccessToken) throw new Error('Zo access token not configured.');
     const result = await mcpToolCall('bash', { cmd: skillsListCommand() });
-    const skills = parseSkillsBundle(toolText(result));
-    skillsListCache.list = skills;
-    skillsListCache.fetchedAt = Date.now();
-    return skills;
-  })();
-  try {
-    return await skillsListCache.inFlight;
-  } finally {
-    skillsListCache.inFlight = null;
-  }
+    return parseSkillsBundle(toolText(result));
+  }, force);
 }
 
 /**

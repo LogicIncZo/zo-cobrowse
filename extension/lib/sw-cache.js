@@ -5,7 +5,8 @@
  * were wiped on every restart, so e.g. the `/` skills picker re-fetched and
  * showed "Loading skills…" on essentially every open.
  *
- * Pure: `storage` is injected (anything with get(key)/set(obj)), so this
+ * Pure: `storage` is injected (a storage AREA — `chrome.storage.session` in
+ * production — anything with get(key)/set(obj)), so this
  * unit-tests without chrome. `null`/`undefined` values are treated as a MISS
  * — a fetcher that fails by returning null is retried next call, never cached.
  *
