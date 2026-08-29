@@ -1,75 +1,56 @@
 # Changelog
 
-All notable changes to Zo Co-browse are documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project uses [Semantic Versioning](https://semver.org/).
+The full, versioned history lives in the repo's
+[CHANGELOG.md](https://github.com/LogicIncZo/zo-cobrowse/blob/dev/CHANGELOG.md).
+This page mirrors everything **unreleased** on `dev`.
 
 ## [Unreleased]
 
-### Added
+### Added — UX polish + context transparency
+- **Context-tier chip on every assistant footer** — 🔗 URL only / 📝 Text /
+  🧩 Elements / 📷 Screenshot, tooltip = the context-policy decision reason;
+  persisted on the message so history re-renders keep it. Makes the per-turn
+  token story visible without opening the prompt inspector.
+- **Empty-state starter chips** — a fresh chat shows four clickable starting
+  points (summarize / `!context` peek / extract links / research) that prefill
+  the composer; the card retires itself on the first message.
+- **Copy button on code blocks** — every rendered fenced block gets a Copy
+  button (clipboard write + label flip). Also fixes a double-escape bug where
+  code blocks displayed literal `&#39;` entities.
+- **⬇ Latest pill** — appears when the chat log is scrolled away from the
+  bottom (e.g. while reading during a stream); clicks snap back.
 
-- **Repo maintenance rules + git-flow model** — formalized a `dev`
-  (integration) → `main` (release) branching model with branch protection on
-  both: no direct pushes, CI must be green to merge. Feature/fix/chore
-  branches flow into `dev`, which promotes to `main` via PR. Releases remain
-  deliberate (`git tag vX.Y.Z` triggers `release.yml`).
-- **Docs site (VitePress + GitHub Pages)** — a comprehensive documentation
-  site under `docs/`, built by VitePress and deployed to GitHub Pages by
-  `.github/workflows/docs.yml` on push to `main`.
-- **Thinking/reasoning bubble** — `reasoning` returned by Zo surfaces as a
-  collapsible "💭 Thinking" bubble above the assistant message, persisted with
-  the message and re-rendered from history.
-- **zo.computer-style chat UI** — read-only modes (`ask`/`research`/`summarize`/
-  `extract`/`visual`) stream **plain markdown** instead of forcing the
-  `{reasoning,actions}` JSON envelope, so thinking and answer render as
-  separate blocks (fixes the raw-JSON-in-chat bug). Only `cobrowse` keeps the
-  JSON action protocol.
-- **Inline grouped action timeline** — DOM actions render as a grouped, sticky
-  timeline with per-action status (pending → running → done).
-- **Reset-to-defaults** in the options page (clears sync + local config).
-- **Mode system unification** — `ACTION_SCHEMA_COMPACT` requests only
-  `{"actions":[...]}`; lite vs full context tiers stay consistent.
-- **Loop-engineering tooling** — `bun run verify` (tests + release checks +
-  per-entry transpile) and a committed **hard-gate pre-commit hook**
-  (`bun run setup-hooks` to install; `git commit --no-verify` to bypass).
-- **CI/CD backbone** — CI runs on every branch push + PR to `main` (tests,
-  transpile check, release checks, package artifact); a dormant tag-triggered
-  `Release` workflow is ready to publish `v*` releases with the extension zip.
+### Fixed — follow-up context (token optimization)
+- **Send-once tab excerpts**: referenced-tab manifests re-sent their 500-char
+  excerpt on EVERY turn for unchanged pages. Tabs already sent at the same
+  url+title now ride as a pointer-only manifest line ("already provided
+  above") — the T-ref stays alive for `read_tab` escalation while the excerpt
+  rides Zo's conversation threading. Dedup state persists per chat
+  (`tabManifestSent` in the session context state); the prompt inspector
+  preview mirrors it, so preview and send can't diverge.
+- **No-thread re-attach guard**: same-page follow-up dedup trusted
+  `conversation_id` threading even when the thread was never established
+  (retry after a stream that died before the conversation_id echo → a fresh
+  Zo thread holds nothing). `decideTurn` now takes `hasThread`; without a
+  thread, action turns re-attach full context.
+- **Single-chunk streams rendered empty bubbles**: a stream whose whole answer
+  arrived in the PartStart event created the live bubble with no streaming
+  span, and STREAM_DONE's markdown replace skipped it. Now rendered.
+- **Wrong mode chip after `!mode` bangs**: the STREAM_DONE footer resolved the
+  active Mode instead of the turn's (bang-overridden) mode.
 
-### Changed
-
-- Streaming path hardened end-to-end: `sessionId` echoed on every `STREAM_*`
-  message, stale-port `safePost()` no-throw, retries gated to transient errors
-  (`isRetriableStreamError`), 60s thinking-indicator liveness timeout, no
-  silent `fullText` clobbering, `STREAM_DONE` normalized to canonical
-  `responseText`.
-- Top region of the panel is sticky — only `#messages` scrolls.
-- Removed dead duplicate `sendQuery`; action loop snapshots pending actions
-  against the Skip race.
-
-### Fixed
-
-- **P0**: `addSystemMessage` XSS + markdown bypass + DOM thrash; context-menu
-  crash (`pageContext` ReferenceError); Lite persona dropdown permanently empty;
-  `enabledMenus` key mismatch hiding "Fill this field".
-- **P1**: streaming port disconnect lifecycle, late-DONE cross-query rendering,
-  `enabledMenus` not loaded on service-worker startup, missing `navigate`/`done`
-  cases in content.js, wrong keyboard-shortcut docs (options.html).
-- **P2**: `fullText` overwritten by final payload, `captureVisibleTab`
-  undefined window, NAVIGATE undefined tabId, `testConnection` casing,
-  hardcoded API hosts, orphan storage keys, sandbox `'unsafe-eval'` CSP,
-  `zoTtsRate` stored as string.
-- **P3**: `addMessage('bot')` markdown bypass, unstyled action timeline/DuckDB
-  tables, badge showing `undefined` persona, dead action handler, uncaught
-  `storage.session.set` promise.
-- Persisted history that showed raw JSON blobs is healed on load; key-first
-  actions are normalized so reasoning bubbles + done text render.
-
-### Tests / QA
-
-- Suite grown from 81 → **494 tests / 0 fail** (23 files, 1240 expect calls).
-- New test files: `action-timeline`, `normalize-actions`, `css-layout`,
-  `sse-parsing`, `strict-module`, plus options/reset and shortcut-docs
-  coverage.
-- Full P0–P3 audit round closed — see `QA_REPORT.md` for the remediation log.
+### Added — settings + chat-list usability
+- **Settings section nav** — sticky chip nav (Connection / Persona & Model /
+  Prompts / Features / Speech / Menus / Actions / About) on the ~12-card
+  options page.
+- **Token Show/Hide** — reveal button on the access-token field.
+- **Fixed status toast** — Save feedback used to render at the very bottom of
+  the page, invisible from the Save button; now a fixed toast.
+- **Unsaved-changes marker** — editing flags both Save buttons with a •
+  (autosave controls excluded); clears on save.
+- **Runtime version** — the About card reads the version from the live
+  manifest (was hardcoded "v0.0.1"); repo links repointed to LogicIncZo.
+- **Chat-list preview snippets** — each history card shows a one-line preview
+  of the conversation's opening ask (first user message, collapsed).
+- **Search highlighting** — history search matches are `<mark>`-highlighted
+  in titles and snippets.

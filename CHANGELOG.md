@@ -40,6 +40,22 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - **Wrong mode chip after `!mode` bangs**: the STREAM_DONE footer resolved the
   active Mode instead of the turn's (bang-overridden) mode.
 
+### Added — settings + chat-list usability
+- **Settings section nav** — sticky chip nav (Connection / Persona & Model /
+  Prompts / Features / Speech / Menus / Actions / About) on the ~12-card
+  options page.
+- **Token Show/Hide** — reveal button on the access-token field.
+- **Fixed status toast** — Save feedback used to render at the very bottom of
+  the page, invisible from the Save button; now a fixed toast.
+- **Unsaved-changes marker** — editing flags both Save buttons with a •
+  (autosave controls excluded); clears on save.
+- **Runtime version** — the About card reads the version from the live
+  manifest (was hardcoded "v0.0.1"); repo links repointed to LogicIncZo.
+- **Chat-list preview snippets** — each history card shows a one-line preview
+  of the conversation's opening ask (first user message, collapsed).
+- **Search highlighting** — history search matches are `<mark>`-highlighted
+  in titles and snippets.
+
 ## [v0.2.0] - 2026-08-28
 
 Form filling (#26) — the co-browse contract: **Zo fills, you review and
