@@ -29,6 +29,17 @@ import {
 } from './lib/pull.js';
 import { isSensitiveForm } from './lib/formfill.js';
 import {
+  buildEnhancePrompt,
+  parseEnhanceResponse,
+} from './lib/write-assist.js';
+import {
+  buildGenerateModePrompt,
+  buildRunSkillPrompt,
+  buildCreateAutomationPrompt,
+  buildListAutomationsPrompt,
+  buildTestConnectionPrompt,
+} from './lib/zo-prompts.js';
+import {
   loadConversationState,
   saveConversationState,
   computePageHash,
@@ -200,6 +211,7 @@ const DEFAULTS = {
   zoActiveMode: 'cobrowse', // active Mode id (replaces personaMode + presets)
   zoAccessToken: '',
   enableScreenshots: true,  // global kill-switch; per-Mode tiers also gate capture
+  enableWriteAssist: true,  // textarea write-assist floating icon (content script)
   enabledMenus: {        // which context menu items are active
     page: true,
     selection: true,
@@ -242,13 +254,14 @@ function senderTabId(sender) {
 
 // ---- Init ----
 chrome.storage.sync.get(
-  ['zoApiUrl', 'zoModel', 'zoPersonaId', 'zoActiveMode', 'enableScreenshots', 'enabledMenus'],
+  ['zoApiUrl', 'zoModel', 'zoPersonaId', 'zoActiveMode', 'enableScreenshots', 'enableWriteAssist', 'enabledMenus'],
   (result) => {
     if (result.zoApiUrl) config.zoApiUrl = result.zoApiUrl;
     if (result.zoModel) config.zoModel = result.zoModel;
     if (result.zoPersonaId) config.zoPersonaId = result.zoPersonaId;
     if (result.zoActiveMode) config.zoActiveMode = result.zoActiveMode;
     if (result.enableScreenshots !== undefined) config.enableScreenshots = result.enableScreenshots;
+    if (result.enableWriteAssist !== undefined) config.enableWriteAssist = result.enableWriteAssist;
       if (result.enabledMenus) config.enabledMenus = { ...config.enabledMenus, ...result.enabledMenus };
   }
 );
@@ -272,6 +285,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   else if (changes.zoSpaceEndpoint?.oldValue && !changes.zoSpaceEndpoint?.newValue) config.zoSpaceEndpoint = undefined;
     if (changes.enabledMenus?.newValue) { config.enabledMenus = { ...config.enabledMenus, ...changes.enabledMenus.newValue }; recreateContextMenus(); }
   if (changes.enableScreenshots?.newValue !== undefined) config.enableScreenshots = changes.enableScreenshots.newValue;
+  if (changes.enableWriteAssist?.newValue !== undefined) config.enableWriteAssist = changes.enableWriteAssist.newValue;
 });
 
 // Open side panel on toolbar icon click (global scope — takes effect on every SW wake-up).
@@ -343,6 +357,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       runExecuteActions(domActions, request.tabId || senderTabId(sender), { confirmed: request.confirmed }).then(sendResponse);
       return true;
     }
+    case 'ENHANCE_TEXT': {
+      // Textarea write-assist: the content script's in-page widget sends the
+      // focused field's data; we build the prompt (lib/write-assist), call Zo
+      // one-shot (no conversation_id -> fresh thread, no ambient rotation),
+      // and return the improved text for the widget to preview + fill back.
+      enhanceText(request).then(sendResponse);
+      return true;
+    }
     case 'GET_OPEN_TABS': {
       // Tab-context chip strip source: capturable tabs in the current window,
       // most recently used first, capped.
@@ -407,6 +429,7 @@ function sanitizedConfig() {
     zoPersonaId: config.zoPersonaId,
     zoActiveMode: config.zoActiveMode,
     enableScreenshots: config.enableScreenshots,
+    enableWriteAssist: config.enableWriteAssist,
     enabledMenus: config.enabledMenus,
     zoSpaceEndpoint: config.zoSpaceEndpoint,
     hasToken: !!config.zoAccessToken,
@@ -1772,6 +1795,7 @@ async function generateMode(description) {
     return { error: 'No token' };
   }
   try {
+    const prompt = buildGenerateModePrompt(description);
     const r = await fetch(config.zoApiUrl, {
       method: 'POST',
       headers: {
@@ -1780,7 +1804,7 @@ async function generateMode(description) {
         Accept: 'application/json',
       },
       body: JSON.stringify({
-        input: `You are a Mode designer for a browser co-browsing AI assistant. Based on this user description, generate a custom Mode.\n\nUser description: ${description}\n\nCreate a Mode with these fields:\n1. name: A short, catchy name (2-4 words)\n2. description: One sentence explaining what this Mode does\n3. icon: A single emoji\n4. systemPrompt: A paragraph setting the AI's role and behavior for this task (write as if addressing the AI directly, starting with "You are Zo —")\n5. instructions: Detailed instructions for how the AI should respond, including output format guidance.\n6. contextTier: 0 (URL only), 1 (+page text), 2 (+clickable elements & form fields), or 3 (+screenshot)\n7. expectJson: true if the mode should drive browser actions, false if it should reply with plain markdown\n\nReturn ONLY valid JSON with those 7 fields. No markdown, no explanation.`,
+        input: prompt,
         model_name: config.zoModel || undefined,
       }),
     });
@@ -1820,7 +1844,7 @@ async function testConnection() {
         Accept: 'application/json',
       },
       body: JSON.stringify({
-        input: 'Reply with just: ZO_OK',
+        input: buildTestConnectionPrompt(),
         model_name: config.zoModel || undefined,
         conversation_id: zoConversationId || undefined,
       }),
@@ -2244,15 +2268,7 @@ async function savePageToWorkspace(pageContext, savePath) {
 
 // Run a Zo skill on the current page (#04)
 async function runSkill(skillName, pageContext) {
-  const prompt = `Run the skill named "${skillName}" using the content from the current page as input.
-
-Page URL: ${pageContext?.url || '(unknown)'}
-Page title: ${pageContext?.title || '(unknown)'}
-
-Page text (first 2000 chars):
-${(pageContext?.visibleText || '').slice(0, 2000)}
-
-Read the skill's SKILL.md and follow its instructions.`;
+  const prompt = buildRunSkillPrompt(skillName, pageContext);
   try {
     const resp = await fetch(config.zoApiUrl, {
       method: 'POST',
@@ -2275,18 +2291,59 @@ Read the skill's SKILL.md and follow its instructions.`;
   }
 }
 
+// Textarea write-assist one-shot (feature/textarea-fill). Builds the prompt via
+// lib/write-assist, POSTs to /zo/ask with NO conversation_id (fresh thread per
+// call — never rotates the ambient zoConversationId), and returns the parsed
+// improved text. A 60s AbortController bounds long generations.
+async function enhanceText(request) {
+  if (config.enableWriteAssist === false) {
+    return { ok: false, error: 'Write assist is disabled in the extension options.' };
+  }
+  if (!config.zoAccessToken) {
+    return { ok: false, error: 'No access token configured. Save one in the extension options.' };
+  }
+  const req = request || {};
+  const prompt = buildEnhancePrompt({
+    text: req.text,
+    instruction: req.instruction,
+    field: req.field,
+    page: req.page,
+    acceptsMarkdown: !!(req.field && req.field.markdown),
+  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60000);
+  try {
+    const resp = await fetch(config.zoApiUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${config.zoAccessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        input: prompt,
+        model_name: config.zoModel || undefined,
+      }),
+      signal: controller.signal,
+    });
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '');
+      return { ok: false, error: `Zo API error: ${resp.status} ${body.substring(0, 200)}` };
+    }
+    const data = await resp.json();
+    const { text } = parseEnhanceResponse(data.output);
+    if (!text) return { ok: false, error: 'Zo returned an empty response.' };
+    return { ok: true, text };
+  } catch (err) {
+    if (err && err.name === 'AbortError') return { ok: false, error: 'Enhance timed out after 60s.' };
+    return { ok: false, error: `Enhance failed: ${err.message}` };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Create a scheduled automation from the current page (#08)
 async function createAutomation(instruction, rrule, pageContext) {
-  const prompt = `Create a scheduled automation with these parameters:
-  - Instruction: ${instruction}
-  - Schedule (RRULE): ${rrule || 'FREQ=DAILY'}
-  - Source page URL: ${pageContext?.url || '(unknown)'}
-  - Source page title: ${pageContext?.title || '(unknown)'}
-
-Context from the page (first 1000 chars):
-${(pageContext?.visibleText || '').slice(0, 1000)}
-
-Use the create_agent tool to create this automation now.`;
+  const prompt = buildCreateAutomationPrompt(instruction, rrule, pageContext);
   try {
     const resp = await fetch(config.zoApiUrl, {
       method: 'POST',
@@ -2311,7 +2368,7 @@ Use the create_agent tool to create this automation now.`;
 
 // List existing automations (#08)
 async function listAutomations() {
-  const prompt = 'List all my automations. For each, return the title, schedule (RRULE), and delivery method.';
+  const prompt = buildListAutomationsPrompt();
   try {
     const resp = await fetch(config.zoApiUrl, {
       method: 'POST',

@@ -93,7 +93,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     chrome.storage.sync.get([
       'zoModel', 'zoPersonaId',
       'zoQuickActions',
-      'zoTtsLang', 'zoTtsRate', 'zoTtsAutoRead', 'enabledMenus', 'enableScreenshots'
+      'zoTtsLang', 'zoTtsRate', 'zoTtsAutoRead', 'enabledMenus', 'enableScreenshots', 'enableWriteAssist'
     ], (syncResult) => {
       const token = localResult.zoAccessToken;
       const spaceEndpoint = localResult.zoSpaceEndpoint;
@@ -120,6 +120,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Restore screenshot toggle
       const screenshotsCheck = document.getElementById('enable-screenshots');
       if (screenshotsCheck) screenshotsCheck.checked = syncResult.enableScreenshots !== false;
+
+      // Restore write-assist toggle
+      const writeAssistCheck = document.getElementById('enable-write-assist');
+      if (writeAssistCheck) writeAssistCheck.checked = syncResult.enableWriteAssist !== false;
     });
   });
 
@@ -188,6 +192,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         zoTtsRate: (document.getElementById('tts-rate')?.value || '1.0').trim(),
         zoTtsAutoRead: !!(document.getElementById('tts-auto-read')?.checked),
         enableScreenshots: !!(document.getElementById('enable-screenshots')?.checked),
+        enableWriteAssist: !!(document.getElementById('enable-write-assist')?.checked),
       enabledMenus: {
         page: document.getElementById('menu-ask-page')?.checked ?? true,
         selection: document.getElementById('menu-ask-selection')?.checked ?? true,
@@ -254,7 +259,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     resetBtn.addEventListener('click', () => {
       if (!confirm('Reset all Zo Co-browse settings to defaults? This clears your token, endpoint, model, and preferences on this device.')) return;
       // Sensitive (local) + non-sensitive (sync) keys are cleared together.
-      const syncKeys = ['zoModel', 'zoPersonaId', 'zoActiveMode', 'zoQuickActions', 'zoTtsLang', 'zoTtsRate', 'zoTtsAutoRead', 'enabledMenus', 'enableScreenshots', 'cobrowse_theme'];
+      const syncKeys = ['zoModel', 'zoPersonaId', 'zoActiveMode', 'zoQuickActions', 'zoTtsLang', 'zoTtsRate', 'zoTtsAutoRead', 'enabledMenus', 'enableScreenshots', 'enableWriteAssist', 'cobrowse_theme'];
       const localKeys = ['zoAccessToken', 'zoSpaceEndpoint', 'cobrowse_mode_overrides'];
       Promise.all([
         new Promise((r) => chrome.storage.sync.remove(syncKeys, r)),

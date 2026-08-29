@@ -12,7 +12,7 @@ import { describe, it, expect, beforeAll } from "bun:test";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 import { Window } from "happy-dom";
-import { createTabTarget, stubNonZeroRects } from "../helpers/chrome-mock.ts";
+import { createTabTarget, stubNonZeroRects, FakeEvent } from "../helpers/chrome-mock.ts";
 
 /** Point bare browser globals at a happy-dom window + tab target (defineProperty: Bun owns some). */
 function setPageGlobals(win: any, chromeObj: any) {
@@ -255,5 +255,255 @@ describe("content.js — full-script message flow", () => {
       expect(b1.value).toBe("viewport pick");
       expect(a1.value).toBe("Ada Lovelace"); // kept its value from the previous test
     });
+  });
+});
+
+// Write-assist widget (feature/textarea-fill) — the first page-injected UI. A
+// dedicated content.js instance runs against its own happy-dom window with a
+// rich chrome (storage + runtime.sendMessage + getURL) so the widget boots.
+describe("content.js — write-assist widget", () => {
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  /** Chrome object rich enough for the widget: storage.sync (setting),
+   *  runtime.sendMessage (stubbed one-shot), runtime.getURL, onMessage. */
+  function makeWidgetChrome(opts: { enabled?: boolean; respond?: (msg: any) => any } = {}) {
+    const sent: any[] = [];
+    const store: Record<string, any> = { enableWriteAssist: opts.enabled !== false };
+    const chromeObj: any = {
+      runtime: {
+        onMessage: new FakeEvent(),
+        sendMessage: (msg: any) => {
+          sent.push(msg);
+          const respond = opts.respond || (() => ({ ok: true, text: "IMPROVED RESULT" }));
+          return Promise.resolve(respond(msg));
+        },
+        getURL: (p: string) => `chrome-extension://test/${p}`,
+      },
+      storage: {
+        sync: {
+          get: (keys: any, cb?: Function) => {
+            const result: Record<string, any> = {};
+            if (keys && typeof keys === "object" && !Array.isArray(keys)) {
+              for (const [k, def] of Object.entries(keys)) result[k] = k in store ? store[k] : def;
+            }
+            if (cb) cb(result);
+            return Promise.resolve(result);
+          },
+        },
+        onChanged: { addListener: () => {}, removeListener: () => {} },
+      },
+    };
+    return { chromeObj, sent };
+  }
+
+  function makeWindow() {
+    const win: any = new Window({ url: "https://jobs.example.test/apply" });
+    win.document.write(`<!DOCTYPE html><html><head><title>Job Application</title></head><body>
+      <label for="proj">Describe your project</label>
+      <textarea id="proj" name="proj" placeholder="Tell us about a project" maxlength="500">Led migration of 40 dashboards to DuckDB</textarea>
+    </body></html>`);
+    stubNonZeroRects(win);
+    return win;
+  }
+
+  function shadow(win: any) {
+    const host = win.document.getElementById("zo-write-assist-host");
+    return host ? host.shadowRoot : null;
+  }
+
+  it("shows the icon when an eligible textarea is focused", async () => {
+    const win = makeWindow();
+    const { chromeObj } = makeWidgetChrome();
+    loadContentScript(win, chromeObj);
+    await tick();
+    const ta = win.document.querySelector("#proj");
+    ta.focus();
+    await tick();
+    const root = shadow(win);
+    expect(root).toBeTruthy();
+    const icon = root.querySelector(".zo-wa-icon");
+    expect(icon).toBeTruthy();
+    expect(icon.style.display).toBe("flex");
+  });
+
+  it("sends ENHANCE_TEXT with field + page context and previews the result", async () => {
+    const win = makeWindow();
+    const { chromeObj, sent } = makeWidgetChrome();
+    loadContentScript(win, chromeObj);
+    await tick();
+    const ta = win.document.querySelector("#proj");
+    ta.focus();
+    await tick();
+    const root = shadow(win);
+    root.querySelector(".zo-wa-icon").click();
+    await tick();
+    const pop = root.querySelector(".zo-wa-pop");
+    expect(pop.hidden).toBe(false);
+    // compose state: instruction input + Enhance button present
+    expect(pop.querySelector(".zo-wa-instr")).toBeTruthy();
+    const enhanceBtn = [...pop.querySelectorAll("button")].find((b: any) => b.textContent === "Enhance");
+    expect(enhanceBtn).toBeTruthy();
+    enhanceBtn.click();
+    await tick();
+    await tick();
+    // The message carried the lead + field label (from <label for>) + maxLength + page cues.
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({
+      type: "ENHANCE_TEXT",
+      text: "Led migration of 40 dashboards to DuckDB",
+      field: { label: "Describe your project", placeholder: "Tell us about a project", maxLength: 500, markdown: false },
+      page: { url: "https://jobs.example.test/apply", title: "Job Application" },
+    });
+    // result state previews the improved text with Accept/Retry
+    const resultBody = pop.querySelector(".zo-wa-result");
+    expect(resultBody).toBeTruthy();
+    expect(resultBody.textContent).toBe("IMPROVED RESULT");
+    const acceptBtn = [...pop.querySelectorAll("button")].find((b: any) => b.textContent === "Accept");
+    expect(acceptBtn).toBeTruthy();
+  });
+
+  it("Accept fills the textarea (framework-safe) and fires input+change", async () => {
+    const win = makeWindow();
+    const { chromeObj } = makeWidgetChrome();
+    loadContentScript(win, chromeObj);
+    await tick();
+    const ta = win.document.querySelector("#proj");
+    const events: string[] = [];
+    ta.addEventListener("input", () => events.push(`input:${ta.value}`));
+    ta.addEventListener("change", () => events.push(`change:${ta.value}`));
+    ta.focus();
+    await tick();
+    const root = shadow(win);
+    root.querySelector(".zo-wa-icon").click();
+    await tick();
+    const pop = root.querySelector(".zo-wa-pop");
+    [...pop.querySelectorAll("button")].find((b: any) => b.textContent === "Enhance").click();
+    await tick();
+    await tick();
+    [...pop.querySelectorAll("button")].find((b: any) => b.textContent === "Accept").click();
+    await tick();
+    expect(ta.value).toBe("IMPROVED RESULT");
+    expect(events).toContain("input:IMPROVED RESULT");
+    expect(events).toContain("change:IMPROVED RESULT");
+    // popover closed after accept
+    expect(pop.hidden).toBe(true);
+  });
+
+  it("renders the error state when the background reports a failure", async () => {
+    const win = makeWindow();
+    const { chromeObj } = makeWidgetChrome({ respond: () => ({ ok: false, error: "No access token configured." }) });
+    loadContentScript(win, chromeObj);
+    await tick();
+    const ta = win.document.querySelector("#proj");
+    ta.focus();
+    await tick();
+    const root = shadow(win);
+    root.querySelector(".zo-wa-icon").click();
+    await tick();
+    const pop = root.querySelector(".zo-wa-pop");
+    [...pop.querySelectorAll("button")].find((b: any) => b.textContent === "Enhance").click();
+    await tick();
+    await tick();
+    const errBody = pop.querySelector(".zo-wa-error");
+    expect(errBody).toBeTruthy();
+    expect(errBody.textContent).toContain("No access token configured");
+  });
+
+  it("does not boot when enableWriteAssist is false", async () => {
+    const win = makeWindow();
+    const { chromeObj } = makeWidgetChrome({ enabled: false });
+    loadContentScript(win, chromeObj);
+    await tick();
+    win.document.querySelector("#proj").focus();
+    await tick();
+    expect(win.document.getElementById("zo-write-assist-host")).toBeNull();
+  });
+
+  it("skips disabled and readonly textareas", async () => {
+    const win = makeWindow();
+    win.document.body.insertAdjacentHTML("beforeend",
+      '<textarea id="dis" disabled>nope</textarea><textarea id="ro" readonly>nope</textarea>');
+    const { chromeObj } = makeWidgetChrome();
+    loadContentScript(win, chromeObj);
+    await tick();
+    win.document.querySelector("#dis").focus();
+    await tick();
+    expect(win.document.getElementById("zo-write-assist-host")).toBeNull();
+    win.document.querySelector("#ro").focus();
+    await tick();
+    expect(win.document.getElementById("zo-write-assist-host")).toBeNull();
+  });
+
+  it("works on contenteditable rich editors (GitHub's CodeMirror issue form)", async () => {
+    const win = makeWindow();
+    win.document.body.insertAdjacentHTML("beforeend",
+      '<div id="rich" contenteditable="true" aria-placeholder="Type your description here...">Led migration of 40 dashboards</div>');
+    const { chromeObj, sent } = makeWidgetChrome();
+    loadContentScript(win, chromeObj);
+    await tick();
+    const ce = win.document.querySelector("#rich");
+    const events: string[] = [];
+    ce.addEventListener("input", () => events.push(`input:${ce.textContent}`));
+    ce.focus();
+    await tick();
+    const root = shadow(win);
+    expect(root.querySelector(".zo-wa-icon").style.display).toBe("flex");
+    root.querySelector(".zo-wa-icon").click();
+    await tick();
+    const pop = root.querySelector(".zo-wa-pop");
+    [...pop.querySelectorAll("button")].find((b: any) => b.textContent === "Enhance").click();
+    await tick();
+    await tick();
+    // Lead + placeholder came from the contenteditable (aria-placeholder, not .placeholder);
+    // CE fields flag Markdown acceptance.
+    expect(sent[0].text).toBe("Led migration of 40 dashboards");
+    expect(sent[0].field.placeholder).toBe("Type your description here...");
+    expect(sent[0].field.maxLength).toBeNull();
+    expect(sent[0].field.markdown).toBe(true);
+    // Accept writes back through the textContent fallback (happy-dom has no
+    // execCommand; real Chromium uses the execCommand pipeline) + fires input.
+    [...pop.querySelectorAll("button")].find((b: any) => b.textContent === "Accept").click();
+    await tick();
+    expect(ce.textContent).toBe("IMPROVED RESULT");
+    expect(events).toContain("input:IMPROVED RESULT");
+  });
+
+  it("anchors the popover inside a large field; small fields keep the below fallback", async () => {
+    const win = makeWindow();
+    const { chromeObj } = makeWidgetChrome();
+    loadContentScript(win, chromeObj);
+    await tick();
+    const ta = win.document.querySelector("#proj");
+
+    // Large field (taller than the popover): bottom-aligned INSIDE the rect.
+    ta.getBoundingClientRect = () => ({ width: 500, height: 600, top: 50, left: 20, right: 520, bottom: 650, x: 20, y: 50 });
+    ta.focus();
+    await tick();
+    const root = shadow(win);
+    root.querySelector(".zo-wa-icon").click();
+    await tick();
+    let pop = root.querySelector(".zo-wa-pop");
+    let top = parseFloat(pop.style.top);
+    expect(top).toBeGreaterThanOrEqual(50 + 8);      // inside the field's top edge
+    expect(top + 200).toBeLessThanOrEqual(650 - 8);  // bottom-aligned within the field (happy-dom ph fallback = 200)
+
+    // Re-anchor on state render (result is taller than compose): still inside.
+    [...pop.querySelectorAll("button")].find((b: any) => b.textContent === "Enhance").click();
+    await tick();
+    await tick();
+    top = parseFloat(pop.style.top);
+    expect(top).toBeGreaterThanOrEqual(50 + 8);
+    expect(top + 200).toBeLessThanOrEqual(650 - 8);
+
+    // Small field: popover cannot fit inside — below-the-field fallback.
+    [...pop.querySelectorAll("button")].find((b: any) => b.textContent === "Accept").click();
+    await tick();
+    ta.getBoundingClientRect = () => ({ width: 120, height: 32, top: 0, left: 0, right: 120, bottom: 32, x: 0, y: 0 });
+    ta.focus();
+    await tick();
+    root.querySelector(".zo-wa-icon").click();
+    await tick();
+    pop = root.querySelector(".zo-wa-pop");
+    expect(parseFloat(pop.style.top)).toBe(32 + 8); // rect.bottom + 8
   });
 });

@@ -1,0 +1,6 @@
+{
+  "id": "wa-maxlen",
+  "promptHash": "2b3f1facbb72b66cf0bd05d417a02f4fc3eb154147f4a3337d344e73aa7deac4",
+  "fetchedAt": "2026-08-28T23:49:12.132Z",
+  "output": "<write-assist>I led the migration of 40 dashboards to DuckDB, moving our reporting onto faster, simpler queries. I ran hands-on training sessions and wrote documentation so the whole team could use and maintain the new setup confidently.</write-assist>"
+}

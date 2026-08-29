@@ -1,0 +1,6 @@
+{
+  "id": "wa-plain-textarea",
+  "promptHash": "6844e145e27e808add6c6f0575d2a92ba8e4662a834ae459c8a4fb6ad318ad27",
+  "fetchedAt": "2026-08-28T23:48:16.123Z",
+  "output": "<write-assist>\nI led the migration of 40 dashboards to DuckDB, owning the project end to end. That meant auditing our existing dashboards, designing the migration approach, and moving each one over while keeping day-to-day reporting running without disruption. Along the way I rebuilt queries to take advantage of DuckDB's speed and handled the edge cases that surfaced as we cut over. Since the technology was new to most of the team, I also ran the enablement side: hands-on training sessions, paired work on real dashboards, and written documentation so people could work confidently on their own. By the end, the whole team was productive on DuckDB and the dashboards were running on a faster, simpler stack — and the migration succeeded because of the people side as much as the technical side.\n</write-assist>"
+}

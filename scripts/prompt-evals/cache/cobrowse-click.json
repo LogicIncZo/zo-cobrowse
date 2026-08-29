@@ -1,0 +1,6 @@
+{
+  "id": "cobrowse-click",
+  "promptHash": "55652e36b52fa7041e11626d5330ab4a86230cfb20451f1cbba9a13a3dcb235b",
+  "fetchedAt": "2026-08-28T23:43:45.661Z",
+  "output": "{\"reasoning\":\"First link in DOM order is the 'Pricing' nav link.\",\"actions\":[{\"type\":\"click\",\"selector\":\"#pricing\"},{\"type\":\"done\",\"response\":\"Clicked the first link: Pricing (#pricing).\"}]}"
+}

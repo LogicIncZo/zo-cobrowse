@@ -53,4 +53,12 @@ describe("manifest.json — full schema validation", () => {
   it("has omnibox keyword 'zo'", () => {
     expect(manifest.omnibox.keyword).toBe("zo");
   });
+
+  // ── Write-assist widget (feature/textarea-fill) ──
+  it("exposes icons/icon.svg to host pages (in-page Zo icon)", () => {
+    const war = manifest.web_accessible_resources || [];
+    const entry = war.find((w) => w.resources.includes("icons/icon.svg"));
+    expect(entry).toBeTruthy();
+    expect(entry!.matches).toContain("<all_urls>");
+  });
 });

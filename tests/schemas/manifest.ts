@@ -55,6 +55,12 @@ export const ManifestSchema = z.object({
   omnibox: z.object({
     keyword: z.string().min(1),
   }).optional(),
+  // Write-assist widget renders the Zo icon inside host pages via
+  // chrome.runtime.getURL — MV3 requires the asset be web-accessible.
+  web_accessible_resources: z.array(z.object({
+    resources: z.array(z.string()),
+    matches: z.array(z.string()),
+  }).passthrough()).optional(),
 }).passthrough();
 
 export type Manifest = z.infer<typeof ManifestSchema>;
