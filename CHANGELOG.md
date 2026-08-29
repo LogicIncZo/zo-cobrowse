@@ -7,6 +7,39 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — UX polish + context transparency
+- **Context-tier chip on every assistant footer** — 🔗 URL only / 📝 Text /
+  🧩 Elements / 📷 Screenshot, tooltip = the context-policy decision reason;
+  persisted on the message so history re-renders keep it. Makes the per-turn
+  token story visible without opening the prompt inspector.
+- **Empty-state starter chips** — a fresh chat shows four clickable starting
+  points (summarize / `!context` peek / extract links / research) that prefill
+  the composer; the card retires itself on the first message.
+- **Copy button on code blocks** — every rendered fenced block gets a Copy
+  button (clipboard write + label flip). Also fixes a double-escape bug where
+  code blocks displayed literal `&#39;` entities.
+- **⬇ Latest pill** — appears when the chat log is scrolled away from the
+  bottom (e.g. while reading during a stream); clicks snap back.
+
+### Fixed — follow-up context (token optimization)
+- **Send-once tab excerpts**: referenced-tab manifests re-sent their 500-char
+  excerpt on EVERY turn for unchanged pages. Tabs already sent at the same
+  url+title now ride as a pointer-only manifest line ("already provided
+  above") — the T-ref stays alive for `read_tab` escalation while the excerpt
+  rides Zo's conversation threading. Dedup state persists per chat
+  (`tabManifestSent` in the session context state); the prompt inspector
+  preview mirrors it, so preview and send can't diverge.
+- **No-thread re-attach guard**: same-page follow-up dedup trusted
+  `conversation_id` threading even when the thread was never established
+  (retry after a stream that died before the conversation_id echo → a fresh
+  Zo thread holds nothing). `decideTurn` now takes `hasThread`; without a
+  thread, action turns re-attach full context.
+- **Single-chunk streams rendered empty bubbles**: a stream whose whole answer
+  arrived in the PartStart event created the live bubble with no streaming
+  span, and STREAM_DONE's markdown replace skipped it. Now rendered.
+- **Wrong mode chip after `!mode` bangs**: the STREAM_DONE footer resolved the
+  active Mode instead of the turn's (bang-overridden) mode.
+
 ## [v0.2.0] - 2026-08-28
 
 Form filling (#26) — the co-browse contract: **Zo fills, you review and

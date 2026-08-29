@@ -21,6 +21,11 @@ export const TabContextSchema = z.object({
   excerpt: z.string(),
   isActive: z.boolean(),
   available: z.boolean(),
+  // Send-once excerpt dedup: the tab's excerpt was already sent to Zo at this
+  // content key, so the manifest renders "already provided above" and the
+  // excerpt drops (conversation threading retains it). Optional so legacy
+  // producers (without the dedup) still validate.
+  pointerOnly: z.boolean().optional(),
 });
 export type TabContext = z.infer<typeof TabContextSchema>;
 

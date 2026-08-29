@@ -714,3 +714,87 @@ describe("write-assist ENHANCE_TEXT round-trip (content → background → Zo)",
     expect(req.headers.authorization).toBe(`Bearer ${MOCK_ZO_TOKEN}`);
   }, 30000);
 });
+
+// ---- UX + context-transparency round (footer context chip, follow-up
+// excerpt dedup, code-copy buttons, empty-state starter chips) ----
+
+function newChat(): void {
+  (panelWin.document.querySelector("#new-chat-btn") as any).click();
+}
+
+async function waitTurnComplete(): Promise<void> {
+  await waitUntil(() => !(panelWin.document.querySelector("#query-input") as any).disabled, 10000);
+}
+
+describe("ux — empty-state starter chips", () => {
+  it("offers starter chips on a fresh chat and prefills the composer on click", async () => {
+    newChat();
+    await waitUntil(() => panelWin.document.querySelector(".empty-state-chip"));
+    const chips = panelWin.document.querySelectorAll(".empty-state-chip");
+    expect(chips.length).toBe(4);
+    (chips[1] as any).click();
+    expect((panelWin.document.querySelector("#query-input") as any).value).toContain("!context");
+  });
+});
+
+describe("ux — follow-up excerpt dedup + footer context chip", () => {
+  it("sends the T1 excerpt once, then pointer-only on the same-page follow-up; footer shows the tier", async () => {
+    newChat();
+    await waitUntil(() => panelWin.document.querySelector(".empty-state-chip"));
+
+    // Turn 1 (read → tier 0 → auto-T1 rides WITH its excerpt, dedup records it)
+    const box1 = armAskCapture();
+    await typeAndSend("What is this page about?");
+    await waitUntil(() => box1.msg != null, 8000);
+    expect(box1.msg.effectiveTier).toBe(0);
+    await waitTurnComplete();
+    const req1 = fm.to("/zo/ask")[fm.to("/zo/ask").length - 1];
+    expect(req1.body.input).toContain("## Referenced Tabs");
+    expect(req1.body.input).toContain("Excerpt:");
+    // Footer context chip: read turn → URL only
+    const bubbles = panelWin.document.querySelectorAll("#messages .msg-assistant");
+    const chip = bubbles[bubbles.length - 1].querySelector(".msg-footer-context");
+    expect(chip).toBeTruthy();
+    expect(chip.textContent).toContain("URL only");
+
+    // Turn 2 (same page → T1 thinned to a pointer line; excerpt NOT re-sent)
+    const box2 = armAskCapture();
+    await typeAndSend("And what does the form do?");
+    await waitUntil(() => box2.msg != null, 8000);
+    await waitTurnComplete();
+    const req2 = fm.to("/zo/ask")[fm.to("/zo/ask").length - 1];
+    expect(req2.body.input).toContain("## Referenced Tabs");
+    expect(req2.body.input).toContain("already provided above");
+    expect(req2.body.input).not.toContain("Excerpt:");
+
+    // The dedup record persists with the per-chat context state.
+    const sessionStore = (bus.storage.session as any)?._store || {};
+    const states = Object.entries(sessionStore).filter(([k]) => String(k).startsWith("cobrowse_ctx_state:"));
+    const sentMap = (states[0]?.[1] as any)?.tabManifestSent;
+    expect(sentMap && Object.keys(sentMap).length > 0).toBe(true);
+  }, 25000);
+});
+
+describe("ux — code-block copy button", () => {
+  it("attaches Copy to rendered code blocks and flips the label on click", async () => {
+    newChat();
+    await waitUntil(() => panelWin.document.querySelector(".empty-state-chip"));
+    fm.handle((url) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [{ model_name: "trio-model", label: "Trio Model" }] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      // Realistic two-event stream: PartStart carries the lead, PartDelta the
+      // fenced code block (a single full-text PartStart would hit the
+      // single-chunk DONE branch instead).
+      return sseResponse([
+        sseEvent("PartStartEvent", { index: 1, part: { part_kind: "text", content: "Here is a sample:\n" } }),
+        sseEvent("PartDeltaEvent", { delta: { part_delta_kind: "text", content_delta: "```js\nconsole.log('hello zo');\n```" } }),
+        sseEvent("completed", {}),
+      ].join("\n"));
+    });
+    await typeAndSend("Show me a code sample");
+    await waitUntil(() => panelWin.document.querySelector("#messages .msg-assistant pre .code-copy-btn"), 10000);
+    const btn: any = panelWin.document.querySelector("#messages .msg-assistant pre .code-copy-btn");
+    btn.click();
+    await waitUntil(() => ["Copied ✓", "✕"].includes(btn.textContent), 3000);
+  }, 20000);
+});

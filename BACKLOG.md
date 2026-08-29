@@ -9,7 +9,7 @@
 ## Current state
 
 - **Branches:** git-flow (`dev` integration, `main` releases); local branch tree pruned 2026-08-28 after v0.2.0 (15 merged/stale branches deleted)
-- **Tests:** ✅ **942 pass / 0 fail** (41 files, 2491 expect() calls) + 28 Playwright e2e across 15 numbered specs (+2 demo specs)
+- **Tests:** ✅ **968 pass / 0 fail** (42 files, 2632 expect() calls) + 29 Playwright e2e across 16 numbered specs (+2 demo specs)
 - **Loop engineering:** `bun run verify` gate + committed hard-gate pre-commit hook (`bun run setup-hooks` to install)
 - **CI/CD:** CI runs on every branch push + PR to `main` (tests + transpile + release checks + zip artifact); `.github/workflows/release.yml` publishes `v*` tag releases (used for v0.0.2)
 - **Streaming:** hardened end-to-end (sessionId isolation, port-disconnect safety, retry correctness, 60s liveness timeout)

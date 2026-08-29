@@ -13,6 +13,10 @@ export const ChatMessageSchema = z
     reasoning: z.string().optional(),
     durationMs: z.number().optional(),
     healed: z.boolean().optional(),
+    // Context policy outcome for the turn (footer chip + tooltip). Optional —
+    // messages predating the chip don't carry it.
+    contextTier: z.number().int().min(0).max(3).optional(),
+    contextReason: z.string().optional(),
     tabRefs: z
       .array(z.object({ ref: z.string(), host: z.string(), title: z.string() }))
       .optional(),
