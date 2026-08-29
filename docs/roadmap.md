@@ -1,46 +1,54 @@
 # Roadmap
 
-Updated 2026-08-09. All QA-report findings from the 2026-08-08 round are
-**resolved** — remaining items are feature work. The authoritative,
-living status lives in `BACKLOG.md` at the repo root.
+Updated 2026-08-29. The **authoritative, living status lives in
+[`BACKLOG.md`](https://github.com/LogicIncZo/zo-cobrowse/blob/dev/BACKLOG.md)**
+at the repo root — this page is a snapshot for the docs site.
 
 ## Current state
 
-- **Branches:** `Rewritet` merged → `main` (fast-forward, 22 commits)
-- **Tests:** ✅ **494 pass / 0 fail** (23 files, 1240 `expect()` calls)
+- **Release:** ✅ **v0.2.0** tagged + released (2026-08-28). Git-flow model:
+  `dev` (integration) → `main` (release); releases are deliberate
+  (`git tag vX.Y.Z` → `release.yml`).
+- **Tests:** ✅ **977 pass / 0 fail** (42 files, 2662 `expect()` calls) +
+  32 Playwright e2e across 17 numbered specs (+2 ZO_DEMO-gated demo specs)
 - **Loop engineering:** `bun run verify` gate + committed hard-gate pre-commit
   hook (`bun run setup-hooks` to install)
-- **CI/CD:** CI runs on every branch push + PR to `main` (tests + transpile +
-  release checks + zip artifact); `release.yml` is dormant until a `v*` tag is
-  pushed; `docs.yml` deploys this docs site to GitHub Pages
+- **CI/CD:** CI on every branch push + PRs into `main`/`dev` (tests +
+  transpile + release checks + zip artifact); a separate e2e job gates PRs
+  into the protected branches; the **drift job** gates dev→main release
+  merges against pinned Zo-API baselines; `docs.yml` deploys this site to
+  GitHub Pages
 - **Streaming:** hardened end-to-end (sessionId isolation, port-disconnect
   safety, retry correctness, 60s liveness timeout)
-- **P0/P1/P2/P3 QA findings:** all closed (P2-31 deferred by design — see below)
-- **Release:** version + tag **pending** — flagged as more issues to address
-  before tagging
+
+## What shipped most recently
+
+- **v0.2.0 (2026-08-28):** batch `fill_form` with the confirm-before-fill
+  review card, sensitivity gate, and the no-auto-submit rule (#26)
+- **2026-08-29:** vision-gated screenshots live-verified (#25 — screenshot
+  embeds reach vision models), write-assist round 2 (contenteditable editors),
+  prompt-eval harness (18/18 on live run), composer pickers (#28), pull
+  contexts (#24), chat tabs, cold-start open-all (#27)
+- **UX rounds (2026-08-29):** follow-up context fixes (send-once tab excerpts,
+  no-thread re-attach guard), context-tier footer chip, empty-state starter
+  chips, code-block Copy, ⬇ Latest pill, settings section nav + dirty
+  tracking + token reveal, chat-list preview snippets + search highlighting
+
+## Milestones
+
+- **v0.2.1** — carry-over slate: model picker (#19) → cross-tab actions
+  (#10) → watch & scheduled tasks (#29)
+- **0.3.0** — competitive round 2 ("Memory, Audit & Control"), tracked as
+  GitHub issues #46–#54: memory across sessions, autonomy dial + permissions,
+  action audit & undo, WebMCP spike, tab compare, export, `read_file` pull,
+  write-assist round 3, chat tabs round 2
+- **#11 Chrome Web Store listing** — its own milestone after 0.3.0 features
 
 ## Deferred by design
 
 - **B-31** — Default `zoSpaceEndpoint` is tenant-specific
   (`cashlessconsumer.zo.space`). Left as-is because it's the documented,
   working integration host; users can override via the `#space-endpoint` field.
-
-## Feature backlog
-
-| Tier | Ticket | Status | Notes |
-|------|--------|--------|-------|
-| Tier 1 | #16 Scheduled AI Commands | P0 — not started | Reuses streaming + persona paths (now stable) |
-| Tier 1 | #17 Web Monitoring & Page Change Detection | P0 — not started | Zo automations + DuckDB history |
-| Tier 1 | #18 Shared Sessions (multi-participant) | P1 — `backend/relay.ts` exists, extension integration not done |
-| Tier 1 | #19 Multi-Model Selection UI | P1 — not started | Model picker in the panel |
-| Tier 1 | #20 Tab Compare / Side-by-Side | P1 — depends on #10 |
-| Tier 2 | #21 Page Context Export (PDF/MD) | P2 | |
-| Tier 2 | #14 Page Monitoring (basic) | P2 | |
-| Parity | #10 Multi-Tab Context | P3 | |
-| Parity | Image/file upload, #23 Workflow Recording, Download files, Risk dialogs, #11 Web Store Listing | P3–P4 | |
-
-## Shipped tickets
-
-Screenshot/vision, right-click context menu, streaming action timeline, skill
-runner, NL→DuckDB, keyboard shortcuts, command templates, automations,
-save-page, onboarding, omnibox.
+- Shared sessions (#15/#18), background/cloud execution, agentic payments,
+  voice — rationale in the 0.2.0 / 0.3.0 competitive analyses
+  (`docs/superpowers/specs/`).

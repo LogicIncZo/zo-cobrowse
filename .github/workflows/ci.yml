@@ -120,6 +120,79 @@ jobs:
       - name: Run release checks
         run: bun run lint
 
+  drift:
+    # Zo API drift gate (2026-08-28): diffs the two upstream reference
+    # snapshots — EthanThatOneKid/zocomputer-tools mcp-tools.json (Zo's MCP
+    # tool inventory) and EthanThatOneKid/zocomputer-ts openapi.json (Zo's
+    # REST surface), both auto-refreshed nightly from Zo's live servers —
+    # against the pinned baselines in scripts/zo-drift/baseline/. Gates
+    # dev→main (release) merges: soft drift stays green but files a
+    # `zo-api-drift` ticket; hard drift (a load-bearing dependency changed:
+    # /zo/ask fields, catalog vision field, endpoints, or the `bash` MCP
+    # tool) goes red. Tickets dedup on a stable key embedded in the issue
+    # body; triage, then `bun run check:drift --update-baseline` and commit
+    # the refreshed baselines referencing the ticket.
+    if: >-
+      github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Run drift check (upstream references vs pinned baselines)
+        id: drift
+        continue-on-error: true
+        run: bun scripts/zo-drift/check.ts --report-json > drift-report.json
+
+      - name: File dev tickets for drift findings
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -f drift-report.json ]; then echo "no report — checker crashed before writing one (see step above)"; exit 0; fi
+          COUNT=$(jq '.findings | length' drift-report.json)
+          if [ "$COUNT" -eq 0 ]; then echo "no drift — nothing to file"; exit 0; fi
+          echo "$COUNT finding(s) — filing tickets for new ones"
+          gh label create zo-api-drift --color D93F0B --description "Upstream Zo API/reference drift detected by the release gate" 2>/dev/null || true
+          jq -c '.findings[]' drift-report.json | while read -r finding; do
+            KEY=$(printf '%s' "$finding" | jq -r .key)
+            if gh issue list --label zo-api-drift --state open --json body --jq '.[].body' | grep -qF "zo-drift:key=$KEY"; then
+              echo "skip — an open ticket already covers $KEY"
+              continue
+            fi
+            TITLE=$(printf '%s' "$finding" | jq -r .title)
+            printf '%s' "$finding" | jq -r '"## " + .title, "", "**Severity:** " + .severity + " — detected by the Zo API drift gate.", "", .details, "", "Triage: audit the change, fix or accept it, then re-pin the baselines with `bun run check:drift --update-baseline` (run from the repo root) and commit them referencing this issue.", "", "<!-- zo-drift:key=" + .key + " -->"' > ticket-body.md
+            gh issue create --label zo-api-drift --title "[zo-drift] $TITLE" --body-file ticket-body.md
+          done
+
+      - name: Gate — fail on hard drift or infra failure
+        if: always()
+        run: |
+          if [ ! -f drift-report.json ]; then
+            echo "::error::drift checker produced no report — infra failure (see the check step log)"
+            exit 1
+          fi
+          if jq -e '.error' drift-report.json > /dev/null; then
+            echo "::error::drift check infra failure: $(jq -r .error drift-report.json)"
+            exit 1
+          fi
+          HARD=$(jq '[.findings[] | select(.severity == "hard")] | length' drift-report.json)
+          if [ "$HARD" -gt 0 ]; then
+            echo "::error::hard Zo API drift — $HARD load-bearing dependency change(s). Triage the filed zo-api-drift ticket(s), then re-pin the baselines (bun run check:drift --update-baseline). Admin-bypass only if the release must ship regardless."
+            exit 1
+          fi
+          echo "gate passed — no hard drift"
+
   package:
     needs: [test, lint]
     runs-on: ubuntu-latest

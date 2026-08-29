@@ -39,7 +39,7 @@ Three pieces on top of the shipped `get_form` pull:
 
 ## UX
 
-Review card (sidepanel, in the live bubble where actions render): title "Review before filling — <page host>", one row per field (label / captured type / editable value input; password-typed fields show "left for you 🔑"), reasons chip row ("payment fields", "login page"), buttons **Fill N fields** / **Cancel**. Confirm sends the edited map via `EXECUTE_ACTIONS {confirmed:true}`; the result renders as the standard single `fill_form` timeline card with per-field ✓/✗ and any blocked-submit note. Cancel parks nothing — the action is dropped and an assistant note explains what was skipped.
+Review card (sidepanel, in the live bubble where actions render): title "Review before filling — `<page host>`", one row per field (label / captured type / editable value input; password-typed fields show "left for you 🔑"), reasons chip row ("payment fields", "login page"), buttons **Fill N fields** / **Cancel**. Confirm sends the edited map via `EXECUTE_ACTIONS {confirmed:true}`; the result renders as the standard single `fill_form` timeline card with per-field ✓/✗ and any blocked-submit note. Cancel parks nothing — the action is dropped and an assistant note explains what was skipped.
 
 ## Error handling
 

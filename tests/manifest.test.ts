@@ -28,6 +28,13 @@ describe("manifest.json — full schema validation", () => {
     expect(manifest.host_permissions).toContain("https://*.zo.space/*");
   });
 
+  it("declares <all_urls> — captureVisibleTab requires it (scoped wildcards don't qualify)", () => {
+    // Without the literal <all_urls> pattern, tier-3 capture fails with
+    // "Either the '<all_urls>' or 'activeTab' permission is required." on
+    // real Chrome — the silent no-image bug triaged 2026-08-29.
+    expect(manifest.host_permissions).toContain("<all_urls>");
+  });
+
   it("icons exist at 16/48/128 and reference PNG files", () => {
     expect(manifest.icons["16"]).toMatch(/\.png$/);
     expect(manifest.icons["48"]).toMatch(/\.png$/);
@@ -52,5 +59,13 @@ describe("manifest.json — full schema validation", () => {
   // ── Ticket #13: Omnibox ──
   it("has omnibox keyword 'zo'", () => {
     expect(manifest.omnibox.keyword).toBe("zo");
+  });
+
+  // ── Write-assist widget (feature/textarea-fill) ──
+  it("exposes icons/icon.svg to host pages (in-page Zo icon)", () => {
+    const war = manifest.web_accessible_resources || [];
+    const entry = war.find((w) => w.resources.includes("icons/icon.svg"));
+    expect(entry).toBeTruthy();
+    expect(entry!.matches).toContain("<all_urls>");
   });
 });

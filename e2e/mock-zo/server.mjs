@@ -78,6 +78,7 @@ function pickScenario(input) {
   if (String(input || "").includes("## Auto-fetched:")) return "pull-followup";
   const q = userRequest(input);
   if (q.includes("schema")) return "pull-form";
+  if (q.includes("code sample")) return "code-sample";
   if (q.includes("checkout")) return "fill-form";
   if (q.includes("classic form")) return "classic-form";
   if (q.includes("chunked")) return "fill-chunked";
@@ -219,7 +220,30 @@ const server = http.createServer(async (req, res) => {
     } catch {}
     requests.push({ ts: Date.now(), method: "POST", url: "/zo/ask", body });
 
+    // Write-assist one-shot (feature/textarea-fill): the in-page widget's
+    // ENHANCE_TEXT handler calls /zo/ask NON-streaming and parses JSON
+    // ({output}), so reply with a plain JSON body — not SSE. Routed on the
+    // stable write-assist marker baked into the enhance prompt. The reply
+    // follows the prompt's tag protocol with narration outside the tags —
+    // the widget must preview ONLY the tag content.
+    if (String(body.input || "").includes("write-assist")) {
+      res.writeHead(200, { "content-type": "application/json", ...cors });
+      return res.end(JSON.stringify({
+        output: "Let me quickly ground this in the data model before expanding.\n" +
+          "<write-assist>" +
+          "I led the migration of 40 dashboards to DuckDB, unifying our analytics stack and cutting p95 query times roughly in half." +
+          "</write-assist>",
+        conversation_id: "e2e-enhance-conv",
+      }));
+    }
+
     const scenario = pickScenario(body.input);
+    if (scenario === "code-sample") {
+      // UX-polish spec: a prose answer containing a fenced code block (the
+      // sidepanel renders <pre><code> with a Copy button at STREAM_DONE).
+      const text = "Here is a sample:\n```js\nconsole.log('hello zo');\n```\nThat is the code.";
+      return streamSse(res, [textStart(text), completed()], { delayMs: 40 });
+    }
     if (scenario === "pull-form") {
       // Zo asks for the complete form schema before acting (#24 pull loop).
       const envelope = JSON.stringify({

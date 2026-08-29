@@ -18,6 +18,8 @@ import {
   noteTabSent,
   isTabSentAt,
   ensureActiveTabRef,
+  thinTabExcerpts,
+  tabContentKey,
 } from "../extension/lib/tab-contexts.js";
 import {
   TabContextSchema,
@@ -426,7 +428,9 @@ describe("auto-active-tab — sidepanel wiring", () => {
   });
 
   it("mirrors the auto-reference in the inspector preview", () => {
-    expect(spCode).toMatch(/previewTabContexts\(\{ includeActive: decision\.effectiveTier === 0 \}\)/);
+    // effTier = decision.effectiveTier after the 📷-toggle force (sendQuery
+    // and the inspector share the same post-force value).
+    expect(spCode).toMatch(/previewTabContexts\(\{ includeActive: effTier === 0 \}\)/);
     expect(spCode).toMatch(/includeActive = false/);
   });
 
@@ -466,5 +470,77 @@ describe("tab contexts — sidepanel wiring", () => {
   it("filters context-only pull actions out of DOM action handling (defensive)", () => {
     expect(spCode).toMatch(/!isContextAction\(a\)/);
     expect(spCode).not.toMatch(/a\.type !== 'read_tab'/);
+  });
+});
+
+describe("thinTabExcerpts — send-once excerpt dedup for follow-up turns", () => {
+  const mkTab = (overrides: Record<string, unknown> = {}) => ({
+    tabId: 7,
+    title: "Example",
+    url: "https://example.com",
+    host: "example.com",
+    textLength: 4200,
+    elementCount: 12,
+    excerpt: "first five hundred chars of page text".padEnd(500, "x"),
+    isActive: false,
+    available: true,
+    ...overrides,
+  });
+
+  it("keeps the excerpt on first send and records the tab's content key", () => {
+    const { contexts, sentMap } = thinTabExcerpts([mkTab()], {});
+    expect(contexts).toHaveLength(1);
+    expect(contexts[0].pointerOnly).toBeUndefined();
+    expect(contexts[0].excerpt).toBe(mkTab().excerpt);
+    expect(sentMap["7"]).toBe(tabContentKey(mkTab()));
+    expect(expectValid(TabContextSchema, { ...contexts[0], ref: "T1" }, "tab").tabId).toBe(7);
+  });
+
+  it("thins an unchanged tab to pointer-only on the next turn (excerpt dropped)", () => {
+    const t = mkTab();
+    const sentMap = { "7": tabContentKey(t) };
+    const { contexts, sentMap: next } = thinTabExcerpts([t], sentMap);
+    expect(contexts[0].pointerOnly).toBe(true);
+    expect(contexts[0].excerpt).toBe("");
+    // The dedup record persists unchanged (same content key).
+    expect(next["7"]).toBe(tabContentKey(t));
+    // Manifest renders the pointer line — the T-ref survives for read_tab.
+    const { rendered } = buildTabManifest(assignRefs(contexts));
+    expect(rendered).toContain("already provided above");
+    expect(rendered).not.toContain("Excerpt:");
+    expect(expectValid(ManifestResultSchema, { rendered, entries: [] }, "manifest shape").rendered).toBe(rendered);
+  });
+
+  it("re-sends the excerpt when the page navigates (url/title change)", () => {
+    const before = mkTab();
+    const after = mkTab({ url: "https://example.com/next", title: "Next" });
+    const sentMap = { "7": tabContentKey(before) };
+    const { contexts, sentMap: next } = thinTabExcerpts([after], sentMap);
+    expect(contexts[0].pointerOnly).toBeUndefined();
+    expect(next["7"]).toBe(tabContentKey(after));
+  });
+
+  it("stays pointer-only when only the excerpt text differs but url+title match (threading + read_tab cover it)", () => {
+    const before = mkTab();
+    const after = mkTab({ excerpt: "different page content".padEnd(300, "y") });
+    const sentMap = { "7": tabContentKey(before) };
+    const { contexts } = thinTabExcerpts([after], sentMap);
+    expect(contexts[0].pointerOnly).toBe(true);
+  });
+
+  it("handles several tabs and skips malformed entries", () => {
+    const a = mkTab({ tabId: 1 });
+    const b = mkTab({ tabId: 2, url: "https://two.test", title: "Two" });
+    const prior = { "2": tabContentKey(b) };
+    const { contexts, sentMap } = thinTabExcerpts([a, b, null], prior);
+    expect(contexts).toHaveLength(2);
+    expect(contexts[0].pointerOnly).toBeUndefined();
+    expect(contexts[1].pointerOnly).toBe(true);
+    expect(Object.keys(sentMap).sort()).toEqual(["1", "2"]);
+  });
+
+  it("wires the dedup into the sidepanel send path", () => {
+    expect(spCode).toContain("thinTabExcerpts(");
+    expect(spCode).toContain("tabManifestSent");
   });
 });

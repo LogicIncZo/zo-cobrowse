@@ -2,6 +2,10 @@ import { describe, it, expect } from "bun:test";
 import {
   BUILTIN_MODES,
   DEFAULT_MODE_ID,
+  MERGED_MODE_IDS,
+  MODE_MERGE_TARGET,
+  migrateMergedModeId,
+  migrateMergedOverrides,
   TIER,
   ACTION_SCHEMA_COMPACT,
   resolveMode,
@@ -57,18 +61,33 @@ describe("BUILTIN_MODES — tier invariants", () => {
     expect(BUILTIN_MODES.extract.expectJson).toBe(false);
   });
 
-  it("ask + summarize + research are TEXT tier (1)", () => {
+  it("ask is TEXT tier (1) — the single reader Mode after the rationalization", () => {
     expect(BUILTIN_MODES.ask.contextTier).toBe(TIER.TEXT);
-    expect(BUILTIN_MODES.summarize.contextTier).toBe(TIER.TEXT);
-    expect(BUILTIN_MODES.research.contextTier).toBe(TIER.TEXT);
   });
 
-  it("all read-only modes (ask/research/summarize/extract/visual) stream plain markdown", () => {
-    for (const id of ["ask", "research", "summarize", "extract", "visual"]) {
+  it("lean is POINTER tier (0) and does not expect JSON", () => {
+    expect(BUILTIN_MODES.lean.contextTier).toBe(TIER.POINTER);
+    expect(BUILTIN_MODES.lean.expectJson).toBe(false);
+  });
+
+  it("lean instructions contract: no content attached, self-fetch, never act, notes on request", () => {
+    expect(BUILTIN_MODES.lean.instructions).toMatch(/NOT attached/i);
+    expect(BUILTIN_MODES.lean.instructions).toMatch(/fetch the URL yourself/i);
+    expect(BUILTIN_MODES.lean.instructions).toMatch(/Never return browser actions/i);
+    expect(BUILTIN_MODES.lean.instructions).toMatch(/note/i);
+  });
+
+  it("all read-only modes (ask/extract/visual/lean) stream plain markdown", () => {
+    for (const id of ["ask", "extract", "visual", "lean"]) {
       expect(BUILTIN_MODES[id].expectJson, `${id} should be plain markdown`).toBe(false);
     }
     // cobrowse drives the browser, so it alone keeps structured actions.
     expect(BUILTIN_MODES.cobrowse.expectJson).toBe(true);
+  });
+
+  it("the merged ids (summarize/research) no longer exist as built-ins", () => {
+    expect(BUILTIN_MODES.summarize).toBeUndefined();
+    expect(BUILTIN_MODES.research).toBeUndefined();
   });
 
   it("visual is SCREENSHOT tier (3) and does not expect JSON", () => {
@@ -167,9 +186,53 @@ describe("DEFAULT_MODE_ID", () => {
 
 describe("resolveMode", () => {
   it("returns the requested built-in Mode", () => {
-    const m = resolveMode("summarize", {});
-    expect(m.id).toBe("summarize");
+    const m = resolveMode("ask", {});
+    expect(m.id).toBe("ask");
     expectValid(m);
+  });
+
+  it("merged ids (summarize/research) fall back to DEFAULT_MODE_ID — callers must migrate first", () => {
+    // sidepanel.loadModes migrates persisted summarize/research values to
+    // 'ask' on load (MERGED_MODE_IDS), so this fallback is unreachable in
+    // practice; pinned here so the silent cobrowse contract-swap is visible.
+    expect(resolveMode("summarize", {}).id).toBe(DEFAULT_MODE_ID);
+    expect(resolveMode("research", {}).id).toBe(DEFAULT_MODE_ID);
+  });
+
+  it("migrateMergedModeId maps merged ids to Ask, passes others through", () => {
+    expect(migrateMergedModeId("summarize")).toBe("ask");
+    expect(migrateMergedModeId("research")).toBe("ask");
+    expect(migrateMergedModeId("ask")).toBe("ask");
+    expect(migrateMergedModeId("cobrowse")).toBe("cobrowse");
+    expect(migrateMergedModeId("custom_1")).toBe("custom_1");
+    expect(migrateMergedModeId(undefined)).toBeUndefined();
+  });
+
+  it("migrateMergedOverrides carries dead-id overrides onto ask only if empty, then drops them", () => {
+    // Target empty → carry over.
+    const carried = migrateMergedOverrides({ summarize: { textBudget: 999 } });
+    expect(carried.changed).toBe(true);
+    expect(carried.next).toEqual({ ask: { textBudget: 999 } });
+    // Target occupied → target wins; dead entry still dropped.
+    const kept = migrateMergedOverrides({
+      summarize: { textBudget: 999 },
+      ask: { textBudget: 1 },
+    });
+    expect(kept.changed).toBe(true);
+    expect(kept.next).toEqual({ ask: { textBudget: 1 } });
+    // No dead ids → untouched.
+    const untouched = migrateMergedOverrides({ ask: { textBudget: 5 } });
+    expect(untouched.changed).toBe(false);
+    expect(untouched.next).toEqual({ ask: { textBudget: 5 } });
+    // Null/garbage input → empty catalog, no change.
+    expect(migrateMergedOverrides(null)).toEqual({ next: {}, changed: false });
+  });
+
+  it("does not mutate the caller's override catalog", () => {
+    const original = { summarize: { textBudget: 999 }, ask: { textBudget: 1 } };
+    migrateMergedOverrides(original);
+    expect(original.summarize).toBeDefined();
+    expect(original.ask.textBudget).toBe(1);
   });
 
   it("falls back to DEFAULT_MODE_ID for an unknown id", () => {
@@ -184,9 +247,9 @@ describe("resolveMode", () => {
   });
 
   it("a custom Mode overrides a built-in by id", () => {
-    const custom = { ...BUILTIN_MODES.summarize, name: "My Summarizer", builtin: false };
-    const m = resolveMode("summarize", { summarize: custom });
-    expect(m.name).toBe("My Summarizer");
+    const custom = { ...BUILTIN_MODES.ask, name: "My Asker", builtin: false };
+    const m = resolveMode("ask", { ask: custom });
+    expect(m.name).toBe("My Asker");
     expect(m.builtin).toBe(false);
   });
 

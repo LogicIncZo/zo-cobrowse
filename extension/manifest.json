@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Zo Co-browse",
-  "version": "0.2.0",
+  "version": "0.2.5",
   "description": "Co-browsing extension powered by Zo — AI backend that sees your page and takes actions through it.",
   "homepage_url": "https://github.com/CCAgentOrg/zo-cobrowse",
   "permissions": [
@@ -15,11 +15,10 @@
     "tts"
   ],
   "host_permissions": [
+    "<all_urls>",
     "https://api.zo.computer/*",
     "https://*.zo.space/*",
-    "https://*.zocomputer.io/*",
-    "http://*/*",
-    "https://*/*"
+    "https://*.zocomputer.io/*"
   ],
   "side_panel": {
     "default_path": "sidepanel.html"
@@ -91,6 +90,16 @@
   "omnibox": {
     "keyword": "zo"
   },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "icons/icon.svg"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"
   }

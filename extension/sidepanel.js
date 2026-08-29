@@ -1,7 +1,7 @@
 // Zo Co-browse — Side Panel Logic
 
 import { parseBangCommand, BANG_COMMANDS } from './lib/bang-commands.js';
-import { BUILTIN_MODES, DEFAULT_MODE_ID, resolveMode, presetToMode, normalizeActions, isContextAction } from './lib/modes.js';
+import { BUILTIN_MODES, DEFAULT_MODE_ID, migrateMergedModeId, migrateMergedOverrides, resolveMode, presetToMode, normalizeActions, isContextAction } from './lib/modes.js';
 import { looksLikeActionJson } from './lib/intent.js';
 import { reviewRows, fillBatchRows } from './lib/formfill.js';
 import {
@@ -12,7 +12,7 @@ import {
   saveConversationState,
 } from './lib/context-policy.js';
 import { describePrompt } from './lib/prompt.js';
-import { assignRefs, ensureActiveTabRef, isBlankPage } from './lib/tab-contexts.js';
+import { assignRefs, ensureActiveTabRef, isBlankPage, thinTabExcerpts } from './lib/tab-contexts.js';
 import { visionModelSuggestion, modelVisionSupport, findModelEntry } from './lib/vision.js';
 import { extractUrls, MAX_LINK_CHIPS } from './lib/links.js';
 import { WORKSPACE_ROOT, filterPickerEntries } from './lib/pickers.js';
@@ -144,11 +144,12 @@ function closeThemePopoverOutside(e) {
 }
 
 // ---- Quick Actions (user-manageable chips) ----
+// 2026-08 rationalization: cut to 2 non-duplicative defaults. "Summarize" and
+// "Page data" duplicated the !summarize/!extract bangs and the starter chips;
+// canned one-click reads live in the empty state instead.
 const DEFAULT_QUICK_ACTIONS = [
-  { label: 'Summarize', prompt: 'Summarize this page in 3-5 bullet points.' },
+  { label: 'Fill forms (test data)', prompt: 'Identify all form fields on this page and fill them with relevant test data.' },
   { label: 'Extract links', prompt: 'Extract all links from this page.' },
-  { label: 'Fill forms', prompt: 'Identify all form fields on this page and fill them with relevant test data.' },
-  { label: 'Page data', prompt: 'Extract all structured data (tables, lists, prices, dates, contacts) from this page.' },
 ];
 
 // ---- State ----
@@ -246,6 +247,7 @@ async function finishInit() {
     await loadQuickActions();
     await loadTtsConfig();
     initTabStrip();
+    initJumpToLatest();
     connectStreamingPort();
     chrome.storage.onChanged.addListener((changes) => {
       if (changes[STORAGE_ACTIONS_KEY]) {
@@ -453,13 +455,15 @@ function bindEvents() {
     micBtn.addEventListener('click', () => { startRecording(); });
   }
 
-  // Chips (event delegation for dynamically rendered chips)
+  // Chips (event delegation for dynamically rendered chips). Sends the chip's
+  // stored prompt — the readable label is display-only (this used to send the
+  // label text and ignore `prompt` entirely).
   const chipsContainer = $('#action-chips');
   if (chipsContainer) {
     chipsContainer.addEventListener('click', (e) => {
       const chip = e.target.closest('.chip');
       if (chip) {
-        input.value = chip.textContent.trim();
+        input.value = chip.dataset.prompt || chip.textContent.trim();
         sendQuery();
       }
     });
@@ -570,6 +574,7 @@ async function loadConversations() {
   // If no active conversation, create one
   if (!activeId || !conversations[activeId]) {
     createNewConversation();
+    renderCurrentConversation(); // fresh chat: system message + empty-state chips
   } else {
     if (!tabsState.openIds.length) tabsState = openChatTab(tabsState, activeId);
     renderCurrentConversation();
@@ -669,16 +674,78 @@ async function ensureActiveConversation() {
   }
 }
 
+// ---- Empty-state starter chips ----
+// An empty chat shows mode-agnostic starting points as clickable chips that
+// prefill the composer — the panel answers "what can I even ask?" at a glance.
+// The card removes itself the moment a real message lands.
+const EMPTY_STATE_CHIPS = [
+  { label: '📝 Summarize this page', value: 'Summarize this page' },
+  { label: '❓ What is on this page?', value: '!context What are the main points on this page?' },
+  { label: '📥 Extract the links', value: 'Extract all links on this page as a list' },
+  { label: '🔬 Research this topic', value: 'Do deep research on this page\'s topic: give me the key facts, data, and sources' },
+];
+function renderEmptyState() {
+  let card = document.getElementById('empty-state');
+  if (card) card.remove();
+  card = document.createElement('div');
+  card.id = 'empty-state';
+  card.className = 'empty-state';
+  const hint = document.createElement('div');
+  hint.className = 'empty-state-hint';
+  hint.textContent = 'Try asking:';
+  card.appendChild(hint);
+  const chipRow = document.createElement('div');
+  chipRow.className = 'empty-state-chips';
+  for (const chip of EMPTY_STATE_CHIPS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'empty-state-chip';
+    btn.textContent = chip.label;
+    btn.title = chip.value;
+    btn.addEventListener('click', () => {
+      input.value = chip.value;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.focus();
+    });
+    chipRow.appendChild(btn);
+  }
+  card.appendChild(chipRow);
+  msgsEl.appendChild(card);
+}
+
+// ---- Jump to latest ----
+// While a stream is live (or after new content lands) the log no longer
+// force-scrolls under the user's finger; a ⬇ pill appears whenever the view
+// is scrolled away from the bottom and snaps back on click.
+const JUMP_LATEST_THRESHOLD = 240;
+function msgsNearBottom() {
+  return msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < JUMP_LATEST_THRESHOLD;
+}
+function initJumpToLatest() {
+  const btn = document.getElementById('jump-latest');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    msgsEl.scrollTop = msgsEl.scrollHeight;
+    btn.classList.add('hidden');
+  });
+  msgsEl.addEventListener('scroll', () => {
+    btn.classList.toggle('hidden', msgsNearBottom());
+  }, { passive: true });
+}
+
 function renderCurrentConversation() {
   msgsEl.innerHTML = '';
   const conv = getActiveConversation();
   if (!conv || !conv.messages.length) {
     addMessageDOM('system', 'Connected to Zo. Ask me about this page, or tell me what to do.');
+    renderEmptyState();
     return;
   }
   for (const msg of conv.messages) {
     const m = msg.role === 'assistant' ? healAssistantMessage(msg) : msg;
-    const opts = m.role === 'assistant' ? { timestamp: m.timestamp, durationMs: m.durationMs } : {};
+    const opts = m.role === 'assistant'
+      ? { timestamp: m.timestamp, durationMs: m.durationMs, contextTier: m.contextTier, contextReason: m.contextReason, screenshot: m.screenshot }
+      : {};
     const el = addMessageDOM(m.role, m.text, opts);
     if (m.role === 'assistant' && m.reasoning) addReasoningBubble(el, m.reasoning);
     if (m.role === 'assistant' && m.tools) addExploredRegion(el, m.tools);
@@ -691,6 +758,7 @@ function renderCurrentConversation() {
       if (userBody) {
         for (const s of (m.skillRefs || [])) appendMentionPill(userBody, `⚡ ${safeText(s && s.name)}`);
         for (const f of (m.fileRefs || [])) appendMentionPill(userBody, `📄 ${safeText(f && f.path).split('/').pop()}`);
+        if (m.shot) appendMentionPill(userBody, '📷 Screenshot');
       }
     }
   }
@@ -728,6 +796,7 @@ async function startNewConversation() {
   // Clear UI
   msgsEl.innerHTML = '';
   addMessageDOM('system', 'Connected to Zo. Ask me about this page, or tell me what to do.');
+  renderEmptyState();
 
   // If in history view, switch back
   if (isHistoryView) {
@@ -950,7 +1019,19 @@ function renderHistoryView() {
 
       const titleEl = document.createElement('div');
       titleEl.className = 'history-card-title';
-      titleEl.textContent = item.title;
+      appendHighlighted(titleEl, item.title, query);
+
+      // Main column: title + one-line preview of the opening ask (identifying
+      // a chat without opening it). No snippet → title-only, layout unchanged.
+      const mainEl = document.createElement('div');
+      mainEl.className = 'history-card-main';
+      mainEl.appendChild(titleEl);
+      if (item.snippet) {
+        const snippetEl = document.createElement('div');
+        snippetEl.className = 'history-card-snippet';
+        appendHighlighted(snippetEl, item.snippet, query);
+        mainEl.appendChild(snippetEl);
+      }
 
       const metaEl = document.createElement('div');
       metaEl.className = 'history-card-meta';
@@ -977,7 +1058,7 @@ function renderHistoryView() {
         }
       });
 
-      card.appendChild(titleEl);
+      card.appendChild(mainEl);
       card.appendChild(metaEl);
       card.appendChild(renameBtn);
       card.appendChild(deleteBtn);
@@ -988,6 +1069,30 @@ function renderHistoryView() {
     }
 
     historyList.appendChild(groupEl);
+  }
+}
+
+/** Append `text` into `el`, wrapping case-insensitive `query` matches in
+ * <mark> (safe DOM nodes only — no innerHTML). No query → plain text. */
+function appendHighlighted(el, text, query) {
+  const q = (query || '').trim().toLowerCase();
+  if (!q) {
+    el.textContent = text;
+    return;
+  }
+  const lower = text.toLowerCase();
+  let i = 0;
+  for (;;) {
+    const idx = lower.indexOf(q, i);
+    if (idx === -1) {
+      el.appendChild(document.createTextNode(text.slice(i)));
+      break;
+    }
+    el.appendChild(document.createTextNode(text.slice(i, idx)));
+    const mark = document.createElement('mark');
+    mark.textContent = text.slice(idx, idx + q.length);
+    el.appendChild(mark);
+    i = idx + q.length;
   }
 }
 
@@ -1151,7 +1256,15 @@ function renderPromptInspector() {
     pageHash,
     pageBlank: isBlankPage(currentContext?.url || ''),
   });
-  const described = describePrompt(mode, currentContext, query, { effectiveTier: decision.effectiveTier, tabContexts: previewTabContexts({ includeActive: decision.effectiveTier === 0 }), skills: pickedSkills, workspaceFiles: pickedFiles });
+  // Mirror sendQuery's 📷-toggle force so the preview can't diverge from the
+  // send: armed toggle = tier 3 this turn, same reason string.
+  let effTier = decision.effectiveTier;
+  let effReason = decision.reason;
+  if (shotArmed && effTier < 3) {
+    effTier = 3;
+    effReason = '📷 Image toggle — screenshot forced this turn';
+  }
+  const described = describePrompt(mode, currentContext, query, { effectiveTier: effTier, tabContexts: previewTabContexts({ includeActive: effTier === 0 }), skills: pickedSkills, workspaceFiles: pickedFiles });
 
   summary.textContent = `🔎 Prompt preview · ~${described.approxTokens} tokens`;
   meta.replaceChildren();
@@ -1164,9 +1277,14 @@ function renderPromptInspector() {
     return span;
   };
   meta.appendChild(chip('Mode:', `${mode.icon} ${mode.name}`));
-  meta.appendChild(chip('Context:', TIER_NAMES[decision.effectiveTier] || `Tier ${decision.effectiveTier}`));
+  meta.appendChild(chip('Context:', TIER_NAMES[effTier] || `Tier ${effTier}`));
+  // Actual attachment, not tier intent: the screenshot section renders only
+  // when a capture really produced a data URL (vision gate + captureVisibleTab).
+  if (described.sections.some(s => s.id === 'screenshot')) {
+    meta.appendChild(chip('📷', 'screenshot attached'));
+  }
   const reasonSpan = document.createElement('span');
-  reasonSpan.textContent = decision.reason;
+  reasonSpan.textContent = effReason;
   meta.appendChild(reasonSpan);
   pre.textContent = described.prompt;
 }
@@ -1348,7 +1466,7 @@ function relativeTime(ts, now = Date.now()) {
 // locally on the history entry (no backend).
 function addMessageFooter(parentMsgEl, opts = {}) {
   if (!parentMsgEl || parentMsgEl.querySelector('.msg-footer')) return null;
-  const { timestamp, modeName, modelName, durationMs } = opts;
+  const { timestamp, modeName, modelName, durationMs, contextTier, contextReason, screenshot } = opts;
   const footer = document.createElement('div');
   footer.className = 'msg-footer';
 
@@ -1384,6 +1502,25 @@ function addMessageFooter(parentMsgEl, opts = {}) {
     modelChip.textContent = safeText(modelDisplay);
     modelChip.title = 'Model';
     footer.appendChild(modelChip);
+  }
+
+  // Context-tier chip: shows how much page context this turn actually sent
+  // (the decideTurn policy outcome) — makes the token story visible per turn.
+  if (Number.isInteger(contextTier)) {
+    const CTX_ICONS = ['🔗', '📝', '🧩', '🖼️'];
+    const CTX_NAMES = ['URL only', 'Text', 'Elements', 'Screenshot'];
+    const ctxChip = document.createElement('span');
+    ctxChip.className = 'msg-footer-chip msg-footer-context';
+    ctxChip.textContent = `${CTX_ICONS[contextTier] || '🔗'} ${CTX_NAMES[contextTier] || 'Tier ' + contextTier}`;
+    ctxChip.title = safeText(contextReason) || 'Context sent this turn';
+    footer.appendChild(ctxChip);
+  }
+  if (screenshot) {
+    const shotChip = document.createElement('span');
+    shotChip.className = 'msg-footer-chip msg-footer-shot';
+    shotChip.textContent = '📷';
+    shotChip.title = 'A page screenshot was attached to this turn';
+    footer.appendChild(shotChip);
   }
 
   if (timestamp) {
@@ -1789,7 +1926,7 @@ function addMessage(role, text, opts = {}) {
   const isBackground = !!chatId && chatId !== activeId;
   let div = null;
   if (!isBackground) {
-    div = addMessageDOM(role, text);
+    div = addMessageDOM(role, text, opts);
     // Auto-read assistant messages via TTS
     if (role === 'assistant' && ttsAutoRead && text) {
       speakText(text);
@@ -1799,7 +1936,7 @@ function addMessage(role, text, opts = {}) {
   if (role !== 'system' && role !== 'thinking') {
     const conv = conversations[chatId];
     if (conv) {
-      conv.messages.push({ role, text, timestamp: Date.now() });
+      conv.messages.push({ role, text, timestamp: Date.now(), screenshot: opts.screenshot || undefined });
       // Trim to MAX_HISTORY per conversation
       if (conv.messages.length > MAX_HISTORY) {
         conv.messages = conv.messages.slice(-MAX_HISTORY);
@@ -1811,9 +1948,33 @@ function addMessage(role, text, opts = {}) {
 }
 
 
+/** Upgrade every <pre> in a rendered message with a Copy button. Idempotent —
+ * safe to call again on containers that already got their buttons. */function enhanceCodeBlocks(container) {
+  if (!container || !container.querySelectorAll) return;
+  for (const pre of container.querySelectorAll('pre')) {
+    if (pre.querySelector('.code-copy-btn')) continue;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'code-copy-btn';
+    btn.textContent = 'Copy';
+    btn.title = 'Copy code';
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const code = (pre.querySelector('code') || pre).textContent || '';
+      try {
+        await navigator.clipboard.writeText(code);
+        btn.textContent = 'Copied ✓';
+      } catch {
+        btn.textContent = '✕';
+      }
+      setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+    });
+    pre.appendChild(btn);
+  }
+}
+
 function markdownToHtml(md) {
-  if (!md) return '';
-  // Escape HTML to prevent XSS
+  if (!md) return '';  // Escape HTML to prevent XSS
   var html = escapeHtml(md);
 
   // Horizontal rules
@@ -1826,10 +1987,12 @@ function markdownToHtml(md) {
   html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
   html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
 
-  // Code blocks: triple backtick with optional language
+  // Code blocks: triple backtick with optional language. `html` is ALREADY
+  // fully escaped above — re-escaping the code here would double-escape
+  // (&#39; showing up literally in the block and in Copy).
   html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
     var cls = lang ? ' class="lang-' + escapeHtml(lang) + '"' : '';
-    return '<pre><code' + cls + '>' + escapeHtml(code.trim()) + '</code></pre>';
+    return '<pre><code' + cls + '>' + code.trim() + '</code></pre>';
   });
   // Inline code
   html = html.replace(/`([^`]+)`/g, function(_, c) { return '<code>' + escapeHtml(c) + '</code>'; });
@@ -1917,6 +2080,11 @@ function markdownToHtml(md) {
 
 function addMessageDOM(role, text, opts = {}) {
   text = safeText(text);
+  // First real message retires the empty-state starter card.
+  if (role !== 'system' && role !== 'thinking') {
+    const emptyCard = document.getElementById('empty-state');
+    if (emptyCard) emptyCard.remove();
+  }
   const div = document.createElement('div');
   div.className = `msg msg-${role}`;
   const body = document.createElement('div');
@@ -1927,6 +2095,7 @@ function addMessageDOM(role, text, opts = {}) {
   // safeText keep every text sink escaped — never raw innerHTML of
   // untrusted text.
   body.innerHTML = markdownToHtml(text);
+  enhanceCodeBlocks(body);
 
   div.appendChild(body);
 
@@ -1955,6 +2124,9 @@ function addMessageDOM(role, text, opts = {}) {
       modeName: mode.name,
       modelName: config.selectedModel || undefined,
       durationMs: opts.durationMs,
+      contextTier: opts.contextTier,
+      contextReason: opts.contextReason,
+      screenshot: opts.screenshot,
     });
   }
 
@@ -2001,6 +2173,62 @@ let openTabsQuerySeq = 0;         // latest-issued query owns the strip (stale
                                   // responses must not overwrite fresher ones)
 let tabStripCollapsed = false;
 
+// #25 vision UX — send-once screenshot toggle (#shot-toggle). Arming forces
+// tier 3 (screenshot) on the NEXT send only, and flips the Mode to Visual so
+// the prompt expects an image; unchecking before sending restores the
+// previous Mode. Like the picker chips, the toggle auto-clears after the
+// send it armed. shotModeAuto guards applyMode() re-entry while we switch
+// Modes programmatically (a manual Mode change while armed drops the
+// restore memory — the user owns the Mode then).
+let shotArmed = false;
+let shotPrevModeId = null;
+let shotModeAuto = false;
+
+/** Re-render the toggle chip's pressed state + label. Also keeps the
+ * tab-contexts row visible when armed even if no tabs are open (the row
+ * hides itself when the strip is empty). */
+function renderShotToggle() {
+  const btn = document.getElementById('shot-toggle');
+  if (!btn) return;
+  btn.setAttribute('aria-pressed', String(shotArmed));
+  btn.classList.toggle('shot-toggle-on', shotArmed);
+  btn.textContent = shotArmed ? '📷 Image ✓' : '📷 Image';
+  btn.title = shotArmed
+    ? 'Screenshot armed — attaches to your NEXT message, then turns off (click to cancel)'
+    : 'Attach a screenshot of this tab to the NEXT message (one turn only — switches Mode to Visual while armed)';
+  const wrap = document.getElementById('tab-contexts');
+  if (wrap && shotArmed) wrap.classList.remove('hidden');
+}
+
+function toggleShotArmed() {
+  shotArmed = !shotArmed;
+  if (shotArmed) {
+    const cur = resolveMode(activeModeId, customModes, modeOverrides);
+    if ((cur?.contextTier ?? 0) < 3) {
+      shotPrevModeId = activeModeId;
+      shotModeAuto = true;
+      modeSelect.value = 'visual';
+      applyMode();
+      shotModeAuto = false;
+    }
+  } else if (shotPrevModeId) {
+    shotModeAuto = true;
+    modeSelect.value = shotPrevModeId;
+    applyMode();
+    shotModeAuto = false;
+    shotPrevModeId = null;
+  }
+  renderShotToggle();
+  renderPromptInspector();
+}
+
+function initShotToggle() {
+  const btn = document.getElementById('shot-toggle');
+  if (!btn) return;
+  btn.addEventListener('click', toggleShotArmed);
+  renderShotToggle();
+}
+
 function initTabStrip() {
   if (typeof chrome === 'undefined' || !chrome?.runtime?.sendMessage) return;
   const collapseBtn = document.getElementById('tab-strip-collapse');
@@ -2013,6 +2241,7 @@ function initTabStrip() {
     });
   }
   refreshOpenTabs();
+  initShotToggle();
   // Keep the strip fresh when the user refocuses the panel.
   window.addEventListener('focus', refreshOpenTabs);
   // Track browser-tab switches: adopt the newly active tab for DISPLAY (page
@@ -2026,6 +2255,16 @@ function initTabStrip() {
         if (win && info.windowId !== win.id) return;
       } catch { /* fall through — adopt anyway */ }
       adoptActiveTabDisplay(info.tabId);
+    });
+  }
+  // Tabs settle asynchronously after creation/navigation: a strip query taken
+  // mid-commit sees url:"" and isCapturableUrl silently drops the tab, leaving
+  // the strip one chip short with no later refresh. Refresh on load-complete
+  // and URL changes; the openTabsQuerySeq guard makes late/stale responses
+  // harmless.
+  if (chrome.tabs?.onUpdated) {
+    chrome.tabs.onUpdated.addListener((_tabId, info) => {
+      if (info.status === 'complete' || info.url !== undefined) refreshOpenTabs();
     });
   }
 }
@@ -2059,7 +2298,7 @@ function renderTabStrip() {
   const strip = document.getElementById('tab-strip');
   const countEl = document.getElementById('tab-strip-count');
   if (!wrap || !strip) return;
-  if (!openTabs.length) {
+  if (!openTabs.length && !shotArmed) {
     wrap.classList.add('hidden');
     return;
   }
@@ -2135,7 +2374,11 @@ function previewTabContexts({ includeActive = false } = {}) {
   }
   const list = [...(autoActive ? [autoActive] : []), ...picked];
   if (!list.length) return [];
-  return assignRefs(list.map((t) => ({
+  // Mirror the send path's send-once excerpt dedup so the preview shows the
+  // same "already provided above" pointer lines the real prompt will carry
+  // (tabContentKey is url|title — both available here).
+  const thinned = thinTabExcerpts(list, contextState && contextState.tabManifestSent);
+  return assignRefs(thinned.contexts.map((t) => ({
     tabId: t.tabId,
     title: t.title || '',
     url: t.url || '',
@@ -2145,6 +2388,7 @@ function previewTabContexts({ includeActive = false } = {}) {
     excerpt: '',
     isActive: !!t.active,
     available: true,
+    ...(t.pointerOnly ? { pointerOnly: true } : {}),
   })));
 }
 
@@ -2828,7 +3072,13 @@ async function loadModes() {
   }
   // Load per-built-in overrides (Settings editor). Hot-reload when Settings saves.
   const ov = await chrome.storage.local.get(STORAGE_OVERRIDES_KEY);
-  modeOverrides = (ov && ov[STORAGE_OVERRIDES_KEY]) || {};
+  const migratedOv = migrateMergedOverrides((ov && ov[STORAGE_OVERRIDES_KEY]) || {});
+  modeOverrides = migratedOv.next;
+  if (migratedOv.changed) {
+    // 2026-08 rationalization: drop overrides saved against merged ids
+    // (summarize/research), carrying them onto ask only if it had none.
+    await chrome.storage.local.set({ [STORAGE_OVERRIDES_KEY]: modeOverrides });
+  }
   rebuildModeOptions();
 
   // Restore last used Mode. Migrate legacy 'zoActivePreset' → 'zoActiveMode'.
@@ -2837,6 +3087,15 @@ async function loadModes() {
   let restored = activeModeSaved.zoActiveMode || activeKeys.zoActivePreset;
   if (restored === 'scrape') restored = 'extract';
   else if (restored === 'qa') restored = 'ask';
+  else {
+    // 2026-08 rationalization: Summarize/Research merged into Ask — without
+    // this, resolveMode would fall back to Co-browse (a different contract).
+    const migrated = migrateMergedModeId(restored);
+    if (migrated !== restored) {
+      restored = migrated;
+      await chrome.storage.sync.set({ zoActiveMode: restored });
+    }
+  }
   activeModeId = restored || DEFAULT_MODE_ID;
   syncModeSelect();
 }
@@ -2847,6 +3106,12 @@ async function saveCustomModes() {
 
 function applyMode() {
   const id = modeSelect.value || DEFAULT_MODE_ID;
+  // #25 vision UX: if the user manually changes the Mode while the shot
+  // toggle is armed (and we didn't switch it ourselves), they own the Mode
+  // now — drop the restore-on-uncheck memory.
+  if (!shotModeAuto && shotArmed && shotPrevModeId && id !== shotPrevModeId) {
+    shotPrevModeId = null;
+  }
   const mode = resolveMode(id, customModes);
   activeModeId = id;
   chrome.storage.sync.set({ zoActiveMode: id });
@@ -3006,6 +3271,7 @@ function renderQuickActions(actions) {
     chip.className = 'chip';
     chip.textContent = a.label;
     chip.title = a.prompt;
+    chip.dataset.prompt = a.prompt || '';
     container.appendChild(chip);
   }
 }
@@ -3502,7 +3768,7 @@ function handleStreamMessage(msg) {
           if (msg.conversationId) conv.zoThreadId = msg.conversationId;
           if (responseText) {
             const reasoningVal = safeText(msg.reasoning) || safeText(streamSession.reasoningText) || undefined;
-            conv.messages.push({ role: 'assistant', text: responseText, reasoning: reasoningVal, timestamp: doneTimestamp, durationMs: doneDuration || undefined });
+            conv.messages.push({ role: 'assistant', text: responseText, reasoning: reasoningVal, timestamp: doneTimestamp, durationMs: doneDuration || undefined, contextTier: streamSession.effectiveTier, contextReason: streamSession.contextReason, screenshot: streamSession.hadScreenshot || undefined });
             if (conv.messages.length > MAX_HISTORY) {
               conv.messages = conv.messages.slice(-MAX_HISTORY);
             }
@@ -3550,6 +3816,11 @@ function handleStreamMessage(msg) {
             streamingTexts.forEach(el => el.remove());
             placeholders.forEach(el => el.remove());
             body.insertAdjacentHTML('beforeend', renderedHtml);
+          } else if (finalText && !body.textContent.trim()) {
+            // Single-chunk stream (PartStart carried the whole answer → one
+            // chunk created the bubble but no span) — render the full markdown
+            // into the still-empty body rather than shipping an empty bubble.
+            body.insertAdjacentHTML('beforeend', markdownToHtml(finalText));
           }
         }
         // Add TTS button if not already present (only if there's actual content).
@@ -3598,13 +3869,21 @@ function handleStreamMessage(msg) {
       if (streamSession.msgEl) {
         const timerLine = streamSession.msgEl.querySelector('.msg-processing-timer');
         if (timerLine) timerLine.remove();
-        const mode = resolveMode(activeModeId, customModes);
+        // Resolve the TURN's mode (a !mode bang may differ from the active
+        // select) so the footer chip names what actually ran.
+        const mode = resolveMode(streamSession.modeId || activeModeId, customModes, modeOverrides);
         addMessageFooter(streamSession.msgEl, {
           timestamp: doneTimestamp,
           modeName: mode.name,
           modelName: config.selectedModel || undefined,
           durationMs: doneDuration,
+          contextTier: streamSession.effectiveTier,
+          contextReason: streamSession.contextReason,
+          screenshot: streamSession.hadScreenshot,
         });
+        // Code blocks in the final rendered markdown get their Copy buttons.
+        const doneBody = streamSession.msgEl.querySelector('.msg-body');
+        if (doneBody) enhanceCodeBlocks(doneBody);
         // Research answers: link chips + Open all (prose answers only — an
         // action turn's links already ran as navigate/click).
         if (!hasActions && responseText) {
@@ -3619,7 +3898,7 @@ function handleStreamMessage(msg) {
         if (responseText) {
           const reasoningVal = safeText(msg.reasoning) || safeText(streamSession.reasoningText) || undefined;
           // Persist to conversation (chronological feed is already in the body; just save reasoning)
-          conv.messages.push({ role: 'assistant', text: responseText, reasoning: reasoningVal, timestamp: doneTimestamp, durationMs: doneDuration || undefined });
+          conv.messages.push({ role: 'assistant', text: responseText, reasoning: reasoningVal, timestamp: doneTimestamp, durationMs: doneDuration || undefined, contextTier: streamSession.effectiveTier, contextReason: streamSession.contextReason, screenshot: streamSession.hadScreenshot || undefined });
           if (conv.messages.length > MAX_HISTORY) {
             conv.messages = conv.messages.slice(-MAX_HISTORY);
           }
@@ -3641,6 +3920,9 @@ function handleStreamMessage(msg) {
       streamSession.fullText = '';
       streamSession.reasoningText = '';
       streamSession.chatId = null;
+      streamSession.effectiveTier = undefined;
+      streamSession.contextReason = undefined;
+      streamSession.modeId = undefined;
       break;
     }
     case 'STREAM_ERROR': {
@@ -3873,6 +4155,14 @@ sendQuery = async function() {
   pickedSkills.length = 0;
   pickedFiles.length = 0;
   renderPickerChips();
+  // #25 vision UX: the 📷 Image toggle is send-once the same way — it arms
+  // exactly one turn (tier-3 forced in the policy step below), then clears.
+  const turnShot = shotArmed;
+  if (shotArmed) {
+    shotArmed = false;
+    shotPrevModeId = null;
+    renderShotToggle();
+  }
 
   const userMsgEl = addMessage('user', query);
   // When a page is captured for this turn, show a Zo-style mention pill
@@ -3900,7 +4190,10 @@ sendQuery = async function() {
     addMessage('system', `📎 ${dropped.length} referenced tab${dropped.length === 1 ? '' : 's'} closed — skipped.`);
   }
   // Picker pills (send-once chips re-render as mention pills, like tab refs).
-  if (turnSkills.length || turnFiles.length) {
+  // The 📷 pill is NOT rendered here — whether the screenshot actually rode
+  // the turn is only known after the capture result comes back (below), and
+  // the pill must never claim pixels that didn't ship.
+  if (turnSkills.length || turnFiles.length || turnShot) {
     const userBody = userMsgEl && userMsgEl.querySelector ? userMsgEl.querySelector('.msg-body') : null;
     if (userBody) {
       for (const s of turnSkills) appendMentionPill(userBody, `⚡ ${s.name}`);
@@ -3930,6 +4223,15 @@ sendQuery = async function() {
   // (in the background) thins what actually reaches Zo using effectiveTier.
   const pageHash = computePageHash(currentContext, mode.contextTier);
   const pageBlank = isBlankPage(currentContext?.url || '');
+  // Per-chat threading: send the chat's stored Zo thread id (the background
+  // echoes the effective id back on STREAM_DONE / the fallback response).
+  // Read BEFORE the policy decision — follow-up dedup ("context already sent")
+  // is only safe when the Zo thread actually exists; a fresh thread (e.g. a
+  // retry after a stream that died before the conversation_id echo) holds
+  // nothing, so the decision re-attaches instead of trusting a thread that
+  // isn't there.
+  const activeConvPre = getActiveConversation();
+  const threadId = (activeConvPre && activeConvPre.zoThreadId) || undefined;
   const turnDecision = decideTurn({
     mode,
     query: effectiveQuery,
@@ -3937,10 +4239,43 @@ sendQuery = async function() {
     state: contextState,
     pageHash,
     pageBlank,
+    hasThread: !!threadId,
   });
   contextState = turnDecision.newState;
   saveConversationState(activeId, contextState);
-  const effectiveTier = turnDecision.effectiveTier;
+  // #25 vision UX: an armed 📷 Image toggle forces tier 3 regardless of the
+  // policy decision — the user explicitly asked for pixels this turn. The
+  // capture itself is still truthful: the background's vision gate may skip
+  // it (model can't take images) and turnHadScreenshot stays honest.
+  let effectiveTier = turnDecision.effectiveTier;
+  let turnReason = turnDecision.reason;
+  if (turnShot && effectiveTier < 3) {
+    effectiveTier = 3;
+    turnReason = '📷 Image toggle — screenshot forced this turn';
+  }
+
+  // Truthful per-turn screenshot flag: the prompt embeds the image only when
+  // the policy attaches tier-3 context AND the capture actually produced a
+  // data URL (the vision gate may skip it, or captureVisibleTab may fail).
+  // Drives the 📷 footer chip + its persistence on the assistant message.
+  const turnHadScreenshot = effectiveTier >= 3 && !!currentContext?.screenshotDataUrl;
+
+  // The 📷 pill marks a screenshot that SHIPPED, not intent: render it (and
+  // persist `shot`) only when the capture produced a data URL. An armed
+  // toggle whose capture failed/skipped gets an inline warning instead —
+  // the background records why in currentContext.screenshotError.
+  if (turnShot && turnHadScreenshot) {
+    const userBody = userMsgEl && userMsgEl.querySelector ? userMsgEl.querySelector('.msg-body') : null;
+    if (userBody) appendMentionPill(userBody, '📷 Screenshot');
+    const conv = getActiveConversation();
+    if (conv && conv.messages.length) {
+      conv.messages[conv.messages.length - 1].shot = true;
+      saveCurrentConversation();
+    }
+  } else if (turnShot) {
+    const why = safeText(currentContext?.screenshotError || 'the page could not be captured');
+    addMessage('system', `📷 Screenshot did not ride this turn (${why}) — it went out as text only.`);
+  }
 
   // ---- Auto-reference the active tab on tier-0 turns ----
   // Whenever the policy thins this turn to URL-only (reads, same-page
@@ -3955,12 +4290,24 @@ sendQuery = async function() {
     if (activeRef) sendTabContexts = assignRefs(ensureActiveTabRef(tabContexts, activeRef));
   }
 
+  // ---- Follow-up excerpt dedup (send-once tab manifests) ----
+  // Tabs whose content key was already sent ride as pointer-only manifest
+  // lines — Zo's conversation threading retains the 500-char excerpts, so
+  // re-sending them every turn is pure duplicate tokens. The dedup map lives
+  // in the per-chat context state and persists with it.
+  const thinned = thinTabExcerpts(sendTabContexts, contextState.tabManifestSent);
+  sendTabContexts = assignRefs(thinned.contexts);
+  contextState = { ...contextState, tabManifestSent: thinned.sentMap };
+  saveConversationState(activeId, contextState);
+
   renderPromptInspector(); // dedup state advanced — refresh the preview
 
-  // Per-chat threading: send the chat's stored Zo thread id (the background
-  // echoes the effective id back on STREAM_DONE / the fallback response).
-  const activeConv = getActiveConversation();
-  const threadId = (activeConv && activeConv.zoThreadId) || undefined;
+  // Stash the turn's context decision + mode for the STREAM_DONE footer (the
+  // context-tier chip and the correct post-bang mode name) and the persisted
+  // assistant record.
+  streamSession.effectiveTier = effectiveTier;
+  streamSession.contextReason = turnReason;
+  streamSession.modeId = modeId;
 
   // --- Streaming path: (re)connect port if needed ---
   if (!streamPort) connectStreamingPort();
@@ -3972,6 +4319,7 @@ sendQuery = async function() {
     streamSession.msgEl = null;
     streamSession.fullText = '';
     streamSession.reasoningText = '';
+    streamSession.hadScreenshot = turnHadScreenshot;
     streamSession.startTime = Date.now();
     try {
       streamPort.postMessage({
@@ -4021,8 +4369,8 @@ sendQuery = async function() {
   });
 
   // Persist the echoed thread id for this chat (before any early return).
-  if (resp && resp.conversationId && activeConv) {
-    activeConv.zoThreadId = resp.conversationId;
+  if (resp && resp.conversationId && activeConvPre) {
+    activeConvPre.zoThreadId = resp.conversationId;
     saveConversationById(activeId);
   }
 
@@ -4066,14 +4414,14 @@ sendQuery = async function() {
   if (!actions.length) {
     // Show reasoning or the raw output text, with "Done." only as last resort
     const fallbackText = reasoning || doneResponse || output || '';
-    const el = addMessage('assistant', fallbackText || 'Done.');
+    const el = addMessage('assistant', fallbackText || 'Done.', { screenshot: turnHadScreenshot });
     addReasoningBubble(el, reasoning);
   } else {
     handleStreamActions(actions, reasoning);
     // handleStreamActions already adds the done response for navigate actions
     // (via its own setTimeout). For non-navigate scenarios, display it here.
     if (doneAction && !hasNavigate) {
-      const el = addMessage('assistant', doneResponse || reasoning || output || 'Done.');
+      const el = addMessage('assistant', doneResponse || reasoning || output || 'Done.', { screenshot: turnHadScreenshot });
       addReasoningBubble(el, reasoning);
     } else if (reasoningVal) {
       // navigate-only actions: persist reasoning with the navigate status message

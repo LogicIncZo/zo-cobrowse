@@ -24,6 +24,8 @@ Send a message to Zo. Zo has full access to files, tools, integrations.
 | `output_format` | object | ❌ | JSON Schema for structured output. When set, `output` in response is an object instead of string |
 | `stream` | boolean | ❌ | Enable SSE streaming. Default false |
 
+**Images (live-verified 2026-08-29, `tests/test-prompts/probe-vision.ts`):** despite `input` being string-only, Zo's backend extracts **markdown data-URL images embedded in `input`** (e.g. `![page](data:image/jpeg;base64,…)` — the extension's tier-3 `## Screenshot` section) and passes them to models whose `/models/catalog` entry has `supports_images: true`. Verified with shape/color fixtures up to ~825K chars of base64 (589KB JPEG); no size ceiling hit, one transient HTTP 500 observed (retried fine). Non-vision models just see the base64 as text — why `lib/vision.js` gates the capture.
+
 **Response:**
 ```json
 {
@@ -194,6 +196,7 @@ Background SW → `chrome.scripting.executeScript` → (fallback if content scri
 |------|-----------|---------|
 | `CAPTURE_CONTEXT` | BG→Content | Get page DOM snapshot |
 | `EXECUTE_ACTION` | BG→Content | Run a single browser action |
+| `ENHANCE_TEXT` | Content→BG | Write-assist one-shot (the only Content→BG type): enhance a textarea lead — `enhanceText()` builds the prompt via `lib/write-assist.js` and calls `/zo/ask` **threadless** (no `conversation_id`); returns `{ok, text}` for the in-page popover's preview + Accept fill-back |
 | `GET_PAGE_CONTEXT` | Panel→BG | Forward to `getActiveTabContext()` |
 | `ASK_ZO` | Panel→BG | Forward to `askZo()` with page context + query |
 | `NEW_CONVERSATION` | Panel→BG | Reset `zoConversationId` to null |

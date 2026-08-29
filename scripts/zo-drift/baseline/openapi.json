@@ -1,0 +1,1695 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Zo API",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://api.zo.computer",
+      "description": "Zo API"
+    }
+  ],
+  "paths": {
+    "/zo/ask": {
+      "post": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "Ask Zo",
+        "description": "Send a message to your Zo and get a response. Use `stream: true` for Server-Sent Events streaming.",
+        "operationId": "zoAsk",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ZoAskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Success (non-streaming)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ZoAskResponseSuccess"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ZoAskResponseError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ZoAskResponseSuccess"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ZoAskResponseError"
+                    }
+                  ],
+                  "title": "Response 200 Zoask"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/models/available": {
+      "get": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "List available models",
+        "description": "List all available models. When authenticated with an API key, includes BYOK configurations.",
+        "operationId": "getAvailableModels",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZoModelsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/models/catalog": {
+      "get": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "Get the full model catalog",
+        "description": "Return the full public model catalog — the picker model list plus the scalar globals (default chat model, featured flags/labels, promo end date, deprecation map). This is the runtime, fleet-fresh equivalent of the baked types/generated/models.ts manifest, built from the same source so the two never drift. Public (no auth); host-specific disabled models are filtered separately at request time. Cached for 1 minute.",
+        "operationId": "getModelCatalog",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCatalogResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/personas/available": {
+      "get": {
+        "tags": [
+          "Personas"
+        ],
+        "summary": "List available personas",
+        "description": "List all configured personas. When authenticated with an API key, returns personas for the key owner.",
+        "operationId": "getAvailablePersonas",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZoPersonasResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CatalogReasoningLevel": {
+        "properties": {
+          "value": {
+            "type": "integer",
+            "title": "Value",
+            "description": "Slider position (0-based) for this reasoning level"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "Human-readable label, e.g. 'High reasoning'"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value",
+          "label"
+        ],
+        "title": "CatalogReasoningLevel",
+        "description": "One selectable reasoning level in a model's reasoning slider."
+      },
+      "CatalogReasoningLevels": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "levels",
+            "title": "Kind",
+            "description": "Discriminator: reasoning selected from discrete levels"
+          },
+          "levels": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogReasoningLevel"
+            },
+            "type": "array",
+            "title": "Levels",
+            "description": "Available reasoning levels, lowest first"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "levels"
+        ],
+        "title": "CatalogReasoningLevels",
+        "description": "Reasoning configured as discrete levels (e.g. low/medium/high)."
+      },
+      "CatalogReasoningRange": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "range",
+            "title": "Kind",
+            "description": "Discriminator: reasoning is a continuous token budget"
+          },
+          "min_tokens": {
+            "type": "integer",
+            "title": "Min Tokens",
+            "description": "Minimum thinking-token budget"
+          },
+          "max_tokens": {
+            "type": "integer",
+            "title": "Max Tokens",
+            "description": "Maximum thinking-token budget"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "min_tokens",
+          "max_tokens"
+        ],
+        "title": "CatalogReasoningRange",
+        "description": "Reasoning configured as a continuous thinking-token budget."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ModelCatalogResponse": {
+        "properties": {
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/PublicModelChoice"
+            },
+            "type": "array",
+            "title": "Models",
+            "description": "The picker model list, sorted by priority"
+          },
+          "media_gateway_public_discovery_enabled": {
+            "type": "boolean",
+            "title": "Media Gateway Public Discovery Enabled",
+            "description": "Legacy global rollout field. New clients use media_gateway_enabled from GET /models/.",
+            "default": false,
+            "deprecated": true
+          },
+          "default_chat_model_id": {
+            "type": "string",
+            "title": "Default Chat Model Id",
+            "description": "Public id of the default chat model"
+          },
+          "featured_model_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Featured Model Ids",
+            "description": "Public ids of featured ('Free' badge) models"
+          },
+          "featured_models_are_free": {
+            "type": "boolean",
+            "title": "Featured Models Are Free",
+            "description": "When true, the frontend shows a Free badge on featured models"
+          },
+          "featured_model_labels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Featured Model Labels",
+            "description": "Labels for featured_model_ids, in order"
+          },
+          "promo_end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Promo End Date",
+            "description": "Promo end date (YYYY-MM-DD) or null"
+          },
+          "deprecation_map": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Deprecation Map",
+            "description": "Map of deprecated public model id → active successor public id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "models",
+          "default_chat_model_id",
+          "featured_model_ids",
+          "featured_models_are_free",
+          "featured_model_labels",
+          "deprecation_map"
+        ],
+        "title": "ModelCatalogResponse",
+        "description": "Full public model catalog served by ``GET /models/catalog``.\n\nMirrors the baked ``types/generated/models.ts`` manifest (the picker list\nplus the scalar globals) so the web app can fetch live catalog data at\nruntime and fall back to the baked copy when the fetch is pending or fails."
+      },
+      "PropertyArray": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "array",
+            "title": "Type"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PropertyScalar"
+              },
+              {
+                "$ref": "#/components/schemas/PropertyObject"
+              },
+              {
+                "$ref": "#/components/schemas/PropertyEnum"
+              },
+              {
+                "$ref": "#/components/schemas/PropertyArray"
+              }
+            ],
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "items"
+        ],
+        "title": "PropertyArray"
+      },
+      "PropertyEnum": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "string",
+            "title": "Type"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "enum": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Enum"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "enum"
+        ],
+        "title": "PropertyEnum"
+      },
+      "PropertyObject": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "object",
+            "title": "Type"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "required": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Required"
+          },
+          "properties": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/PropertyScalar"
+                },
+                {
+                  "$ref": "#/components/schemas/PropertyObject"
+                },
+                {
+                  "$ref": "#/components/schemas/PropertyEnum"
+                },
+                {
+                  "$ref": "#/components/schemas/PropertyArray"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Properties"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "required",
+          "properties"
+        ],
+        "title": "PropertyObject"
+      },
+      "PropertyScalar": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "string",
+              "number",
+              "boolean"
+            ],
+            "title": "Type"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "PropertyScalar"
+      },
+      "PublicMediaBoundedLinearPriceRule": {
+        "properties": {
+          "selector": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Selector"
+          },
+          "included_in_free_allowance": {
+            "type": "boolean",
+            "title": "Included In Free Allowance"
+          },
+          "kind": {
+            "type": "string",
+            "const": "bounded_linear",
+            "title": "Kind"
+          },
+          "basis": {
+            "type": "string",
+            "enum": [
+              "characters",
+              "duration_milliseconds"
+            ],
+            "title": "Basis"
+          },
+          "units_per_step": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "title": "Units Per Step"
+          },
+          "charge_usd_per_step": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)\\.[0-9]{2,6}$",
+            "title": "Charge Usd Per Step"
+          },
+          "minimum_steps": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "title": "Minimum Steps"
+          },
+          "maximum_steps": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "title": "Maximum Steps"
+          }
+        },
+        "type": "object",
+        "required": [
+          "selector",
+          "included_in_free_allowance",
+          "kind",
+          "basis",
+          "units_per_step",
+          "charge_usd_per_step",
+          "minimum_steps",
+          "maximum_steps"
+        ],
+        "title": "PublicMediaBoundedLinearPriceRule",
+        "description": "One bounded linear retail price safe to render in product surfaces."
+      },
+      "PublicMediaFixedPriceRule": {
+        "properties": {
+          "selector": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Selector"
+          },
+          "included_in_free_allowance": {
+            "type": "boolean",
+            "title": "Included In Free Allowance"
+          },
+          "kind": {
+            "type": "string",
+            "const": "fixed_request",
+            "title": "Kind"
+          },
+          "charge_usd": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)\\.[0-9]{2,6}$",
+            "title": "Charge Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "selector",
+          "included_in_free_allowance",
+          "kind",
+          "charge_usd"
+        ],
+        "title": "PublicMediaFixedPriceRule",
+        "description": "One exact fixed request price safe to render in product surfaces."
+      },
+      "PublicMediaInputCapability": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "source_image",
+              "reference_image",
+              "mask",
+              "start_frame",
+              "end_frame",
+              "source_video",
+              "reference_video",
+              "source_audio",
+              "reference_audio",
+              "audio_track",
+              "voice_sample"
+            ],
+            "title": "Role"
+          },
+          "min_count": {
+            "type": "integer",
+            "maximum": 8,
+            "minimum": 0,
+            "title": "Min Count"
+          },
+          "max_count": {
+            "type": "integer",
+            "maximum": 8,
+            "minimum": 1,
+            "title": "Max Count"
+          },
+          "mime_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Mime Types"
+          }
+        },
+        "type": "object",
+        "required": [
+          "role",
+          "min_count",
+          "max_count",
+          "mime_types"
+        ],
+        "title": "PublicMediaInputCapability",
+        "description": "One user-visible media input role and its cardinality."
+      },
+      "PublicMediaOperationProfile": {
+        "properties": {
+          "operation": {
+            "type": "string",
+            "enum": [
+              "image.generate",
+              "image.edit",
+              "image.inpaint",
+              "video.generate",
+              "video.edit",
+              "video.extend",
+              "speech.generate",
+              "audio.transcribe"
+            ],
+            "title": "Operation"
+          },
+          "availability": {
+            "type": "string",
+            "const": "public",
+            "title": "Availability"
+          },
+          "product_role": {
+            "type": "string",
+            "title": "Product Role"
+          },
+          "request_variants": {
+            "items": {
+              "$ref": "#/components/schemas/PublicMediaRequestCapability"
+            },
+            "type": "array",
+            "title": "Request Variants"
+          },
+          "prices": {
+            "items": {
+              "$ref": "#/components/schemas/PublicMediaPriceRange"
+            },
+            "type": "array",
+            "title": "Prices"
+          },
+          "price_rules": {
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/PublicMediaFixedPriceRule"
+                },
+                {
+                  "$ref": "#/components/schemas/PublicMediaBoundedLinearPriceRule"
+                }
+              ],
+              "discriminator": {
+                "propertyName": "kind",
+                "mapping": {
+                  "bounded_linear": "#/components/schemas/PublicMediaBoundedLinearPriceRule",
+                  "fixed_request": "#/components/schemas/PublicMediaFixedPriceRule"
+                }
+              }
+            },
+            "type": "array",
+            "title": "Price Rules"
+          },
+          "output": {
+            "$ref": "#/components/schemas/PublicMediaOutputCapability"
+          }
+        },
+        "type": "object",
+        "required": [
+          "operation",
+          "availability",
+          "product_role",
+          "request_variants",
+          "prices",
+          "price_rules",
+          "output"
+        ],
+        "title": "PublicMediaOperationProfile",
+        "description": "Public capabilities and retail display prices, stripped of execution evidence."
+      },
+      "PublicMediaOutputCapability": {
+        "properties": {
+          "max_count": {
+            "type": "integer",
+            "maximum": 8,
+            "minimum": 1,
+            "title": "Max Count"
+          },
+          "mime_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Mime Types"
+          },
+          "max_width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Width"
+          },
+          "max_height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Height"
+          },
+          "max_duration_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Duration Seconds"
+          },
+          "max_text_chars": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Text Chars"
+          },
+          "require_audio_stream": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Require Audio Stream"
+          }
+        },
+        "type": "object",
+        "required": [
+          "max_count",
+          "mime_types"
+        ],
+        "title": "PublicMediaOutputCapability",
+        "description": "User-visible output formats and dimensions."
+      },
+      "PublicMediaPriceRange": {
+        "properties": {
+          "currency": {
+            "type": "string",
+            "const": "USD",
+            "title": "Currency",
+            "default": "USD"
+          },
+          "minimum_usd": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)\\.[0-9]{2,9}$",
+            "title": "Minimum Usd"
+          },
+          "maximum_usd": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)\\.[0-9]{2,9}$",
+            "title": "Maximum Usd"
+          },
+          "basis": {
+            "type": "string",
+            "enum": [
+              "per_request",
+              "characters",
+              "duration_milliseconds"
+            ],
+            "title": "Basis"
+          }
+        },
+        "type": "object",
+        "required": [
+          "minimum_usd",
+          "maximum_usd",
+          "basis"
+        ],
+        "title": "PublicMediaPriceRange",
+        "description": "A display-safe fixed retail-price range for one billing basis."
+      },
+      "PublicMediaRequestCapability": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{1,63}$",
+            "title": "Id"
+          },
+          "inputs": {
+            "items": {
+              "$ref": "#/components/schemas/PublicMediaInputCapability"
+            },
+            "type": "array",
+            "title": "Inputs"
+          },
+          "settings": {
+            "items": {
+              "$ref": "#/components/schemas/PublicMediaSettingCapability"
+            },
+            "type": "array",
+            "title": "Settings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "inputs",
+          "settings"
+        ],
+        "title": "PublicMediaRequestCapability",
+        "description": "One supported public input and setting shape without internal selectors."
+      },
+      "PublicMediaSettingCapability": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{1,63}$",
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "enum",
+              "integer",
+              "number",
+              "boolean",
+              "string"
+            ],
+            "title": "Kind"
+          },
+          "values": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Values"
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum"
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximum"
+          },
+          "default": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              }
+            ],
+            "title": "Default"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "values",
+          "default"
+        ],
+        "title": "PublicMediaSettingCapability",
+        "description": "One safe setting exposed to public capability consumers."
+      },
+      "PublicModelChoice": {
+        "properties": {
+          "value": {
+            "type": "string",
+            "title": "Value",
+            "description": "Public model identifier (e.g. 'zo:openai/gpt-5.4')"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "User-friendly model name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Plain-language picker description"
+          },
+          "quality_tier": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "enum": [
+                  1,
+                  2,
+                  3
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quality Tier",
+            "description": "1-3 star quality rating; null for hidden/non-rated variants"
+          },
+          "is_fast": {
+            "type": "boolean",
+            "title": "Is Fast",
+            "description": "Whether to render the speed (zap) badge",
+            "default": false
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url",
+            "description": "Model info URL"
+          },
+          "release_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Date",
+            "description": "Release date (YYYY-MM-DD)"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug",
+            "description": "Model slug"
+          },
+          "vendor": {
+            "type": "string",
+            "title": "Vendor",
+            "description": "Model provider display name"
+          },
+          "vendor_slug": {
+            "type": "string",
+            "title": "Vendor Slug",
+            "description": "Model provider slug (drives the vendor icon)"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country",
+            "description": "ISO 3166-1 alpha-2 country code"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "description": "Access tier: 'free' (available to all) or 'subscribers' (premium metered)"
+          },
+          "meter": {
+            "type": "string",
+            "title": "Meter",
+            "description": "Billing meter event name (e.g. 'chat', 'image')"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority",
+            "description": "Sort priority for pickers; lower values first"
+          },
+          "knowledge_cutoff_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Knowledge Cutoff Date",
+            "description": "Knowledge cutoff date (chat models only)"
+          },
+          "context_window": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Window",
+            "description": "Maximum context length in tokens (chat models only)"
+          },
+          "supports_images": {
+            "type": "boolean",
+            "title": "Supports Images",
+            "description": "Whether the model accepts image input",
+            "default": true
+          },
+          "features": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Features",
+            "description": "Capability flags (e.g. 'extend_reasoning')"
+          },
+          "reasoning": {
+            "anyOf": [
+              {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/CatalogReasoningLevels"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CatalogReasoningRange"
+                  }
+                ],
+                "discriminator": {
+                  "propertyName": "kind",
+                  "mapping": {
+                    "levels": "#/components/schemas/CatalogReasoningLevels",
+                    "range": "#/components/schemas/CatalogReasoningRange"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning",
+            "description": "Reasoning-control UI config, if any"
+          },
+          "media_domain": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "image",
+                  "video",
+                  "speech",
+                  "transcription"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media Domain",
+            "description": "Generated-media domain, independent of the billing meter taxonomy."
+          },
+          "media_default_selectable": {
+            "type": "boolean",
+            "title": "Media Default Selectable",
+            "description": "Whether this model remains selectable through a legacy media tool path.",
+            "default": false
+          },
+          "media_profiles": {
+            "items": {
+              "$ref": "#/components/schemas/PublicMediaOperationProfile"
+            },
+            "type": "array",
+            "title": "Media Profiles",
+            "description": "Provider-neutral operations, request modes, and fixed customer prices."
+          },
+          "input_tok_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Tok Price",
+            "description": "Price per input token (cents)"
+          },
+          "output_tok_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Tok Price",
+            "description": "Price per output token (cents)"
+          },
+          "cached_read_tok_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cached Read Tok Price",
+            "description": "Price per cached-read token (cents)"
+          },
+          "cached_write_tok_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cached Write Tok Price",
+            "description": "Price per cached-write token (cents)"
+          },
+          "input_audio_minutes_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Audio Minutes Price",
+            "description": "Price per minute of audio input (cents)"
+          },
+          "output_megapixel_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Megapixel Price",
+            "description": "Price per megapixel of image output (cents)"
+          },
+          "output_video_seconds_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Video Seconds Price",
+            "description": "Price per second of video output (cents)"
+          },
+          "tier_threshold_input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tier Threshold Input Tokens",
+            "description": "Input-token threshold above which higher-tier pricing applies"
+          },
+          "tier_higher_input_tok_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tier Higher Input Tok Price",
+            "description": "Higher-tier input token price (cents)"
+          },
+          "tier_higher_output_tok_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tier Higher Output Tok Price",
+            "description": "Higher-tier output token price (cents)"
+          },
+          "hide_from_ui": {
+            "type": "boolean",
+            "title": "Hide From Ui",
+            "description": "Whether the model is hidden from UI pickers",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "value",
+          "label",
+          "slug",
+          "vendor",
+          "vendor_slug",
+          "type",
+          "meter"
+        ],
+        "title": "PublicModelChoice",
+        "description": "One model in the public catalog.\n\nMirrors the public (non-billing) fields of ha-core ``ModelChoice`` — Stripe\nmeter-item ids and ``deprecated_by`` are stripped. Shape-for-shape with the\nbaked ``AVAILABLE_MODELS`` manifest in ``types/generated/models.ts`` so the\nweb app can swap the static import for this runtime payload directly."
+      },
+      "StructuredOutputFormat": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "object",
+            "title": "Type"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "required": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Required"
+          },
+          "properties": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/PropertyScalar"
+                },
+                {
+                  "$ref": "#/components/schemas/PropertyObject"
+                },
+                {
+                  "$ref": "#/components/schemas/PropertyEnum"
+                },
+                {
+                  "$ref": "#/components/schemas/PropertyArray"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Properties"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "required",
+          "properties"
+        ],
+        "title": "StructuredOutputFormat",
+        "description": "Example with the various kind of properties that can be stated:\n{\n    \"type\": \"object\",\n    \"description\": \"descriptions are optional but helpful, each property can have them\",\n    \"properties\": {\n        \"names\": {\n            \"type\": \"array\",\n            \"items\": {\n                \"type\": \"string\"\n            }\n        },\n        \"first_name\": {\n            \"type\": \"string\"\n        },\n        \"temperature_degrees\": {\n            \"type\": \"number\"\n        },\n        \"temperature_unit\": {\n            \"type\": \"string\",\n            \"description\": \"The unit to return the temperature in\",\n            \"enum\": [\"F\", \"C\"]\n        },\n        \"nested_object\": {\n            \"type\": \"object\",\n            \"description\": \"A nested object\",\n            \"properties\": {\n                \"nested_object_property\": {\n                    \"type\": \"string\"\n                }\n            },\n            \"required\": [\"nested_object_property\"]\n        }\n    },\n    \"required\": [\"names\", \"first_name\"]\n}"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "ZoAskRequest": {
+        "properties": {
+          "input": {
+            "type": "string",
+            "title": "Input",
+            "description": "Your message to Zo"
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id",
+            "description": "Continue an existing conversation"
+          },
+          "model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Name",
+            "description": "Override the default model (for example, 'zo:openai/gpt-5.4'; use /models/available to list available)"
+          },
+          "persona_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Persona Id",
+            "description": "Override the active persona (use /personas/available to list available)"
+          },
+          "output_format": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StructuredOutputFormat"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "JSON Schema for structured output"
+          },
+          "memory_mode": {
+            "type": "string",
+            "enum": [
+              "enabled",
+              "off"
+            ],
+            "title": "Memory Mode",
+            "description": "Memory mode for this request: 'enabled' includes workspace memory, 'off' disables it.",
+            "default": "enabled"
+          },
+          "stream": {
+            "type": "boolean",
+            "title": "Stream",
+            "description": "Enable streaming mode (returns Server-Sent Events)",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "title": "ZoAskRequest"
+      },
+      "ZoAskResponseError": {
+        "properties": {
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "description": "Error message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "title": "ZoAskResponseError"
+      },
+      "ZoAskResponseSuccess": {
+        "properties": {
+          "output": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              }
+            ],
+            "title": "Output",
+            "description": "Zo's response (object if output_format was specified)"
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id",
+            "description": "ID to continue this conversation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "output"
+        ],
+        "title": "ZoAskResponseSuccess"
+      },
+      "ZoModelInfo": {
+        "properties": {
+          "model_name": {
+            "type": "string",
+            "title": "Model Name",
+            "description": "Unique public model identifier (e.g., 'zo:openai/gpt-5.4')"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "Human-readable model name"
+          },
+          "vendor": {
+            "type": "string",
+            "title": "Vendor",
+            "description": "Model provider (e.g., 'Anthropic', 'OpenAI')"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "free",
+                  "subscribers"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type",
+            "description": "Access tier: 'free' (available to all) or 'subscribers' (premium built-in metered models)"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority",
+            "description": "Sort priority for UI pickers; lower values appear first"
+          },
+          "context_window": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Window",
+            "description": "Maximum context length in tokens"
+          },
+          "is_byok": {
+            "type": "boolean",
+            "title": "Is Byok",
+            "description": "True if this is a user-configured BYOK model",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "model_name",
+          "label",
+          "vendor"
+        ],
+        "title": "ZoModelInfo"
+      },
+      "ZoModelsResponse": {
+        "properties": {
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ZoModelInfo"
+            },
+            "type": "array",
+            "title": "Models",
+            "description": "List of available AI models"
+          },
+          "featured_models_are_free": {
+            "type": "boolean",
+            "title": "Featured Models Are Free",
+            "description": "When true, frontend shows Free badge on featured models"
+          }
+        },
+        "type": "object",
+        "required": [
+          "models",
+          "featured_models_are_free"
+        ],
+        "title": "ZoModelsResponse",
+        "description": "Response from /models/available endpoint."
+      },
+      "ZoPersonaInfo": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Unique persona identifier"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Display name"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "System prompt defining the persona's behavior"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model",
+            "description": "AI model ID, or null for system default"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image",
+            "description": "Avatar image URL"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "prompt"
+        ],
+        "title": "ZoPersonaInfo"
+      },
+      "ZoPersonasResponse": {
+        "properties": {
+          "personas": {
+            "items": {
+              "$ref": "#/components/schemas/ZoPersonaInfo"
+            },
+            "type": "array",
+            "title": "Personas",
+            "description": "List of configured personas"
+          }
+        },
+        "type": "object",
+        "required": [
+          "personas"
+        ],
+        "title": "ZoPersonasResponse"
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Zo API key (zo_sk_...)"
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ]
+}

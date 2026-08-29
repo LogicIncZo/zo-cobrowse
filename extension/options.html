@@ -9,9 +9,9 @@
     /* ── Reset & base ── */
     * { box-sizing: border-box; }
     body {
-      width: 540px;
+      max-width: 980px;
       margin: 0 auto;
-      padding: 24px;
+      padding: 24px 28px;
       min-height: 100vh;
       overflow: visible !important;
       background: var(--bg-deep);
@@ -42,13 +42,18 @@
     .page-header .subtitle { font-size: 13px; color: var(--text-muted); margin: 0; }
 
     /* ── Cards ── */
+    /* Panes (declared further down) are the grid containers; the form itself
+       is a plain block so only one tab pane shows at a time. */
     .card {
       background: var(--bg-surface);
       border: 1px solid var(--border-soft);
       border-radius: var(--radius-md);
       padding: 16px;
-      margin-bottom: 14px;
+      margin-bottom: 0;
+      min-width: 0;
     }
+    /* Wide cards span the full row (multi-field editors, tables, button rows). */
+    .card-wide { grid-column: 1 / -1; }
     .card h2 {
       font-family: var(--font-display);
       font-size: 14px;
@@ -209,6 +214,73 @@
     .flex { display: flex; }
     .gap-2 { gap: 8px; }
     .items-center { align-items: center; }
+
+    /* ── Section tabs (tabbed UI — one pane visible at a time, no scroll) ── */
+    #settings-nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 4px 0 10px;
+      margin-bottom: 4px;
+      border-bottom: 1px solid var(--border-soft);
+    }
+    #settings-nav .settings-tab {
+      font-size: 12px;
+      padding: 5px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border-soft);
+      background: transparent;
+      color: var(--text-muted);
+      font-family: var(--font-ui);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: border-color 0.15s, background 0.15s, color 0.15s;
+    }
+    #settings-nav .settings-tab:hover { color: var(--text); border-color: var(--indigo); }
+    #settings-nav .settings-tab.active {
+      background: var(--amber-glow, color-mix(in srgb, var(--amber) 15%, transparent));
+      border-color: var(--amber);
+      color: var(--text);
+    }
+    #settings-form { display: block; }
+    .tab-pane {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 14px;
+      align-items: start;
+      margin-bottom: 14px;
+    }
+    .tab-pane[hidden] { display: none; }
+
+    /* ── Token reveal ── */
+    .token-row { display: flex; gap: 6px; }
+    .token-row input { flex: 1; }
+    .token-toggle {
+      flex: 0 0 auto;
+      border: 1px solid var(--border-soft);
+      background: var(--bg);
+      color: var(--text-muted);
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-size: 12px;
+      padding: 0 10px;
+    }
+    .token-toggle:hover { color: var(--text); border-color: var(--indigo); }
+
+    /* ── Save feedback: fixed toast (visible from any scroll position) ── */
+    #status-message {
+      position: fixed;
+      bottom: 18px;
+      right: 18px;
+      z-index: 50;
+      box-shadow: 0 4px 14px rgb(0 0 0 / 0.25);
+    }
+    #status-message:empty { display: none; }
+    .save-dirty::after {
+      content: " •";
+      color: var(--indigo);
+      font-weight: 700;
+    }
   </style>
 </head>
 <body>
@@ -217,13 +289,27 @@
     <p class="subtitle">Configure your co-browsing connection to Zo Computer</p>
   </div>
 
+  <!-- ── Section tabs: one pane visible at a time ── -->
+  <nav id="settings-nav" aria-label="Settings sections">
+    <button type="button" class="settings-tab" data-pane="pane-connection">🔌 Connection</button>
+    <button type="button" class="settings-tab" data-pane="pane-model">🧠 Model &amp; Persona</button>
+    <button type="button" class="settings-tab" data-pane="pane-prompts">✎ Prompts</button>
+    <button type="button" class="settings-tab" data-pane="pane-features">🧩 Features</button>
+    <button type="button" class="settings-tab" data-pane="pane-actions">⚡ Actions</button>
+    <button type="button" class="settings-tab" data-pane="pane-about">ℹ️ About</button>
+  </nav>
+
   <form id="settings-form">
+    <div class="tab-pane" id="pane-connection">
     <!-- ── Connection ── -->
-    <div class="card">
+    <div class="card card-wide" id="card-connection">
       <h2>🔌 Connection</h2>
       <div class="field-group">
         <label for="access-token">Zo Access Token</label>
-        <input type="password" id="access-token" placeholder="zo_…" />
+        <div class="token-row">
+          <input type="password" id="access-token" placeholder="zo_…" autocomplete="off" />
+          <button type="button" id="token-toggle" class="token-toggle" title="Show token">Show</button>
+        </div>
       </div>
       <div class="field-group">
         <label for="space-endpoint">Zo.space Endpoint</label>
@@ -250,9 +336,11 @@
         </select>
       </div>
     </div>
+    </div><!-- /pane-connection -->
 
+    <div class="tab-pane" id="pane-model" hidden>
     <!-- ── Model & Persona ── -->
-    <div class="card">
+    <div class="card" id="card-persona">
       <h2>🧠 Persona</h2>
       <p class="desc">Pin the Zo persona that runs your requests. The Mode you pick in the side panel decides how Zo behaves; this sets which persona executes it.</p>
 
@@ -276,9 +364,11 @@
         <div id="model-status" class="inline-status"></div>
       </div>
     </div>
+    </div><!-- /pane-model -->
 
+    <div class="tab-pane" id="pane-prompts" hidden>
     <!-- ── Prompts (mode tuning) ── -->
-    <div class="card">
+    <div class="card card-wide" id="card-prompts">
       <h2>✎ Prompts</h2>
       <p class="desc">Tune what each Mode sends to Zo — system prompt, instructions, and how much page context. Built-in Modes keep an editable override (Reset restores the original); custom Modes are edited directly. Page context still requires <code>!context</code> per turn in the chat.</p>
       <div class="field-group">
@@ -324,9 +414,11 @@
         <pre class="prompt-preview" id="prompt-preview-pre"></pre>
       </details>
     </div>
+    </div><!-- /pane-prompts -->
 
+    <div class="tab-pane" id="pane-features" hidden>
     <!-- ── Screenshot ── -->
-    <div class="card">
+    <div class="card" id="card-features">
       <h2>📷 Screenshot & Vision</h2>
       <div class="field-group">
         <label class="row-label">
@@ -340,8 +432,23 @@
       </div>
     </div>
 
+    <!-- ── Write assist ── -->
+    <div class="card" id="card-write">
+      <h2>✍️ Write Assist</h2>
+      <div class="field-group">
+        <label class="row-label">
+          <input type="checkbox" id="enable-write-assist" checked />
+          Show the Zo icon on text fields to enhance writing
+        </label>
+        <p class="desc" style="margin-top:4px;">
+          When a text area is focused, a small Zo icon appears at its corner. Click it to have Zo expand or polish
+          your draft — you preview the result before it is filled in. Nothing is written without your approval.
+        </p>
+      </div>
+    </div>
+
     <!-- ── Speech ── -->
-    <div class="card">
+    <div class="card" id="card-speech">
       <h2>🎤 Speech</h2>
       <div class="field-group-double">
         <div class="field-group">
@@ -362,7 +469,7 @@
     </div>
 
         <!-- ── Context Menu ── -->
-    <div class="card">
+    <div class="card" id="card-menus">
       <h2>🖱️ Right-Click Menu</h2>
       <p class="desc">Show Zo options in the right-click context menu.</p>
       <label class="checkbox-row">
@@ -382,9 +489,11 @@
         Ask Zo to fill this field
       </label>
     </div>
+    </div><!-- /pane-features -->
 
+    <div class="tab-pane" id="pane-actions" hidden>
     <!-- ── Quick Actions ── -->
-    <div class="card">
+    <div class="card card-wide" id="card-actions">
       <h2>⚡ Quick Actions</h2>
       <p class="desc">Chips shown above the input for one-click prompts.</p>
       <div id="quick-actions-list"></div>
@@ -392,7 +501,7 @@
     </div>
 
     <!-- ── Keyboard Shortcuts ── -->
-    <div class="card">
+    <div class="card card-wide">
       <h2>⌨️ Keyboard Shortcuts</h2>
       <p class="desc">Use the table below to view available shortcuts. To remap them, visit <a href="chrome://extensions/shortcuts" target="_blank">chrome://extensions/shortcuts</a>.</p>
       <table style="width:100%; border-collapse: collapse; margin-top: 8px;">
@@ -422,25 +531,28 @@
         </tbody>
       </table>
     </div>
+    </div><!-- /pane-actions -->
 
+    <div class="tab-pane" id="pane-about" hidden>
     <!-- ── About ── -->
-    <div class="card">
+    <div class="card card-wide" id="card-about">
       <h2>ℹ️ About</h2>
       <p class="desc">
-        <strong>Zo Co-browse</strong> v0.0.1 &mdash; AI-powered co-browsing extension.
+        <strong>Zo Co-browse</strong> <span id="ext-version">v—</span> &mdash; AI-powered co-browsing extension.
         Your page context is sent only to your configured Zo endpoint.
       </p>
       <div class="btn-row" style="flex-wrap: wrap;">
-        <a href="https://github.com/CCAgentOrg/zo-cobrowse" target="_blank" class="btn"><span style="font-size:14px;">⌘</span> GitHub</a>
-        <a href="https://github.com/CCAgentOrg/zo-cobrowse/blob/main/PRIVACY.md" target="_blank" class="btn">🔒 Privacy</a>
-        <a href="https://github.com/CCAgentOrg/zo-cobrowse/issues" target="_blank" class="btn">🐛 Report Issue</a>
+        <a href="https://github.com/LogicIncZo/zo-cobrowse" target="_blank" class="btn"><span style="font-size:14px;">⌘</span> GitHub</a>
+        <a href="https://github.com/LogicIncZo/zo-cobrowse/blob/main/PRIVACY.md" target="_blank" class="btn">🔒 Privacy</a>
+        <a href="https://github.com/LogicIncZo/zo-cobrowse/issues" target="_blank" class="btn">🐛 Report Issue</a>
         <a href="https://zocomputer.com" target="_blank" class="btn btn-ghost">Powered by Zo Computer</a>
         <button type="button" id="reset-defaults" class="btn btn-danger" style="margin-left:auto;">Reset to Defaults</button>
       </div>
     </div>
+    </div><!-- /pane-about -->
 
     <!-- ── Save ── -->
-    <div class="flex gap-2 items-center">
+    <div class="flex gap-2 items-center card-wide">
       <button type="submit" class="btn btn-primary">Save Settings</button>
     </div>
   </form>

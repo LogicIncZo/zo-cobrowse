@@ -1,0 +1,6 @@
+{
+  "id": "summarize-brief",
+  "promptHash": "59cba3ba9db52bc302293b0ab9b98a8d28277a07f79da30c100d383667a4c632",
+  "fetchedAt": "2026-08-29T17:16:17.834Z",
+  "output": "**Zo Co-browse test page** — a demo page mimicking a product landing site:\n\n- **Header**: Nav links — Pricing, Features, Docs, About; search box top right\n- **Hero**: \"Build Smarter with Zo\" headline + platform subheading\n- **Features** (3 cards, each with \"Learn More\"): Instant DuckDB Queries, Web Research Automation, Custom Skill Builder\n- **Footer**: Copyright, Privacy Policy, Terms of Service links\n\nNothing dynamic or data-heavy here — it's structured exactly like the kind of page co-browse summaries should handle: clear sections, link inventory, no hidden content."
+}

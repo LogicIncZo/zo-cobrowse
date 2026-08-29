@@ -47,10 +47,20 @@ The extension speaks to Zo over **two channels** (see
 
 1. **Right-click the icon → Options** (or open the side panel and use its
    **Options** entry)
-2. Enter your **Zo Access Token** (key format: `zo_sk_...`)
+2. Enter your **Zo Access Token** (key format: `zo_sk_...`) — use **Show** to
+   verify a pasted token
 3. (Optional) Choose a **model** — leave blank to use Zo's default
 4. Click **Test Connection** — you should see a green success state
 5. Optionally set your **Zo.space endpoint** to your tenant's data API
+6. Click **Save Settings** — the • marker on the Save buttons disappears when
+   everything is persisted (the sticky section nav jumps between the ~12
+   settings cards)
+
+::: tip Unsaved changes
+Fields save only when you press **Save Settings** (the model select and
+Quick-Action rows save immediately). Until then, the Save buttons carry a •
+marker and a toast reminds you.
+:::
 
 ## Your first query
 

@@ -46,6 +46,50 @@ document.addEventListener('DOMContentLoaded', async () => {
   const modelStatus = document.getElementById('model-status');
   const themeSelect = document.getElementById(OPTIONS_THEME_SELECTOR);
 
+  // Runtime version from the manifest — never a hardcoded (stale) string.
+  const versionEl = document.getElementById('ext-version');
+  try {
+    if (versionEl) versionEl.textContent = `v${chrome.runtime.getManifest().version}`;
+  } catch { /* manifest unavailable in tests */ }
+
+  // Token show/hide — the password field hides the secret from shoulder-surfers
+  // but users need to verify a pasted token.
+  const tokenToggle = document.getElementById('token-toggle');
+  if (tokenToggle) {
+    tokenToggle.addEventListener('click', () => {
+      const show = tokenInput.type === 'password';
+      tokenInput.type = show ? 'text' : 'password';
+      tokenToggle.textContent = show ? 'Hide' : 'Show';
+      tokenToggle.title = show ? 'Hide token' : 'Show token';
+    });
+  }
+
+  // Unsaved-changes dirty tracking. The form saves ONLY on submit, but two
+  // controls autosave (model select, quick-action rows) — mark them so they
+  // don't falsely flag the form as dirty.
+  let dirtyEls = [];
+  const markDirty = () => {
+    if (dirtyEls.length) return;
+    dirtyEls = [...form.querySelectorAll('button[type="submit"]')];
+    dirtyEls.forEach((b) => b.classList.add('save-dirty'));
+    if (statusMsg && !statusMsg.textContent) {
+      statusMsg.textContent = 'Unsaved changes — remember to Save Settings.';
+      statusMsg.className = 'inline-status pending';
+    }
+  };
+  const clearDirty = () => {
+    dirtyEls.forEach((b) => b.classList.remove('save-dirty'));
+    dirtyEls = [];
+  };
+  form.addEventListener('input', (e) => {
+    if (e.target.closest('#quick-actions-list') || e.target.id === 'model') return; // autosave controls
+    markDirty();
+  });
+  form.addEventListener('change', (e) => {
+    if (e.target.closest('#quick-actions-list') || e.target.id === 'model') return;
+    markDirty();
+  });
+
   // Persona field (the Mode is chosen in the side panel; here we only pin the
   // default persona that executes requests).
   const personaSelect = document.getElementById('persona-select');
@@ -53,6 +97,42 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Theme selector
   if (themeSelect) {
     themeSelect.addEventListener('change', () => applyOptionsTheme(themeSelect.value));
+  }
+
+  // ── Section tabs: one pane visible at a time (no page-long scroll) ──
+  // Each .settings-tab shows its .tab-pane and hides the others; the last
+  // visited tab persists in localStorage so reopening Settings lands where
+  // you left off. Deep links (#card-*) still work: a matching card's pane
+  // is activated.
+  const nav = document.getElementById('settings-nav');
+  if (nav) {
+    const tabs = [...nav.querySelectorAll('.settings-tab')];
+    const activate = (paneId, save = true) => {
+      const pane = document.getElementById(paneId);
+      if (!pane) return false;
+      for (const t of tabs) t.classList.toggle('active', t.dataset.pane === paneId);
+      for (const p of document.querySelectorAll('.tab-pane')) p.hidden = p.id !== paneId;
+      if (save) { try { localStorage.setItem('cobrowse_settings_tab', paneId); } catch { /* storage unavailable */ } }
+      return true;
+    };
+    for (const t of tabs) t.addEventListener('click', () => activate(t.dataset.pane));
+    // Same-document #card-* navigations (hash clicks/updates after load).
+    window.addEventListener('hashchange', () => {
+      if (!location.hash.startsWith('#card-')) return;
+      const card = document.querySelector(location.hash);
+      const pane = card && card.closest('.tab-pane');
+      if (pane) activate(pane.id, false);
+    });
+    // A #card-* deep link (e.g. from an old bookmark) opens that card's pane.
+    if (location.hash.startsWith('#card-')) {
+      const card = document.querySelector(location.hash);
+      const pane = card && card.closest('.tab-pane');
+      if (pane) activate(pane.id, false);
+    } else {
+      let initial = 'pane-connection';
+      try { initial = localStorage.getItem('cobrowse_settings_tab') || initial; } catch { /* storage unavailable */ }
+      if (!activate(initial, false)) activate('pane-connection', false);
+    }
   }
 
   // Quick Actions management
@@ -93,7 +173,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     chrome.storage.sync.get([
       'zoModel', 'zoPersonaId',
       'zoQuickActions',
-      'zoTtsLang', 'zoTtsRate', 'zoTtsAutoRead', 'enabledMenus', 'enableScreenshots'
+      'zoTtsLang', 'zoTtsRate', 'zoTtsAutoRead', 'enabledMenus', 'enableScreenshots', 'enableWriteAssist'
     ], (syncResult) => {
       const token = localResult.zoAccessToken;
       const spaceEndpoint = localResult.zoSpaceEndpoint;
@@ -120,6 +200,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Restore screenshot toggle
       const screenshotsCheck = document.getElementById('enable-screenshots');
       if (screenshotsCheck) screenshotsCheck.checked = syncResult.enableScreenshots !== false;
+
+      // Restore write-assist toggle
+      const writeAssistCheck = document.getElementById('enable-write-assist');
+      if (writeAssistCheck) writeAssistCheck.checked = syncResult.enableWriteAssist !== false;
     });
   });
 
@@ -188,6 +272,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         zoTtsRate: (document.getElementById('tts-rate')?.value || '1.0').trim(),
         zoTtsAutoRead: !!(document.getElementById('tts-auto-read')?.checked),
         enableScreenshots: !!(document.getElementById('enable-screenshots')?.checked),
+        enableWriteAssist: !!(document.getElementById('enable-write-assist')?.checked),
       enabledMenus: {
         page: document.getElementById('menu-ask-page')?.checked ?? true,
         selection: document.getElementById('menu-ask-selection')?.checked ?? true,
@@ -197,6 +282,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }, () => {
         statusMsg.textContent = '✅ Saved!';
         statusMsg.className = 'inline-status ok';
+        clearDirty();
         setTimeout(() => { statusMsg.textContent = ''; statusMsg.className = 'inline-status'; }, 3000);
       });
     });
@@ -254,7 +340,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     resetBtn.addEventListener('click', () => {
       if (!confirm('Reset all Zo Co-browse settings to defaults? This clears your token, endpoint, model, and preferences on this device.')) return;
       // Sensitive (local) + non-sensitive (sync) keys are cleared together.
-      const syncKeys = ['zoModel', 'zoPersonaId', 'zoActiveMode', 'zoQuickActions', 'zoTtsLang', 'zoTtsRate', 'zoTtsAutoRead', 'enabledMenus', 'enableScreenshots', 'cobrowse_theme'];
+      const syncKeys = ['zoModel', 'zoPersonaId', 'zoActiveMode', 'zoQuickActions', 'zoTtsLang', 'zoTtsRate', 'zoTtsAutoRead', 'enabledMenus', 'enableScreenshots', 'enableWriteAssist', 'cobrowse_theme'];
       const localKeys = ['zoAccessToken', 'zoSpaceEndpoint', 'cobrowse_mode_overrides'];
       Promise.all([
         new Promise((r) => chrome.storage.sync.remove(syncKeys, r)),

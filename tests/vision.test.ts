@@ -1,4 +1,5 @@
 import { describe, it, expect } from "bun:test";
+import { ModelCatalogSchema, VisionSuggestionSchema } from "./schemas/vision.js";
 import {
   CATALOG_TTL_MS,
   VISION_FIELD,
@@ -13,6 +14,13 @@ const CATALOG = [
   { model_name: "text-only", label: "Text Only", vendor: "vendor", [VISION_FIELD]: false },
   { model_name: "vision-pro", label: "Vision Pro", vendor: "vendor", [VISION_FIELD]: true },
   { model_name: "mystery", label: "Mystery", vendor: "vendor" }, // no supports_images field
+];
+
+// /models/catalog entries are keyed on `value` (public identifier) with no
+// model_name field — verified against the live API + openapi baseline.
+const CATALOG_BY_VALUE = [
+  { value: "zo:vendor/text-only", label: "Text Only", [VISION_FIELD]: false },
+  { value: "zo:vendor/vision-pro", label: "Vision Pro", [VISION_FIELD]: true },
 ];
 
 describe("vision gating — constants", () => {
@@ -34,6 +42,21 @@ describe("findModelEntry", () => {
     expect(findModelEntry(CATALOG, "nonexistent")).toBeNull();
     expect(findModelEntry(null, "vision-pro")).toBeNull();
     expect(findModelEntry([], "vision-pro")).toBeNull();
+  });
+  it("matches value-keyed catalog entries (/models/catalog shape)", () => {
+    expect(findModelEntry(CATALOG_BY_VALUE, "zo:vendor/vision-pro")?.label).toBe("Vision Pro");
+    expect(findModelEntry(CATALOG_BY_VALUE, "zo:vendor/text-only")?.label).toBe("Text Only");
+    expect(findModelEntry(CATALOG_BY_VALUE, "zo:vendor/missing")).toBeNull();
+  });
+  it("gates capture on value-keyed entries too", () => {
+    expect(shouldCaptureScreenshot(CATALOG_BY_VALUE[1], { tier: 3, enableScreenshots: true })).toBe(true);
+    expect(shouldCaptureScreenshot(CATALOG_BY_VALUE[0], { tier: 3, enableScreenshots: true })).toBe(false);
+  });
+  it("suggests a model using value when model_name is absent", () => {
+    const s = visionModelSuggestion(CATALOG_BY_VALUE, "zo:vendor/text-only");
+    expect(s.kind).toBe("suggest");
+    expect(s.suggestedModel).toBe("zo:vendor/vision-pro");
+    expect(s.suggestedLabel).toBe("Vision Pro");
   });
 });
 
@@ -112,5 +135,30 @@ describe("visionModelSuggestion", () => {
     expect(s.kind).toBe("warn");
     expect(s.currentModel).toBe("text");
     expect(s).not.toHaveProperty("suggestedModel");
+  });
+});
+
+// ---- schema conformance (tests/schemas/vision.ts) ----
+
+describe("vision — schema conformance", () => {
+  it("the CATALOG fixture satisfies ModelCatalogSchema (live upstream shape)", () => {
+    const parsed = ModelCatalogSchema.safeParse(CATALOG);
+    if (!parsed.success) throw new Error(`CATALOG fixture failed schema:\n${parsed.error.message}`);
+  });
+
+  it("every visionModelSuggestion output satisfies the discriminated union", () => {
+    const inputs: Array<[unknown, string]> = [
+      [CATALOG, "text-only"],
+      [CATALOG, ""],
+      [CATALOG, null],
+      [{ model_name: "text", label: "Text", supports_images: false }, "text"],
+      [null, "anything"],
+    ];
+    for (const [catalog, model] of inputs) {
+      const s = visionModelSuggestion(catalog as never, model as string);
+      if (s === null) continue;
+      const parsed = VisionSuggestionSchema.safeParse(s);
+      if (!parsed.success) throw new Error(`suggestion(${model}) failed schema:\n${parsed.error.message}`);
+    }
   });
 });

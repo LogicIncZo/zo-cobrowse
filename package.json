@@ -15,6 +15,9 @@
     "check-prereqs": "bash scripts/check-release.sh",
     "lint": "bash scripts/check-release.sh",
     "verify": "bash scripts/verify.sh",
+    "check:drift": "bun scripts/zo-drift/check.ts",
+    "evals": "bun scripts/prompt-evals/run.ts",
+    "evals:live": "bun --env-file=.env scripts/prompt-evals/run.ts --live",
     "setup-hooks": "bash scripts/install-hooks.sh",
     "capture:prompts": "bun --env-file=.env tests/test-prompts/capture.ts",
     "package": "cd extension && zip -r ../zo-cobrowse.zip . -x '*.git*' -x '*.DS_Store'"

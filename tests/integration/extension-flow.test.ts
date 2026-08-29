@@ -29,7 +29,7 @@ import { describe, it, expect, beforeAll } from "bun:test";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 import { Window } from "happy-dom";
-import { createFakeChrome, createTabTarget, stubNonZeroRects, waitUntil } from "../helpers/chrome-mock.ts";
+import { createFakeChrome, createTabTarget, stubNonZeroRects, waitUntil, FakeEvent } from "../helpers/chrome-mock.ts";
 import { ZoFetchMock, MOCK_ZO_TOKEN, sseResponse, sseEvent, deferredSse, zoSseText, jsonResponse } from "../helpers/zo-fetch-mock.ts";
 
 const PANEL_HTML = readFileSync(resolve(import.meta.dir, "../../extension/sidepanel.html"), "utf-8")
@@ -527,6 +527,11 @@ describe("vision-gated screenshots (#25)", () => {
       }, 15000);
       // The vision gate suppressed the screenshot capture.
       expect(screenshotCalls).toBe(0);
+      // No 📷 chip on the assistant footer, and nothing persisted either —
+      // the flag tracks the REAL attachment, not the tier intent.
+      expect(panelWin.document.querySelector(".msg-footer-shot")).toBeNull();
+      const convs: any[] = Object.values(bus.storage.local._store.cobrowse_convos || {});
+      expect(convs.flatMap((c: any) => c.messages || []).some((m: any) => m.role === "assistant" && m.screenshot)).toBe(false);
     } finally {
       bus.tabs.captureVisibleTab = origCapture;
       await bus.storage.sync.set({ zoModel: "trio-model", zoActiveMode: "cobrowse" });
@@ -568,6 +573,206 @@ describe("vision-gated screenshots (#25)", () => {
       // prompt builder only includes it when effectiveTier >= 3. Assert on
       // the capture count (the gate's direct effect) rather than the prompt
       // body, which is thinned independently by the context-policy layer.
+      // The 📷 footer chip reflects the same fact the user can see: the
+      // screenshot actually rode this turn's prompt (streaming + persisted).
+      await waitUntil(() => panelWin.document.querySelector(".msg-footer-shot"));
+      const convs: any[] = Object.values(bus.storage.local._store.cobrowse_convos || {});
+      const shotMsg = convs.flatMap((c: any) => c.messages || []).find((m: any) => m.role === "assistant" && m.screenshot);
+      expect(shotMsg).toBeTruthy();
+    } finally {
+      bus.tabs.captureVisibleTab = origCapture;
+      await bus.storage.sync.set({ zoModel: "trio-model", zoActiveMode: "cobrowse" });
+    }
+  }, 30000);
+});
+
+describe("📷 Image toggle — send-once screenshot (#25 UX)", () => {
+  const reinstallCatalogHandler = () => fm.handle((url) => {
+    if (url.includes("/models/available")) return jsonResponse({ models: [{ model_name: "trio-model", label: "Trio Model" }] });
+    if (url.includes("/models/catalog")) return jsonResponse({ models: [
+      { model_name: "trio-model", label: "Trio Model", supports_images: false },
+      { model_name: "vision-model", label: "Vision Model", supports_images: true },
+    ] });
+    if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+    return sseResponse(zoSseText({ text: "It is a test page." }));
+  });
+
+  it("arming flips Mode to Visual and forces tier 3 on the next send only", async () => {
+    reinstallCatalogHandler();
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await waitUntil(() => panelWin.document.querySelector("#messages .msg-system"));
+
+    // Vision-capable model so the gate doesn't suppress the capture.
+    let screenshotCalls = 0;
+    const origCapture = bus.tabs.captureVisibleTab;
+    bus.tabs.captureVisibleTab = () => { screenshotCalls++; return Promise.resolve("data:image/jpeg;base64,/9j/ZmFrZQ=="); };
+    await bus.storage.sync.set({ zoModel: "vision-model", zoActiveMode: "cobrowse" });
+    await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "cobrowse", 5000);
+    await new Promise((r) => setTimeout(r, 50));
+
+    try {
+      // Arm: the toggle flips the Mode dropdown to Visual + highlights.
+      const toggle = panelWin.document.querySelector("#shot-toggle");
+      toggle.click();
+      expect(toggle.getAttribute("aria-pressed")).toBe("true");
+      await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "visual", 5000);
+      // Inspector mirrors the force BEFORE the send (preview = send).
+      await waitUntil(() => panelWin.document.querySelector("#prompt-inspector-meta")?.textContent?.includes("Screenshot"), 5000);
+
+      // Send (a read query — without the toggle the policy would pick tier 0).
+      const box = armAskCapture();
+      await typeAndSend("what color is the shirt?");
+      await waitUntil(() => box.msg != null, 8000);
+      expect(box.msg.effectiveTier).toBe(3); // forced by the toggle
+      expect(box.msg.modeId).toBe("visual");
+      expect(String(box.msg.pageContext.screenshotDataUrl || "")).toMatch(/^data:image/);
+      expect(screenshotCalls).toBeGreaterThanOrEqual(1);
+
+      // The user message shows the 📷 Screenshot pill…
+      await waitUntil(() => {
+        const pills = [...panelWin.document.querySelectorAll("#messages .msg-user")].flatMap((el) =>
+          [...el.querySelectorAll(".msg-mention")].map((p) => p.textContent || ""));
+        return pills.some((t) => t.includes("Screenshot"));
+      }, 10000);
+      // …the assistant footer carries the truthful 📷 chip…
+      await waitUntil(() => panelWin.document.querySelector(".msg-footer-shot"), 15000);
+      // …and the toggle auto-cleared (send-once). Mode STAYS Visual — the
+      // user sees it in the dropdown; nothing hides.
+      expect(toggle.getAttribute("aria-pressed")).toBe("false");
+
+      // The NEXT send is not forced: same page read turn → back to tier 0.
+      const box2 = armAskCapture();
+      await typeAndSend("and now just summarize");
+      await waitUntil(() => box2.msg != null, 8000);
+      expect(box2.msg.effectiveTier).toBeLessThan(3);
+    } finally {
+      bus.tabs.captureVisibleTab = origCapture;
+      await bus.storage.sync.set({ zoModel: "trio-model", zoActiveMode: "cobrowse" });
+    }
+  }, 30000);
+
+  it("unchecking before send restores the previous Mode and forces nothing", async () => {
+    reinstallCatalogHandler();
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await waitUntil(() => panelWin.document.querySelector("#messages .msg-system"));
+
+    await bus.storage.sync.set({ zoModel: "vision-model", zoActiveMode: "cobrowse" });
+    await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "cobrowse", 5000);
+    await new Promise((r) => setTimeout(r, 50));
+
+    const toggle = panelWin.document.querySelector("#shot-toggle");
+    toggle.click();
+    await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "visual", 5000);
+    toggle.click(); // cancel
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "cobrowse", 5000);
+
+    // A manual Mode change while armed drops the restore memory (the user
+    // owns the Mode then): arm, hand-switch to extract, disarm → no bounce.
+    toggle.click();
+    await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "visual", 5000);
+    const ms = panelWin.document.querySelector("#mode-select");
+    ms.value = "extract";
+    ms.dispatchEvent(new panelWin.Event("change", { bubbles: true }));
+    await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "extract", 5000);
+    toggle.click(); // disarm — must NOT restore cobrowse over the manual pick
+    expect(panelWin.document.querySelector("#mode-select").value).toBe("extract");
+    await bus.storage.sync.set({ zoActiveMode: "cobrowse" });
+    await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "cobrowse", 5000);
+  }, 30000);
+
+  it("capture failure: no 📷 pill, honest system warning, no chip, no persistence", async () => {
+    reinstallCatalogHandler();
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await waitUntil(() => panelWin.document.querySelector("#messages .msg-system"));
+
+    // Vision-capable model so the GATE passes; the capture itself rejects —
+    // the exact permission error the pre-<all_urls> manifest produced on
+    // real Chrome (captureVisibleTab requires <all_urls> or activeTab).
+    const origCapture = bus.tabs.captureVisibleTab;
+    bus.tabs.captureVisibleTab = () =>
+      Promise.reject(new Error("Either the '<all_urls>' or 'activeTab' permission is required."));
+    await bus.storage.sync.set({ zoModel: "vision-model", zoActiveMode: "cobrowse" });
+    await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "cobrowse", 5000);
+    await new Promise((r) => setTimeout(r, 50));
+
+    try {
+      const toggle = panelWin.document.querySelector("#shot-toggle");
+      toggle.click();
+      await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "visual", 5000);
+
+      const box = armAskCapture();
+      // Unique query text: the persistence assertions below scope to THIS
+      // conversation — other tests in the file legitimately persist
+      // screenshot:true records that must not leak into the check.
+      await typeAndSend("what color is the bow tie?");
+      await waitUntil(() => box.msg != null, 8000);
+      // Forced tier 3, but the background recorded WHY nothing shipped.
+      expect(box.msg.effectiveTier).toBe(3);
+      expect(String(box.msg.pageContext.screenshotError || "")).toContain("<all_urls>");
+      expect(box.msg.pageContext.screenshotDataUrl).toBeUndefined();
+
+      // No 📷 Screenshot pill on the user bubble — intent ≠ attachment.
+      const pills: string[] = [];
+      for (const el of panelWin.document.querySelectorAll("#messages .msg-user .msg-mention")) {
+        pills.push(el.textContent || "");
+      }
+      expect(pills.some((t) => t.includes("Screenshot"))).toBe(false);
+      // An honest system warning names the failure instead.
+      let warned = false;
+      for (const el of panelWin.document.querySelectorAll("#messages .msg-system")) {
+        if ((el.textContent || "").includes("Screenshot did not ride this turn")) warned = true;
+      }
+      expect(warned).toBe(true);
+
+      // Turn completes: no 📷 footer chip, nothing persisted as a screenshot.
+      await waitUntil(() => {
+        const convs: any[] = Object.values(bus.storage.local._store.cobrowse_convos || {});
+        return convs.some((c: any) => (c.messages || []).some((m: any) => m.role === "assistant"));
+      }, 15000);
+      await new Promise((r) => setTimeout(r, 200));
+      expect(panelWin.document.querySelector(".msg-footer-shot")).toBeNull();
+      const convs: any[] = Object.values(bus.storage.local._store.cobrowse_convos || {});
+      const thisConv: any = convs.find((c: any) =>
+        (c.messages || []).some((m: any) => m.role === "user" && (m.text || "").includes("bow tie")));
+      expect(thisConv).toBeTruthy();
+      expect((thisConv.messages || []).some((m: any) => m.role === "assistant" && m.screenshot)).toBe(false);
+    } finally {
+      bus.tabs.captureVisibleTab = origCapture;
+      await bus.storage.sync.set({ zoModel: "trio-model", zoActiveMode: "cobrowse" });
+    }
+  }, 30000);
+
+  it("vision-gate skip on an armed toggle also surfaces the model reason", async () => {
+    reinstallCatalogHandler();
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await waitUntil(() => panelWin.document.querySelector("#messages .msg-system"));
+
+    // Non-vision model + armed toggle: the gate suppresses the capture AND
+    // the user is told it was the model, not silent text-only degradation.
+    const origCapture = bus.tabs.captureVisibleTab;
+    let screenshotCalls = 0;
+    bus.tabs.captureVisibleTab = () => { screenshotCalls++; return Promise.resolve("data:image/jpeg;base64,/9j/ZmFrZQ=="); };
+    await bus.storage.sync.set({ zoModel: "trio-model", zoActiveMode: "cobrowse" });
+    await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "cobrowse", 5000);
+    await new Promise((r) => setTimeout(r, 50));
+
+    try {
+      const toggle = panelWin.document.querySelector("#shot-toggle");
+      toggle.click();
+      await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "visual", 5000);
+
+      const box = armAskCapture();
+      await typeAndSend("what color is the shirt?");
+      await waitUntil(() => box.msg != null, 8000);
+      expect(box.msg.effectiveTier).toBe(3);
+      expect(String(box.msg.pageContext.screenshotError || "")).toContain("support images");
+      expect(screenshotCalls).toBe(0);
+      let warned = false;
+      for (const el of panelWin.document.querySelectorAll("#messages .msg-system")) {
+        if ((el.textContent || "").includes("Screenshot did not ride this turn")) warned = true;
+      }
+      expect(warned).toBe(true);
     } finally {
       bus.tabs.captureVisibleTab = origCapture;
       await bus.storage.sync.set({ zoModel: "trio-model", zoActiveMode: "cobrowse" });
@@ -644,4 +849,184 @@ describe("form-fill review card (#26)", () => {
     expect(rows.length).toBeGreaterThanOrEqual(2);
     expect(rows.every((r) => !!r.closest(".action-card-fill_form"))).toBe(true);
   }, 30000);
+});
+
+// Write-assist (feature/textarea-fill) — the first CONTENT-initiated message.
+// A dedicated content.js instance (rich chrome: storage + sendMessage routed to
+// the bus) drives ENHANCE_TEXT through the REAL background one-shot handler to
+// the Zo fetch mock, asserting the wire request is threadless and the enhanced
+// text round-trips back into the popover preview.
+describe("write-assist ENHANCE_TEXT round-trip (content → background → Zo)", () => {
+  it("enhances a textarea lead via the real background one-shot (no conversation_id)", async () => {
+    // Superset handler: write-assist marker → JSON one-shot; else beforeAll defaults.
+    fm.handle((url, _init, req) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [{ model_name: "trio-model", label: "Trio Model" }] });
+      if (url.includes("/models/catalog")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      const input = req.body && req.body.input != null ? String(req.body.input) : "";
+      if (input.includes("write-assist")) {
+        // Narration + tagged final text, mirroring Zo's live agent-turn shape —
+        // the popover must preview ONLY the tag content.
+        return jsonResponse({
+          output: "Let me quickly ground this in the data model before expanding.\n<write-assist>ENHANCED BY ZO</write-assist>\nRan command: cat AGENTS.md",
+          conversation_id: "conv_enhance_x",
+        });
+      }
+      return sseResponse(zoSseText({ text: "It is a test page." }));
+    });
+
+    const waWin: any = new Window({ url: "https://jobs.example.test/apply" });
+    waWin.document.write(`<!DOCTYPE html><html><head><title>Job Application</title></head><body>
+      <label for="proj">Describe your project</label>
+      <textarea id="proj" maxlength="500">Led migration of 40 dashboards</textarea>
+    </body></html>`);
+    stubNonZeroRects(waWin);
+    const waChrome = {
+      runtime: {
+        onMessage: new FakeEvent(),
+        sendMessage: (msg: any) => bus.runtime.sendMessage(msg), // content → background
+        getURL: (p: string) => `chrome-extension://test-extension-id/${p}`,
+      },
+      storage: bus.storage,
+    };
+    loadContentScript(waWin, waChrome);
+    const tick = () => new Promise((r) => setTimeout(r, 10));
+    await tick(); // let the storage.get callback set waEnabled
+
+    const ta = waWin.document.querySelector("#proj");
+    ta.focus();
+    await tick();
+    const host = waWin.document.getElementById("zo-write-assist-host");
+    expect(host).toBeTruthy();
+    const root = host.shadowRoot;
+    root.querySelector(".zo-wa-icon").click();
+    await tick();
+    const pop = root.querySelector(".zo-wa-pop");
+    [...pop.querySelectorAll("button")].find((b: any) => b.textContent === "Enhance").click();
+    await waitUntil(() => !!pop.querySelector(".zo-wa-result"), 5000);
+    expect(pop.querySelector(".zo-wa-result").textContent).toBe("ENHANCED BY ZO");
+
+    // The wire request: a one-shot /zo/ask carrying the marker + lead, with NO
+    // conversation_id (fresh thread — never rotates the ambient thread).
+    const enhanceReqs = fm.to("/zo/ask").filter((r) => String(r.body?.input || "").includes("write-assist"));
+    expect(enhanceReqs.length).toBeGreaterThanOrEqual(1);
+    const req = enhanceReqs[enhanceReqs.length - 1];
+    expect(req.body.conversation_id).toBeUndefined();
+    expect(req.body.input).toContain("<write-assist>");       // tag protocol shipped
+    expect(req.body.input).toMatch(/do not use tools/i);      // one-shot, not an agent turn
+    expect(req.body.input).toContain("Led migration of 40 dashboards");
+    expect(req.body.input).toContain("Describe your project");
+    expect(req.headers.authorization).toBe(`Bearer ${MOCK_ZO_TOKEN}`);
+  }, 30000);
+});
+
+// ---- UX + context-transparency round (footer context chip, follow-up
+// excerpt dedup, code-copy buttons, empty-state starter chips) ----
+
+function newChat(): void {
+  (panelWin.document.querySelector("#new-chat-btn") as any).click();
+}
+
+async function waitTurnComplete(): Promise<void> {
+  await waitUntil(() => !(panelWin.document.querySelector("#query-input") as any).disabled, 10000);
+}
+
+describe("ux — empty-state starter chips", () => {
+  it("offers starter chips on a fresh chat and prefills the composer on click", async () => {
+    newChat();
+    await waitUntil(() => panelWin.document.querySelector(".empty-state-chip"));
+    const chips = panelWin.document.querySelectorAll(".empty-state-chip");
+    expect(chips.length).toBe(4);
+    (chips[1] as any).click();
+    expect((panelWin.document.querySelector("#query-input") as any).value).toContain("!context");
+  });
+});
+
+describe("ux — follow-up excerpt dedup + footer context chip", () => {
+  it("sends the T1 excerpt once, then pointer-only on the same-page follow-up; footer shows the tier", async () => {
+    newChat();
+    await waitUntil(() => panelWin.document.querySelector(".empty-state-chip"));
+
+    // Turn 1 (read → tier 0 → auto-T1 rides WITH its excerpt, dedup records it)
+    const box1 = armAskCapture();
+    await typeAndSend("What is this page about?");
+    await waitUntil(() => box1.msg != null, 8000);
+    expect(box1.msg.effectiveTier).toBe(0);
+    await waitTurnComplete();
+    const req1 = fm.to("/zo/ask")[fm.to("/zo/ask").length - 1];
+    expect(req1.body.input).toContain("## Referenced Tabs");
+    expect(req1.body.input).toContain("Excerpt:");
+    // Footer context chip: read turn → URL only
+    const bubbles = panelWin.document.querySelectorAll("#messages .msg-assistant");
+    const chip = bubbles[bubbles.length - 1].querySelector(".msg-footer-context");
+    expect(chip).toBeTruthy();
+    expect(chip.textContent).toContain("URL only");
+
+    // Turn 2 (same page → T1 thinned to a pointer line; excerpt NOT re-sent)
+    const box2 = armAskCapture();
+    await typeAndSend("And what does the form do?");
+    await waitUntil(() => box2.msg != null, 8000);
+    await waitTurnComplete();
+    const req2 = fm.to("/zo/ask")[fm.to("/zo/ask").length - 1];
+    expect(req2.body.input).toContain("## Referenced Tabs");
+    expect(req2.body.input).toContain("already provided above");
+    expect(req2.body.input).not.toContain("Excerpt:");
+
+    // The dedup record persists with the per-chat context state.
+    const sessionStore = (bus.storage.session as any)?._store || {};
+    const states = Object.entries(sessionStore).filter(([k]) => String(k).startsWith("cobrowse_ctx_state:"));
+    const sentMap = (states[0]?.[1] as any)?.tabManifestSent;
+    expect(sentMap && Object.keys(sentMap).length > 0).toBe(true);
+  }, 25000);
+});
+
+describe("ux — code-block copy button", () => {
+  it("attaches Copy to rendered code blocks and flips the label on click", async () => {
+    newChat();
+    await waitUntil(() => panelWin.document.querySelector(".empty-state-chip"));
+    fm.handle((url) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [{ model_name: "trio-model", label: "Trio Model" }] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      // Realistic two-event stream: PartStart carries the lead, PartDelta the
+      // fenced code block (a single full-text PartStart would hit the
+      // single-chunk DONE branch instead).
+      return sseResponse([
+        sseEvent("PartStartEvent", { index: 1, part: { part_kind: "text", content: "Here is a sample:\n" } }),
+        sseEvent("PartDeltaEvent", { delta: { part_delta_kind: "text", content_delta: "```js\nconsole.log('hello zo');\n```" } }),
+        sseEvent("completed", {}),
+      ].join("\n"));
+    });
+    await typeAndSend("Show me a code sample");
+    await waitUntil(() => panelWin.document.querySelector("#messages .msg-assistant pre .code-copy-btn"), 10000);
+    const btn: any = panelWin.document.querySelector("#messages .msg-assistant pre .code-copy-btn");
+    btn.click();
+    await waitUntil(() => ["Copied ✓", "✕"].includes(btn.textContent), 3000);
+  }, 20000);
+});
+
+describe("ux — history (chat list) snippet + search highlight", () => {
+  it("shows a preview snippet per chat and <mark>-highlights search matches", async () => {
+    // Open the history view over the panel's real conversations (earlier
+    // describes sent real turns, so the active chat has a user message).
+    (panelWin.document.querySelector("#history-btn") as any).click();
+    await waitUntil(() => panelWin.document.querySelector(".history-card"), 5000);
+
+    const card: any = panelWin.document.querySelector(".history-card");
+    const snippet = card.querySelector(".history-card-snippet");
+    expect(snippet).toBeTruthy();
+    expect(snippet.textContent.length).toBeGreaterThan(0);
+
+    // Search: the query matches a snippet/title → <mark> wraps the hit.
+    const search = panelWin.document.querySelector("#history-search") as any;
+    search.value = "page";
+    search.dispatchEvent(new panelWin.Event("input", { bubbles: true }));
+    await waitUntil(() => panelWin.document.querySelector(".history-card mark"), 5000);
+    const marks = [...panelWin.document.querySelectorAll(".history-card mark")] as any[];
+    expect(marks.some((m) => m.textContent.toLowerCase() === "page")).toBe(true);
+
+    // Back to chat view.
+    search.value = "";
+    search.dispatchEvent(new panelWin.Event("input", { bubbles: true }));
+    (panelWin.document.querySelector("#history-btn") as any).click();
+  });
 });

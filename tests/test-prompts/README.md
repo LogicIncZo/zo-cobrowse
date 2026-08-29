@@ -12,7 +12,7 @@ This folder captures **real streaming responses** from the Zo `/zo/ask` API for 
 tests/test-prompts/
 ├── README.md                  ← this file
 ├── qa-notes.md                ← CRITICAL: real Zo SSE protocol findings vs docs
-├── prompts.json               ← catalog of 8 use cases (all 6 builtin modes + both cobrowse intents)
+├── prompts.json               ← catalog of 9 use cases (all 5 builtin modes + both cobrowse intents + both ask phrasings)
 ├── schema.ts                  ← Zod schemas for catalog entries, fixtures, replay results
 ├── capture.ts                 ← bun script: live POST /zo/ask stream:true → saves .sse + .json
 ├── replay.ts                  ← shared harness: .sse bytes → real extractStreamContent/finishStream → STREAM_*
@@ -53,7 +53,7 @@ Requires `ZO_API_KEY` (or `ZO_ACCESS_TOKEN`) in `.env` (gitignored). The script:
 bun test tests/test-prompts/
 ```
 
-- `stream-catalog.test.ts` — `prompts.json` covers all 6 `BUILTIN_MODES` ids + both cobrowse intents; each entry's tier/expectJson matches its Mode.
+- `stream-catalog.test.ts` — `prompts.json` covers all 5 `BUILTIN_MODES` ids + both cobrowse intents; each entry's tier/expectJson matches its Mode.
 - `stream-replay.test.ts` — for every committed `fixtures/*.sse`: validates the event sequence against the Zod schema, replays through the vm-extracted real parsers, and asserts the `STREAM_DONE`/`STREAM_ERROR` contract (no raw-JSON leak, type-first action normalization, reasoning surfaced, cumulative chunk consistency).
 
 CI runs these without a key — the committed fixtures make them deterministic.
