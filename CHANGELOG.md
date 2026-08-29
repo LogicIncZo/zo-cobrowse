@@ -8,6 +8,14 @@ and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added — UX polish + context transparency
+- **📷 Image toggle (send-once screenshot)** — a chip at the end of the tab
+  strip arms ONE turn with a page screenshot: no `!context` prefix, no Mode
+  hunting. Arming flips the MODE dropdown to Visual (unchecking before send
+  restores it); the send forces tier 3, shows a 📷 Screenshot pill on the
+  user bubble, then auto-clears the toggle (Mode stays Visual). The prompt
+  inspector mirrors the force before sending, and the capture itself stays
+  truthful (the vision gate can still skip a non-vision model; the 📷 footer
+  chip only lights when pixels actually rode the turn).
 - **Context-tier chip on every assistant footer** — 🔗 URL only / 📝 Text /
   🧩 Elements / 📷 Screenshot, tooltip = the context-policy decision reason;
   persisted on the message so history re-renders keep it. Makes the per-turn
@@ -41,9 +49,11 @@ and this project uses [Semantic Versioning](https://semver.org/).
   active Mode instead of the turn's (bang-overridden) mode.
 
 ### Added — settings + chat-list usability
-- **Settings section nav** — sticky chip nav (Connection / Persona & Model /
-  Prompts / Features / Speech / Menus / Actions / About) on the ~12-card
-  options page.
+- **Settings tabbed UI** — the section-nav chips became real tabs
+  (Connection / Model & Persona / Prompts / Features / Actions / About): one
+  pane visible at a time, no page-long scroll. The last tab persists across
+  visits; `#card-*` deep links still land on the right pane (hash clicks
+  included); Save stays visible below the panes.
 - **Token Show/Hide** — reveal button on the access-token field.
 - **Fixed status toast** — Save feedback used to render at the very bottom of
   the page, invisible from the Save button; now a fixed toast.

@@ -23,6 +23,13 @@ Copy / mode / model / time / feedback controls.
   a **context-tier chip** (🔗 URL only / 📝 Text / 🧩 Elements / 📷 Screenshot)
   showing exactly how much page context that turn sent — hover for the
   policy's reason.
+- **📷 Image toggle** — the chip at the end of the tab strip (next to the
+  composer) arms **one** turn with a page screenshot: no `!context` prefix, no
+  mode hunting. Arming flips the MODE dropdown to Visual (unchecking before
+  you send restores it); the next send attaches the screenshot — and a 📷
+  Screenshot pill on your message — then the toggle switches itself off.
+  The capture is honest: if the selected model can't take images, Zo's footer
+  📷 chip stays off.
 - **⬇ Latest pill** — appears when the chat log is scrolled away from the
   bottom; click to snap back.
 - **Cancel** — press `Esc` while Zo is responding to interrupt the stream.
@@ -124,6 +131,10 @@ active tab at a **tier** determined by the active mode:
 Co-browse (the default) runs at tier 2, so Zo gets clickable elements and form
 fields with selectors to act on. The Visual mode runs at tier 3. See
 [Modes](../guide/modes) for the full mapping.
+
+**Want pixels on a specific turn?** Arm the 📷 Image toggle by the composer
+(it flips the Mode to Visual and forces tier 3 for that one send) or type
+`!context <question>` in Visual mode.
 
 **Follow-ups are cheap by design.** Within a conversation, full context is
 attached at most once per stable page — same-page follow-ups send the URL/title
