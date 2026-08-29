@@ -61,6 +61,15 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - **⬇ Latest pill** — appears when the chat log is scrolled away from the
   bottom (e.g. while reading during a stream); clicks snap back.
 
+### Added — debug mode + perf baseline (#67)
+- Settings → **Debug & Diagnostics**: a toggle that turns on a metadata-only timing ring in the
+  background (message hops, capture durations, stream durations — capped at 500 events) plus a
+  **Copy diagnostics** export for bug reports. Privacy enforced in `lib/debug-log.js`: scalar
+  extras only, strings truncated, never page text/prompts/tokens; disabling clears the buffer.
+- `docs/qa/perf-baseline.md`: the evidence-first baseline — prompt/policy compute measured at
+  microseconds (not worth optimizing), the real costs named (SW cold start, message hops, stream
+  latency) with an on-device measurement recipe using the new instrument.
+
 ### Fixed — 📷 screenshots never reached Zo on real Chrome
 - **`<all_urls>` host permission**: `chrome.tabs.captureVisibleTab` requires the literal
   `<all_urls>` pattern (or an activeTab gesture) — the manifest's scoped wildcards

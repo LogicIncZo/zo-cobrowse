@@ -26,6 +26,8 @@ export const MESSAGE_TYPES = [
   "LIST_AUTOMATIONS",  "DUCKDB_QUERY",
   "NEW_CONVERSATION",
   "RECREATE_CONTEXT_MENUS",
+  "GET_DEBUG_LOG",
+  "CLEAR_DEBUG_LOG",
 ] as const;
 
 export const MessageType = z.enum(MESSAGE_TYPES);

@@ -32,6 +32,49 @@ function applyOptionsTheme(theme) {
   chrome.storage.sync.set({ [THEME_STORAGE_KEY]: theme });
 }
 
+// ---- Debug diagnostics (#67) ----
+// The background records metadata-only timings while debugMode is on; this
+// exports them via clipboard (nothing leaves the browser otherwise).
+async function refreshDebugControls(on) {
+  const btn = document.getElementById('copy-diagnostics');
+  const status = document.getElementById('debug-status');
+  if (!btn) return;
+  btn.disabled = !on;
+  if (!on) {
+    if (status) status.textContent = '';
+    return;
+  }
+  try {
+    const resp = await chrome.runtime.sendMessage({ type: 'GET_DEBUG_LOG' });
+    if (status) {
+      status.textContent = resp && Array.isArray(resp.entries)
+        ? `${resp.entries.length} event(s) recorded${resp.dropped ? ` · ${resp.dropped} dropped (ring full)` : ''}`
+        : '';
+    }
+  } catch { /* background unavailable */ }
+}
+
+async function copyDiagnostics() {
+  const status = document.getElementById('debug-status');
+  const btn = document.getElementById('copy-diagnostics');
+  try {
+    const resp = await chrome.runtime.sendMessage({ type: 'GET_DEBUG_LOG' });
+    const text = JSON.stringify({
+      exportedAt: new Date().toISOString(),
+      userAgent: navigator.userAgent,
+      version: chrome.runtime.getManifest().version,
+      ...resp,
+    }, null, 2);
+    await navigator.clipboard.writeText(text);
+    if (btn) btn.textContent = '✅ Copied';
+    if (status) status.textContent = `Copied ${resp?.entries?.length ?? 0} event(s) — paste into your bug report.`;
+  } catch (err) {
+    if (status) status.textContent = `Export failed: ${err?.message || err}`;
+  } finally {
+    setTimeout(() => { if (btn) btn.textContent = '📋 Copy diagnostics'; }, 2000);
+  }
+}
+
 // ---- Init ----
 document.addEventListener('DOMContentLoaded', async () => {
   loadOptionsTheme();
@@ -204,6 +247,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Restore write-assist toggle
       const writeAssistCheck = document.getElementById('enable-write-assist');
       if (writeAssistCheck) writeAssistCheck.checked = syncResult.enableWriteAssist !== false;
+
+      // Debug diagnostics (#67)
+      const debugCheck = document.getElementById('debug-mode');
+      if (debugCheck) debugCheck.checked = !!syncResult.debugMode;
+      refreshDebugControls(!!syncResult.debugMode);
     });
   });
 
@@ -212,6 +260,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     const token = tokenInput.value.trim();
     if (token) populateModels(token, getModelValue());
   });
+
+  // Debug diagnostics (#67): apply immediately (the ring is cheap + local),
+  // and also persist via the normal Save mapping.
+  document.getElementById('debug-mode')?.addEventListener('change', (e) => {
+    const on = !!e.target.checked;
+    chrome.storage.sync.set({ debugMode: on });
+    refreshDebugControls(on);
+  });
+  document.getElementById('copy-diagnostics')?.addEventListener('click', copyDiagnostics);
 
   // Quick Actions live editing
   document.getElementById('quick-actions-list')?.addEventListener('input', (e) => {
@@ -273,6 +330,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         zoTtsAutoRead: !!(document.getElementById('tts-auto-read')?.checked),
         enableScreenshots: !!(document.getElementById('enable-screenshots')?.checked),
         enableWriteAssist: !!(document.getElementById('enable-write-assist')?.checked),
+        debugMode: !!(document.getElementById('debug-mode')?.checked),
       enabledMenus: {
         page: document.getElementById('menu-ask-page')?.checked ?? true,
         selection: document.getElementById('menu-ask-selection')?.checked ?? true,

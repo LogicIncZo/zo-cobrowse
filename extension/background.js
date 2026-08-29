@@ -67,6 +67,7 @@ import {
   parseSkillsBundle,
   parseLsEntries,
 } from './lib/pickers.js';
+import { createDebugLog } from './lib/debug-log.js';
 
 function safePost(port, msg) {
   if (!port || port._dead) return false;
@@ -251,6 +252,24 @@ function senderTabId(sender) {
   return /^(chrome-extension|chrome|about|edge|devtools):/i.test(url) ? undefined : sender?.tab?.id;
 }
 
+// ---- Debug diagnostics (#67) ----
+// Metadata-only ring buffer (lib/debug-log.js enforces the privacy contract:
+// kinds/labels/durations/small scalar extras — never page text or tokens).
+// Gated by Settings → Features → Debug mode (storage.sync `debugMode`,
+// default OFF); exported only when the user clicks "Copy diagnostics".
+const debugLog = createDebugLog();
+
+function perfNow() {
+  return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+}
+
+try {
+  chrome.storage.sync.get({ debugMode: false }, (res) => debugLog.setEnabled(!!(res && res.debugMode)));
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'sync' && changes.debugMode) debugLog.setEnabled(!!changes.debugMode.newValue);
+  });
+} catch { /* storage unavailable */ }
+
 
 // ---- Init ----
 chrome.storage.sync.get(
@@ -294,7 +313,21 @@ chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => 
 
 // ---- Message handler ----
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  // #67: metadata-only hop record (message type + coarse shape flags — no payloads).
+  debugLog.push('msg', request.type || 'unknown', undefined, {
+    tier: typeof request.effectiveTier === 'number' ? request.effectiveTier : undefined,
+    shotOnly: request.shotOnly === true ? true : undefined,
+  });
   switch (request.type) {
+    case 'GET_DEBUG_LOG': {
+      sendResponse(debugLog.entries());
+      return true;
+    }
+    case 'CLEAR_DEBUG_LOG': {
+      debugLog.clear();
+      sendResponse({ ok: true });
+      return true;
+    }
     case 'GET_PAGE_CONTEXT': {
       getActiveTabContext(senderTabId(sender), request.tier, request.modeId).then(sendResponse);
       return true;
@@ -551,6 +584,15 @@ function makeActionEval(action) {
 
 
 async function getActiveTabContext(tabId, tier, modeId, opts) {
+  const __t0 = perfNow(); // #67 capture-duration telemetry
+  try {
+    return await getActiveTabContextImpl(tabId, tier, modeId, opts);
+  } finally {
+    debugLog.push('capture', opts?.pull ? `capture:${opts.pull}` : 'capture', perfNow() - __t0, { tier });
+  }
+}
+
+async function getActiveTabContextImpl(tabId, tier, modeId, opts) {
   // Normalize the tier. tier 0 = URL/title/viewport only; 1 = +text;
   // 2 = +clickable+forms (with selectors); 3 = +screenshot. Unknown → 2.
   const t = (typeof tier === 'number' && tier >= 0 && tier <= 3) ? tier : 2;
@@ -803,9 +845,12 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onMessage.addListener(async (msg) => {
     switch (msg.type) {
       case 'ASK_ZO': {
+        const __t0 = perfNow(); // #67 stream-duration telemetry
         try {
           await askZoStream(port, msg);
+          debugLog.push('stream', 'askZoStream:done', perfNow() - __t0, { tier: msg.effectiveTier });
         } catch (err) {
+          debugLog.push('stream', 'askZoStream:error', perfNow() - __t0, { tier: msg.effectiveTier });
           // Final failure after retries (or a non-retriable error). Only try
           // to surface it if the port is still alive.
           safePost(port, { sessionId: msg.sessionId, type: 'STREAM_ERROR', error: `Failed: ${err.message}` });
