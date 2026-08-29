@@ -1,5 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { detectIntent, shouldDowngradeToJsonDisabled, looksLikeActionJson } from "../extension/lib/intent.js";
+import { DowngradeDecisionSchema, IntentSchema } from "./schemas/intent.js";
 
 /**
  * Pure-logic tests for the Co-browse intent downgrade.
@@ -189,5 +190,28 @@ describe("looksLikeActionJson — suppress raw action-JSON during streaming", ()
     expect(looksLikeActionJson(null as unknown as string)).toBe(false);
     expect(looksLikeActionJson(undefined as unknown as string)).toBe(false);
     expect(looksLikeActionJson(123 as unknown as string)).toBe(false);
+  });
+});
+
+// ---- schema conformance: every classification must satisfy the contract ----
+
+describe("detectIntent — schema conformance (tests/schemas/intent.ts)", () => {
+  const matrix = [
+    "Summarize", "What is this page?", "pricing?", "the summary",
+    "Click the login button", "fill the form", "go to settings",
+    "", "   ", "summarize what happens when I click submit", "?", "hello world",
+  ];
+  it("every detectIntent output satisfies IntentSchema", () => {
+    for (const q of matrix) {
+      const intent = detectIntent(q);
+      const parsed = IntentSchema.safeParse(intent);
+      if (!parsed.success) throw new Error(`detectIntent(${JSON.stringify(q)}) → ${intent} failed IntentSchema`);
+    }
+  });
+
+  it("shouldDowngradeToJsonDisabled output satisfies DowngradeDecisionSchema", () => {
+    for (const q of matrix) {
+      expect(DowngradeDecisionSchema.safeParse(shouldDowngradeToJsonDisabled({ expectJson: true }, q)).success).toBe(true);
+    }
   });
 });

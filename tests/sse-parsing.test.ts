@@ -4,6 +4,7 @@ import { resolve } from "path";
 import * as vm from "node:vm";
 import { normalizeActions } from "../extension/lib/modes.js";
 import { parseZoOutput, repairJson, stripCodeFence } from "../extension/lib/parse-output.js";
+import { ParseResultSchema, expectChannel } from "./schemas/parse-output.js";
 import { replaySse } from "./test-prompts/replay.js";
 
 /**
@@ -620,3 +621,38 @@ data: {"status":"succeeded","error":null}
   });
 });
 
+
+// ---- schema conformance: every parse path satisfies the channel contract ----
+
+describe("parseZoOutput — schema conformance (tests/schemas/parse-output.ts)", () => {
+  const cases = [
+    ["envelope object", { reasoning: "why", actions: [{ type: "done", response: "ok" }] }, "envelope"],
+    ["fenced JSON envelope", '```json\n{"actions":[{"click":{"selector":"#a"}}]}\n```', "envelope"],
+    ["repaired inner-quote JSON", '{"actions":[{"extract":{"selector":"input[name=\"x\"]","attribute":"href"}}]}', "envelope"],
+    ["plain markdown", "# Hello\n\nWorld.", "plain"],
+    ["number output", 42, "plain"],
+    ["null output", null, "plain"],
+    ["undefined output", undefined, "plain"],
+    ["junk string", "not json at all {", "plain"],
+  ] as const;
+
+  it("every response shape produces a ParseResultSchema-valid triple", () => {
+    for (const [name, input, channel] of cases) {
+      const result = parseZoOutput(input as unknown as string);
+      const parsed = ParseResultSchema.safeParse(result);
+      if (!parsed.success) {
+        throw new Error(`parseZoOutput(${name}) failed schema:\n${parsed.error.message}`);
+      }
+      expectChannel(result, channel);
+    }
+  });
+
+  it("envelope + plain channels are mutually exclusive", () => {
+    const env = parseZoOutput({ actions: [] });
+    expect(env.plainText).toBe("");
+    const plain = parseZoOutput("just text");
+    expect(plain.reasoning).toBe("");
+    expect(plain.rawOutput).toBe("");
+    expect(plain.actions).toEqual([]);
+  });
+});
