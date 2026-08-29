@@ -248,6 +248,29 @@ describe("searchConversations", () => {
     const ugly = { a: conv("a"), bad: null, worse: { nope: 1 } } as unknown as Record<string, ReturnType<typeof conv>>;
     expect(searchConversations(ugly, "").map((s) => s.id)).toEqual(["a"]);
   });
+
+  it("carries a one-line snippet from the first user message", () => {
+    const all = expectValid(ChatSummaryArray, searchConversations(map, ""), "summaries");
+    const b = all.find((s) => s.id === "b")!;
+    expect(b.snippet).toBe("find the cheapest flight to Lisbon");
+    // The helper's default conversation has a user message — snippet reflects it.
+    expect(all.find((s) => s.id === "a")!.snippet).toBe("hello from a");
+  });
+
+  it("hides the snippet line for conversations with no user messages", () => {
+    const m = { e: conv("e", { title: "Empty", messages: [] }) };
+    expect(searchConversations(m, "")[0].snippet).toBe("");
+  });
+
+  it("collapses whitespace and truncates long snippets with an ellipsis", () => {
+    const long = `the first    paragraph
+      of a long question that keeps going and going and going and going and going`;
+    const m = { x: conv("x", { title: "T", messages: [{ role: "user", text: long, timestamp: 1 }] }) };
+    const s = searchConversations(m, "")[0];
+    expect(s.snippet.length).toBeLessThanOrEqual(90);
+    expect(s.snippet.endsWith("…")).toBe(true);
+    expect(s.snippet).not.toMatch(/\s{2,}/);
+  });
 });
 
 describe("conversation schema accepts the new per-chat fields", () => {

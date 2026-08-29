@@ -68,4 +68,46 @@ test.describe("options page", () => {
       await context.close();
     }
   });
+
+  test("settings usability: section nav, token reveal, runtime version, dirty indicator", async () => {
+    const { context, extensionId, serviceWorker } = await launchExtension({ freshProfile: true });
+    try {
+      await seedExtensionConfig(serviceWorker);
+      const page = await context.newPage();
+      await page.goto(`chrome-extension://${extensionId}/options.html`);
+
+      // Sticky section nav: every anchor target exists.
+      const navLinks = page.locator("#settings-nav a");
+      await expect(navLinks.first()).toBeVisible();
+      const count = await navLinks.count();
+      expect(count).toBeGreaterThanOrEqual(6);
+      for (let i = 0; i < count; i++) {
+        const href = await navLinks.nth(i).getAttribute("href");
+        expect(href).toMatch(/^#card-/);
+        expect(await page.locator(href!).count()).toBe(1);
+      }
+
+      // Token reveal: password by default, toggles to text and back.
+      await expect(page.locator("#access-token")).toHaveAttribute("type", "password");
+      await page.click("#token-toggle");
+      await expect(page.locator("#access-token")).toHaveAttribute("type", "text");
+      await expect(page.locator("#token-toggle")).toHaveText("Hide");
+      await page.click("#token-toggle");
+      await expect(page.locator("#access-token")).toHaveAttribute("type", "password");
+
+      // Version comes from the live manifest, not a hardcoded string.
+      await expect(page.locator("#ext-version")).toHaveText(/^v\d+\.\d+/, { timeout: 5_000 });
+
+      // Dirty indicator: editing a form-only field flags the Save buttons;
+      // saving clears it (and the toast is visible — fixed position).
+      await expect(page.locator("button[type=submit].save-dirty")).toHaveCount(0);
+      await page.fill("#space-endpoint", "https://example.zo.space");
+      await expect(page.locator("button[type=submit].save-dirty").first()).toBeVisible();
+      await page.click("button[type=submit]");
+      await expect(page.locator("#status-message")).toContainText("Saved");
+      await expect(page.locator("button[type=submit].save-dirty")).toHaveCount(0);
+    } finally {
+      await context.close();
+    }
+  });
 });

@@ -64,6 +64,8 @@ export type TabsState = z.infer<typeof TabsStateSchema>;
 export const ChatSummarySchema = z.object({
   id: z.string(),
   title: z.string(),
+  /** One-line preview of the first user message ("" when the chat is empty). */
+  snippet: z.string(),
   createdAt: z.number(),
   updatedAt: z.number(),
   messageCount: z.number().int().min(0),

@@ -1015,7 +1015,19 @@ function renderHistoryView() {
 
       const titleEl = document.createElement('div');
       titleEl.className = 'history-card-title';
-      titleEl.textContent = item.title;
+      appendHighlighted(titleEl, item.title, query);
+
+      // Main column: title + one-line preview of the opening ask (identifying
+      // a chat without opening it). No snippet → title-only, layout unchanged.
+      const mainEl = document.createElement('div');
+      mainEl.className = 'history-card-main';
+      mainEl.appendChild(titleEl);
+      if (item.snippet) {
+        const snippetEl = document.createElement('div');
+        snippetEl.className = 'history-card-snippet';
+        appendHighlighted(snippetEl, item.snippet, query);
+        mainEl.appendChild(snippetEl);
+      }
 
       const metaEl = document.createElement('div');
       metaEl.className = 'history-card-meta';
@@ -1042,7 +1054,7 @@ function renderHistoryView() {
         }
       });
 
-      card.appendChild(titleEl);
+      card.appendChild(mainEl);
       card.appendChild(metaEl);
       card.appendChild(renameBtn);
       card.appendChild(deleteBtn);
@@ -1053,6 +1065,30 @@ function renderHistoryView() {
     }
 
     historyList.appendChild(groupEl);
+  }
+}
+
+/** Append `text` into `el`, wrapping case-insensitive `query` matches in
+ * <mark> (safe DOM nodes only — no innerHTML). No query → plain text. */
+function appendHighlighted(el, text, query) {
+  const q = (query || '').trim().toLowerCase();
+  if (!q) {
+    el.textContent = text;
+    return;
+  }
+  const lower = text.toLowerCase();
+  let i = 0;
+  for (;;) {
+    const idx = lower.indexOf(q, i);
+    if (idx === -1) {
+      el.appendChild(document.createTextNode(text.slice(i)));
+      break;
+    }
+    el.appendChild(document.createTextNode(text.slice(i, idx)));
+    const mark = document.createElement('mark');
+    mark.textContent = text.slice(idx, idx + q.length);
+    el.appendChild(mark);
+    i = idx + q.length;
   }
 }
 

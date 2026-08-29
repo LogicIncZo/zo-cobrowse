@@ -46,6 +46,50 @@ document.addEventListener('DOMContentLoaded', async () => {
   const modelStatus = document.getElementById('model-status');
   const themeSelect = document.getElementById(OPTIONS_THEME_SELECTOR);
 
+  // Runtime version from the manifest — never a hardcoded (stale) string.
+  const versionEl = document.getElementById('ext-version');
+  try {
+    if (versionEl) versionEl.textContent = `v${chrome.runtime.getManifest().version}`;
+  } catch { /* manifest unavailable in tests */ }
+
+  // Token show/hide — the password field hides the secret from shoulder-surfers
+  // but users need to verify a pasted token.
+  const tokenToggle = document.getElementById('token-toggle');
+  if (tokenToggle) {
+    tokenToggle.addEventListener('click', () => {
+      const show = tokenInput.type === 'password';
+      tokenInput.type = show ? 'text' : 'password';
+      tokenToggle.textContent = show ? 'Hide' : 'Show';
+      tokenToggle.title = show ? 'Hide token' : 'Show token';
+    });
+  }
+
+  // Unsaved-changes dirty tracking. The form saves ONLY on submit, but two
+  // controls autosave (model select, quick-action rows) — mark them so they
+  // don't falsely flag the form as dirty.
+  let dirtyEls = [];
+  const markDirty = () => {
+    if (dirtyEls.length) return;
+    dirtyEls = [...form.querySelectorAll('button[type="submit"]')];
+    dirtyEls.forEach((b) => b.classList.add('save-dirty'));
+    if (statusMsg && !statusMsg.textContent) {
+      statusMsg.textContent = 'Unsaved changes — remember to Save Settings.';
+      statusMsg.className = 'inline-status pending';
+    }
+  };
+  const clearDirty = () => {
+    dirtyEls.forEach((b) => b.classList.remove('save-dirty'));
+    dirtyEls = [];
+  };
+  form.addEventListener('input', (e) => {
+    if (e.target.closest('#quick-actions-list') || e.target.id === 'model') return; // autosave controls
+    markDirty();
+  });
+  form.addEventListener('change', (e) => {
+    if (e.target.closest('#quick-actions-list') || e.target.id === 'model') return;
+    markDirty();
+  });
+
   // Persona field (the Mode is chosen in the side panel; here we only pin the
   // default persona that executes requests).
   const personaSelect = document.getElementById('persona-select');
@@ -202,6 +246,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }, () => {
         statusMsg.textContent = '✅ Saved!';
         statusMsg.className = 'inline-status ok';
+        clearDirty();
         setTimeout(() => { statusMsg.textContent = ''; statusMsg.className = 'inline-status'; }, 3000);
       });
     });

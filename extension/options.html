@@ -209,6 +209,62 @@
     .flex { display: flex; }
     .gap-2 { gap: 8px; }
     .items-center { align-items: center; }
+
+    /* ── Section nav (sticky) ── */
+    #settings-nav {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding: 8px 16px;
+      margin: 0 -16px 12px;
+      background: color-mix(in srgb, var(--bg) 92%, transparent);
+      backdrop-filter: blur(6px);
+      border-bottom: 1px solid var(--border-soft);
+    }
+    #settings-nav a {
+      flex: 0 0 auto;
+      font-size: 11.5px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border-soft);
+      color: var(--text-muted);
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    #settings-nav a:hover { color: var(--text); border-color: var(--indigo); }
+    .card { scroll-margin-top: 52px; }
+
+    /* ── Token reveal ── */
+    .token-row { display: flex; gap: 6px; }
+    .token-row input { flex: 1; }
+    .token-toggle {
+      flex: 0 0 auto;
+      border: 1px solid var(--border-soft);
+      background: var(--bg);
+      color: var(--text-muted);
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-size: 12px;
+      padding: 0 10px;
+    }
+    .token-toggle:hover { color: var(--text); border-color: var(--indigo); }
+
+    /* ── Save feedback: fixed toast (visible from any scroll position) ── */
+    #status-message {
+      position: fixed;
+      bottom: 18px;
+      right: 18px;
+      z-index: 50;
+      box-shadow: 0 4px 14px rgb(0 0 0 / 0.25);
+    }
+    .save-dirty::after {
+      content: " •";
+      color: var(--indigo);
+      font-weight: 700;
+    }
   </style>
 </head>
 <body>
@@ -217,13 +273,28 @@
     <p class="subtitle">Configure your co-browsing connection to Zo Computer</p>
   </div>
 
+  <!-- ── Sticky section nav ── -->
+  <nav id="settings-nav" aria-label="Settings sections">
+    <a href="#card-connection">🔌 Connection</a>
+    <a href="#card-persona">🧠 Persona &amp; Model</a>
+    <a href="#card-prompts">✎ Prompts</a>
+    <a href="#card-features">🧩 Features</a>
+    <a href="#card-speech">🎤 Speech</a>
+    <a href="#card-menus">🖱️ Menus</a>
+    <a href="#card-actions">⚡ Actions</a>
+    <a href="#card-about">ℹ️ About</a>
+  </nav>
+
   <form id="settings-form">
     <!-- ── Connection ── -->
-    <div class="card">
+    <div class="card" id="card-connection">
       <h2>🔌 Connection</h2>
       <div class="field-group">
         <label for="access-token">Zo Access Token</label>
-        <input type="password" id="access-token" placeholder="zo_…" />
+        <div class="token-row">
+          <input type="password" id="access-token" placeholder="zo_…" autocomplete="off" />
+          <button type="button" id="token-toggle" class="token-toggle" title="Show token">Show</button>
+        </div>
       </div>
       <div class="field-group">
         <label for="space-endpoint">Zo.space Endpoint</label>
@@ -252,7 +323,7 @@
     </div>
 
     <!-- ── Model & Persona ── -->
-    <div class="card">
+    <div class="card" id="card-persona">
       <h2>🧠 Persona</h2>
       <p class="desc">Pin the Zo persona that runs your requests. The Mode you pick in the side panel decides how Zo behaves; this sets which persona executes it.</p>
 
@@ -278,7 +349,7 @@
     </div>
 
     <!-- ── Prompts (mode tuning) ── -->
-    <div class="card">
+    <div class="card" id="card-prompts">
       <h2>✎ Prompts</h2>
       <p class="desc">Tune what each Mode sends to Zo — system prompt, instructions, and how much page context. Built-in Modes keep an editable override (Reset restores the original); custom Modes are edited directly. Page context still requires <code>!context</code> per turn in the chat.</p>
       <div class="field-group">
@@ -326,7 +397,7 @@
     </div>
 
     <!-- ── Screenshot ── -->
-    <div class="card">
+    <div class="card" id="card-features">
       <h2>📷 Screenshot & Vision</h2>
       <div class="field-group">
         <label class="row-label">
@@ -341,7 +412,7 @@
     </div>
 
     <!-- ── Write assist ── -->
-    <div class="card">
+    <div class="card" id="card-write">
       <h2>✍️ Write Assist</h2>
       <div class="field-group">
         <label class="row-label">
@@ -356,7 +427,7 @@
     </div>
 
     <!-- ── Speech ── -->
-    <div class="card">
+    <div class="card" id="card-speech">
       <h2>🎤 Speech</h2>
       <div class="field-group-double">
         <div class="field-group">
@@ -377,7 +448,7 @@
     </div>
 
         <!-- ── Context Menu ── -->
-    <div class="card">
+    <div class="card" id="card-menus">
       <h2>🖱️ Right-Click Menu</h2>
       <p class="desc">Show Zo options in the right-click context menu.</p>
       <label class="checkbox-row">
@@ -399,7 +470,7 @@
     </div>
 
     <!-- ── Quick Actions ── -->
-    <div class="card">
+    <div class="card" id="card-actions">
       <h2>⚡ Quick Actions</h2>
       <p class="desc">Chips shown above the input for one-click prompts.</p>
       <div id="quick-actions-list"></div>
@@ -439,16 +510,16 @@
     </div>
 
     <!-- ── About ── -->
-    <div class="card">
+    <div class="card" id="card-about">
       <h2>ℹ️ About</h2>
       <p class="desc">
-        <strong>Zo Co-browse</strong> v0.0.1 &mdash; AI-powered co-browsing extension.
+        <strong>Zo Co-browse</strong> <span id="ext-version">v—</span> &mdash; AI-powered co-browsing extension.
         Your page context is sent only to your configured Zo endpoint.
       </p>
       <div class="btn-row" style="flex-wrap: wrap;">
-        <a href="https://github.com/CCAgentOrg/zo-cobrowse" target="_blank" class="btn"><span style="font-size:14px;">⌘</span> GitHub</a>
-        <a href="https://github.com/CCAgentOrg/zo-cobrowse/blob/main/PRIVACY.md" target="_blank" class="btn">🔒 Privacy</a>
-        <a href="https://github.com/CCAgentOrg/zo-cobrowse/issues" target="_blank" class="btn">🐛 Report Issue</a>
+        <a href="https://github.com/LogicIncZo/zo-cobrowse" target="_blank" class="btn"><span style="font-size:14px;">⌘</span> GitHub</a>
+        <a href="https://github.com/LogicIncZo/zo-cobrowse/blob/main/PRIVACY.md" target="_blank" class="btn">🔒 Privacy</a>
+        <a href="https://github.com/LogicIncZo/zo-cobrowse/issues" target="_blank" class="btn">🐛 Report Issue</a>
         <a href="https://zocomputer.com" target="_blank" class="btn btn-ghost">Powered by Zo Computer</a>
         <button type="button" id="reset-defaults" class="btn btn-danger" style="margin-left:auto;">Reset to Defaults</button>
       </div>

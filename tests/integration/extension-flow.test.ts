@@ -798,3 +798,30 @@ describe("ux — code-block copy button", () => {
     await waitUntil(() => ["Copied ✓", "✕"].includes(btn.textContent), 3000);
   }, 20000);
 });
+
+describe("ux — history (chat list) snippet + search highlight", () => {
+  it("shows a preview snippet per chat and <mark>-highlights search matches", async () => {
+    // Open the history view over the panel's real conversations (earlier
+    // describes sent real turns, so the active chat has a user message).
+    (panelWin.document.querySelector("#history-btn") as any).click();
+    await waitUntil(() => panelWin.document.querySelector(".history-card"), 5000);
+
+    const card: any = panelWin.document.querySelector(".history-card");
+    const snippet = card.querySelector(".history-card-snippet");
+    expect(snippet).toBeTruthy();
+    expect(snippet.textContent.length).toBeGreaterThan(0);
+
+    // Search: the query matches a snippet/title → <mark> wraps the hit.
+    const search = panelWin.document.querySelector("#history-search") as any;
+    search.value = "page";
+    search.dispatchEvent(new panelWin.Event("input", { bubbles: true }));
+    await waitUntil(() => panelWin.document.querySelector(".history-card mark"), 5000);
+    const marks = [...panelWin.document.querySelectorAll(".history-card mark")] as any[];
+    expect(marks.some((m) => m.textContent.toLowerCase() === "page")).toBe(true);
+
+    // Back to chat view.
+    search.value = "";
+    search.dispatchEvent(new panelWin.Event("input", { bubbles: true }));
+    (panelWin.document.querySelector("#history-btn") as any).click();
+  });
+});
