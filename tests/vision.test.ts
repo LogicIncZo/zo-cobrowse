@@ -15,6 +15,13 @@ const CATALOG = [
   { model_name: "mystery", label: "Mystery", vendor: "vendor" }, // no supports_images field
 ];
 
+// /models/catalog entries are keyed on `value` (public identifier) with no
+// model_name field — verified against the live API + openapi baseline.
+const CATALOG_BY_VALUE = [
+  { value: "zo:vendor/text-only", label: "Text Only", [VISION_FIELD]: false },
+  { value: "zo:vendor/vision-pro", label: "Vision Pro", [VISION_FIELD]: true },
+];
+
 describe("vision gating — constants", () => {
   it("caches the catalog for 5 minutes", () => {
     expect(CATALOG_TTL_MS).toBe(5 * 60 * 1000);
@@ -34,6 +41,21 @@ describe("findModelEntry", () => {
     expect(findModelEntry(CATALOG, "nonexistent")).toBeNull();
     expect(findModelEntry(null, "vision-pro")).toBeNull();
     expect(findModelEntry([], "vision-pro")).toBeNull();
+  });
+  it("matches value-keyed catalog entries (/models/catalog shape)", () => {
+    expect(findModelEntry(CATALOG_BY_VALUE, "zo:vendor/vision-pro")?.label).toBe("Vision Pro");
+    expect(findModelEntry(CATALOG_BY_VALUE, "zo:vendor/text-only")?.label).toBe("Text Only");
+    expect(findModelEntry(CATALOG_BY_VALUE, "zo:vendor/missing")).toBeNull();
+  });
+  it("gates capture on value-keyed entries too", () => {
+    expect(shouldCaptureScreenshot(CATALOG_BY_VALUE[1], { tier: 3, enableScreenshots: true })).toBe(true);
+    expect(shouldCaptureScreenshot(CATALOG_BY_VALUE[0], { tier: 3, enableScreenshots: true })).toBe(false);
+  });
+  it("suggests a model using value when model_name is absent", () => {
+    const s = visionModelSuggestion(CATALOG_BY_VALUE, "zo:vendor/text-only");
+    expect(s.kind).toBe("suggest");
+    expect(s.suggestedModel).toBe("zo:vendor/vision-pro");
+    expect(s.suggestedLabel).toBe("Vision Pro");
   });
 });
 

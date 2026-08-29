@@ -18,8 +18,10 @@ export const CATALOG_TTL_MS = 5 * 60 * 1000;
 export const VISION_FIELD = 'supports_images';
 
 /**
- * Find the catalog entry for a model name. Catalog entries use `model_name`
- * as the key; the selected model is `config.zoModel`.
+ * Find the catalog entry for a model name. /models/catalog keys entries on
+ * `value` (public identifier, e.g. 'zo:openai/gpt-5.4') while /models/available
+ * — where config.zoModel comes from — uses `model_name` for the same
+ * identifier format, so match either. The selected model is `config.zoModel`.
  *
  * @param {Array} catalog — the `models` array from /models/catalog
  * @param {string} modelName — config.zoModel (may be '' for API default)
@@ -27,7 +29,10 @@ export const VISION_FIELD = 'supports_images';
  */
 export function findModelEntry(catalog, modelName) {
   if (!Array.isArray(catalog) || !modelName) return null;
-  return catalog.find((m) => m && m.model_name === modelName) || null;
+  return (
+    catalog.find((m) => m && (m.model_name === modelName || m.value === modelName)) ||
+    null
+  );
 }
 
 /**
@@ -92,8 +97,8 @@ export function visionModelSuggestion(catalog, modelName) {
       kind: 'suggest',
       currentModel: modelName,
       reason: `“${entry.label || modelName}” doesn't support images.`,
-      suggestedModel: visionModel.model_name,
-      suggestedLabel: visionModel.label || visionModel.model_name,
+      suggestedModel: visionModel.model_name || visionModel.value,
+      suggestedLabel: visionModel.label || visionModel.model_name || visionModel.value,
     };
   }
   return {
