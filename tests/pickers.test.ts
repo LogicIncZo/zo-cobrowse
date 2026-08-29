@@ -86,6 +86,15 @@ describe("command builders — deterministic, marker-delimited", () => {
     expect(cmd).toContain("'/home/workspace/Skills'");
     expect(cmd).toContain("SKILL.md");
   });
+  it("skillsListCommand emits the ##SKILL_COUNT line first, inside the markers (#73)", () => {
+    const cmd = skillsListCommand();
+    const beginIdx = cmd.indexOf("__ZO_BEGIN__;");
+    const countIdx = cmd.indexOf("##SKILL_COUNT", beginIdx);
+    const loopIdx = cmd.indexOf("for d in", beginIdx);
+    expect(countIdx).toBeGreaterThan(beginIdx);
+    expect(loopIdx).toBeGreaterThan(countIdx);
+    expect(cmd).toContain("wc -l");
+  });
   it("dirListCommand lists one directory non-recursively", () => {
     const cmd = dirListCommand("/home/workspace/Skills/websh");
     expect(cmd).toContain("ls -1F");
@@ -169,19 +178,41 @@ describe("parseSkillsBundle", () => {
     "__ZO_END__\n";
 
   it("parses ##SKILL-delimited heads into schema-valid entries, sorted by name", () => {
-    const skills = parseSkillsBundle(raw);
+    const { skills } = parseSkillsBundle(raw);
     expect(skills.map((s: any) => s.id)).toEqual(["cc-video", "websh"]);
     for (const s of skills) expect(SkillEntrySchema.safeParse(s).success).toBe(true);
   });
   it("falls back to the folder name when frontmatter lacks name:", () => {
     const r = "__ZO_BEGIN__\n##SKILL /home/workspace/Skills/noname\ndescription: only a description\n__ZO_END__";
-    const skills = parseSkillsBundle(r);
+    const { skills } = parseSkillsBundle(r);
     expect(skills).toHaveLength(1);
     expect(skills[0].name).toBe("noname");
   });
-  it("skips entries with no parseable head, and returns [] without markers", () => {
-    expect(parseSkillsBundle("CmdResult(stdout='ls: cannot access', stderr='', returncode=2)")).toEqual([]);
-    expect(parseSkillsBundle("__ZO_BEGIN__\n##SKILL /home/workspace/Skills/empty\n__ZO_END__")).toEqual([]);
+  it("skips entries with no parseable head, and returns an empty report without markers", () => {
+    expect(parseSkillsBundle("CmdResult(stdout='ls: cannot access', stderr='', returncode=2)")).toEqual({ skills: [], totalFolders: null });
+    expect(parseSkillsBundle("__ZO_BEGIN__\n##SKILL /home/workspace/Skills/empty\n__ZO_END__")).toEqual({ skills: [], totalFolders: null });
+  });
+});
+
+describe("parseSkillsBundle — ##SKILL_COUNT + truncation (#73)", () => {
+  const mk = (id: string, name: string) =>
+    `##SKILL /home/workspace/Skills/${id}\n---\nname: ${name}\ndescription: d\n---\n`;
+
+  it("reads the count line and reports totalFolders next to the parsed list", () => {
+    const raw = "__ZO_BEGIN__\n##SKILL_COUNT 5\n" + mk("a", "A") + mk("b", "B") + "__ZO_END__\n";
+    const { skills, totalFolders } = parseSkillsBundle(raw);
+    expect(totalFolders).toBe(5);
+    expect(skills.map((s: any) => s.name)).toEqual(["A", "B"]);
+  });
+
+  it("a listing cut short (missing END marker) yields an empty report — the caller turns that into an honest error", () => {
+    const raw = "CmdResult(stdout='__ZO_BEGIN__\\n##SKILL_COUNT 9\\n##SKILL /home/workspace/Skills/a\\n---\\nname: A\\n---\\n', stderr='', returncode=0)";
+    expect(parseSkillsBundle(raw)).toEqual({ skills: [], totalFolders: null });
+  });
+
+  it("totalFolders stays null when the count line is absent (older fixture shape)", () => {
+    const raw = "__ZO_BEGIN__\n" + mk("a", "A") + "__ZO_END__\n";
+    expect(parseSkillsBundle(raw).totalFolders).toBeNull();
   });
 });
 

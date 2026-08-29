@@ -338,8 +338,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     case 'LIST_SKILLS': {
       // #28 `/` picker: enumerate the user's Zo skills (workspace Skills
-      // folder) over the MCP server's bash tool. Cached ~5 min per worker.
-      listSkills(!!request.force).then((skills) => sendResponse({ ok: true, skills }))
+      // folder) over the MCP server's bash tool. Cached ~5 min, session-backed
+      // (survives SW restarts, #73). `total` = total skill folders seen, so
+      // the picker can say "+N more" when folders were skipped.
+      listSkills(!!request.force).then((r) => sendResponse({ ok: true, skills: r.skills, total: r.totalFolders ?? undefined }))
         .catch((err) => sendResponse({ ok: false, error: err?.message || String(err) }));
       return true;
     }
@@ -1745,7 +1747,13 @@ async function listSkills(force = false) {
   return skillsCacheStore.get(async () => {
     if (!config.zoAccessToken) throw new Error('Zo access token not configured.');
     const result = await mcpToolCall('bash', { cmd: skillsListCommand() });
-    return parseSkillsBundle(toolText(result));
+    const raw = toolText(result);
+    // A server-side output cap cuts the END marker off → extractMarkedStdout
+    // nulls. Surface that honestly instead of caching a silent empty list (#73).
+    if (extractMarkedStdout(raw) == null) {
+      throw new Error('Skills listing came back truncated or unparseable — refresh to retry.');
+    }
+    return parseSkillsBundle(raw);
   }, force);
 }
 

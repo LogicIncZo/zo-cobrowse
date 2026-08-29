@@ -17,6 +17,7 @@ const fm = new ZoFetchMock();
 // text output is a Python-repr CmdResult wrapper around stdout, with \n
 // escapes and our __ZO_BEGIN__/__ZO_END__ markers around the payload.
 const SKILLS_STDOUT = [
+  "##SKILL_COUNT 3",
   "##SKILL /home/workspace/Skills/websh",
   "---",
   "name: websh",
@@ -29,7 +30,10 @@ const SKILLS_STDOUT = [
   "description: End-to-end video pipeline.",
   "---",
 ].join("\\n");
+// One folder (cc-empty) counted but with no parseable SKILL.md head → the
+// "+N more" affordance in the picker has something to report.
 const LS_STDOUT = "Skills/\\nAGENTS.md\\nrun.sh*";
+let truncated = false;
 
 function bashResult(stdoutRepr: string): string {
   return `CmdResult(stdout='__ZO_BEGIN__\\n${stdoutRepr}\\n__ZO_END__\\n', stderr='', returncode=0)`;
@@ -60,7 +64,15 @@ beforeAll(async () => {
     if (body.method === "notifications/initialized") return textResponse("", 202);
     if (body.method === "tools/call" && body.params?.name === "bash") {
       const cmd = String(body.params.arguments?.cmd || "");
-      if (cmd.includes("SKILL.md")) return mcpOk(body.id, { isError: false, content: [{ type: "text", text: bashResult(SKILLS_STDOUT) }] });
+      if (cmd.includes("SKILL.md")) {
+        // `truncated` simulates a server-side output cap that cut the END
+        // marker off — extractMarkedStdout nulls and the background must
+        // answer ok:false instead of a silent empty list (#73).
+        const text = truncated
+          ? "CmdResult(stdout='__ZO_BEGIN__\\n##SKILL_COUNT 3\\n##SKILL /home/workspace/Skills/websh\\n', stderr='', returncode=0)"
+          : bashResult(SKILLS_STDOUT);
+        return mcpOk(body.id, { isError: false, content: [{ type: "text", text }] });
+      }
       if (cmd.includes("ls -1F")) return mcpOk(body.id, { isError: false, content: [{ type: "text", text: bashResult(LS_STDOUT) }] });
       return mcpOk(body.id, { isError: true, content: [{ type: "text", text: "unexpected command" }] });
     }
@@ -76,6 +88,7 @@ describe("LIST_SKILLS — MCP bash enumeration of the workspace Skills folder", 
     const resp = await bus.runtime.sendMessage({ type: "LIST_SKILLS" });
     expect(resp.ok).toBe(true);
     expect(resp.skills.map((s: any) => s.name)).toEqual(["cc-awareness-video", "websh"]);
+    expect(resp.total).toBe(3); // one folder has no parseable SKILL.md head
     expect(ListSkillsResponseSchema.safeParse(resp).success).toBe(true);
 
     const reqs = mcpRequests();
@@ -108,6 +121,26 @@ describe("LIST_SKILLS — MCP bash enumeration of the workspace Skills folder", 
     expect(resp.ok).toBe(true);
     expect(resp.skills.length).toBeGreaterThan(0);
     expect(mcpRequests().length).toBe(before);
+  });
+
+  it("a truncated listing (missing END marker) is an honest error, not an empty list", async () => {
+    // Warm cache answers even while the flag is on…
+    truncated = true;
+    const warm = await bus.runtime.sendMessage({ type: "LIST_SKILLS" });
+    expect(warm.ok).toBe(true);
+    // …but a force refresh against the truncated payload fails honestly.
+    const resp = await bus.runtime.sendMessage({ type: "LIST_SKILLS", force: true });
+    expect(resp.ok).toBe(false);
+    expect(resp.error).toMatch(/truncat/i);
+    // Let both background instances' in-flight force fetches settle before
+    // recovering — a stale in-flight error response would win the
+    // first-response race against the healthy refetch (two listeners answer).
+    await new Promise((r) => setTimeout(r, 50));
+    // Recovery: next force fetch against a healthy payload succeeds again.
+    truncated = false;
+    const recovered = await bus.runtime.sendMessage({ type: "LIST_SKILLS", force: true });
+    expect(recovered.ok).toBe(true);
+    expect(recovered.skills.length).toBeGreaterThan(0);
   });
 });
 
