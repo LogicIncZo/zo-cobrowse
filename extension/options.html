@@ -9,9 +9,9 @@
     /* ── Reset & base ── */
     * { box-sizing: border-box; }
     body {
-      width: 540px;
+      max-width: 980px;
       margin: 0 auto;
-      padding: 24px;
+      padding: 24px 28px;
       min-height: 100vh;
       overflow: visible !important;
       background: var(--bg-deep);
@@ -42,13 +42,22 @@
     .page-header .subtitle { font-size: 13px; color: var(--text-muted); margin: 0; }
 
     /* ── Cards ── */
+    #settings-form {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 14px;
+      align-items: start;
+    }
     .card {
       background: var(--bg-surface);
       border: 1px solid var(--border-soft);
       border-radius: var(--radius-md);
       padding: 16px;
-      margin-bottom: 14px;
+      margin-bottom: 0;
+      min-width: 0;
     }
+    /* Wide cards span the full row (multi-field editors, tables, button rows). */
+    .card-wide { grid-column: 1 / -1; }
     .card h2 {
       font-family: var(--font-display);
       font-size: 14px;
@@ -216,11 +225,13 @@
       top: 0;
       z-index: 20;
       display: flex;
+      flex-wrap: wrap;
       gap: 6px;
-      overflow-x: auto;
-      padding: 8px 16px;
-      margin: 0 -16px 12px;
-      background: color-mix(in srgb, var(--bg) 92%, transparent);
+      padding: 8px 0;
+      margin: 0 -28px 12px;
+      padding-left: 28px;
+      padding-right: 28px;
+      background: color-mix(in srgb, var(--bg-deep) 92%, transparent);
       backdrop-filter: blur(6px);
       border-bottom: 1px solid var(--border-soft);
     }
@@ -287,7 +298,7 @@
 
   <form id="settings-form">
     <!-- ── Connection ── -->
-    <div class="card" id="card-connection">
+    <div class="card card-wide" id="card-connection">
       <h2>🔌 Connection</h2>
       <div class="field-group">
         <label for="access-token">Zo Access Token</label>
@@ -349,7 +360,7 @@
     </div>
 
     <!-- ── Prompts (mode tuning) ── -->
-    <div class="card" id="card-prompts">
+    <div class="card card-wide" id="card-prompts">
       <h2>✎ Prompts</h2>
       <p class="desc">Tune what each Mode sends to Zo — system prompt, instructions, and how much page context. Built-in Modes keep an editable override (Reset restores the original); custom Modes are edited directly. Page context still requires <code>!context</code> per turn in the chat.</p>
       <div class="field-group">
@@ -470,7 +481,7 @@
     </div>
 
     <!-- ── Quick Actions ── -->
-    <div class="card" id="card-actions">
+    <div class="card card-wide" id="card-actions">
       <h2>⚡ Quick Actions</h2>
       <p class="desc">Chips shown above the input for one-click prompts.</p>
       <div id="quick-actions-list"></div>
@@ -478,7 +489,7 @@
     </div>
 
     <!-- ── Keyboard Shortcuts ── -->
-    <div class="card">
+    <div class="card card-wide">
       <h2>⌨️ Keyboard Shortcuts</h2>
       <p class="desc">Use the table below to view available shortcuts. To remap them, visit <a href="chrome://extensions/shortcuts" target="_blank">chrome://extensions/shortcuts</a>.</p>
       <table style="width:100%; border-collapse: collapse; margin-top: 8px;">
@@ -510,7 +521,7 @@
     </div>
 
     <!-- ── About ── -->
-    <div class="card" id="card-about">
+    <div class="card card-wide" id="card-about">
       <h2>ℹ️ About</h2>
       <p class="desc">
         <strong>Zo Co-browse</strong> <span id="ext-version">v—</span> &mdash; AI-powered co-browsing extension.
@@ -526,7 +537,7 @@
     </div>
 
     <!-- ── Save ── -->
-    <div class="flex gap-2 items-center">
+    <div class="flex gap-2 items-center card-wide">
       <button type="submit" class="btn btn-primary">Save Settings</button>
     </div>
   </form>
