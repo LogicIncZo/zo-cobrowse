@@ -16,13 +16,13 @@
         <span>co-browse</span>
       </div>
       <div class="header-actions">
-        <button id="theme-toggle" class="icon-btn theme-toggle" title="Toggle theme">☀</button>
+        <button id="theme-toggle" class="icon-btn theme-toggle" data-i18n-title="sidepanelThemeToggle">☀</button>
         <div class="status-dot-wrap">
           <span id="status-dot" class="dot dot-disconnected" title="Not configured"></span>
         </div>
-        <button id="help-btn" class="icon-btn" title="About co-browsing">?</button>
-        <button id="history-btn" class="icon-btn" title="History">☰</button>
-        <button id="new-chat-btn" class="icon-btn" title="New chat">✚</button>
+        <button id="help-btn" class="icon-btn" data-i18n-title="sidepanelHelp">?</button>
+        <button id="history-btn" class="icon-btn" data-i18n-title="sidepanelHistory">☰</button>
+        <button id="new-chat-btn" class="icon-btn" data-i18n-title="sidepanelNewChat">✚</button>
       </div>
     </header>
 
@@ -39,15 +39,15 @@
     <!-- ── Controls bar ── -->
     <div class="controls-bar">
       <label>Model</label>
-      <select id="model-select" title="AI model">
+      <select id="model-select" data-i18n-title="sidepanelModelLabel">
         <option value="">Default</option>
       </select>
       <label>Persona</label>
-      <select id="persona-select" title="Persona">
+      <select id="persona-select" data-i18n-title="sidepanelPersonaLabel">
         <option value="">Zo (default)</option>
       </select>
       <label>Mode</label>
-      <select id="mode-select" title="Zo mode">
+      <select id="mode-select" data-i18n-title="sidepanelModeLabel">
         <option value="cobrowse">🤖 Co-browse</option>
         <option value="ask">💬 Ask</option>
         <option value="research">🔬 Research</option>
@@ -55,7 +55,7 @@
         <option value="extract">📥 Extract</option>
         <option value="visual">🖼️ Visual</option>
       </select>
-      <button id="create-mode-btn" class="btn btn-ghost btn-sm create-mode-btn" title="Create custom mode">✦</button>
+      <button id="create-mode-btn" class="btn btn-ghost btn-sm create-mode-btn" data-i18n-title="sidepanelCreateMode">✦</button>
     </div>
 
     <!-- ── Quick action chips ── -->
@@ -125,7 +125,7 @@
       <div class="input-area">
         <button id="mic-btn" class="btn btn-ghost btn-icon mic-btn" title="Voice input">🎤</button>
         <div class="input-wrap">
-          <textarea id="query-input" rows="1" placeholder="Ask Zo about this page…" autofocus></textarea>
+          <textarea id="query-input" rows="1" data-i18n-placeholder="sidepanelComposerPlaceholder" autofocus></textarea>
         </div>
         <button id="send-btn" class="btn btn-primary btn-icon" title="Send">→</button>
       </div>

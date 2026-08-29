@@ -61,6 +61,14 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - **⬇ Latest pill** — appears when the chat log is scrolled away from the
   bottom (e.g. while reading during a stream); clicks snap back.
 
+### Added — i18n scaffolding (#68)
+- `chrome.i18n` is wired for future localization: `_locales/en/messages.json` (default locale),
+  manifest `name`/`description` via `__MSG_` placeholders (strings byte-identical — asserted),
+  a pure `lib/i18n.js` (`t()` + `applyI18nDom()` walking `data-i18n*` attributes), and a pilot
+  set of sidepanel strings migrated. **Scope: UI strings only** — prompt templates stay English
+  (they're LLM instructions, not user-facing text). CI guard test: every `data-i18n` key must
+  resolve in every locale dir; message entries must carry translator descriptions.
+
 ### Fixed — 📷 screenshots never reached Zo on real Chrome
 - **`<all_urls>` host permission**: `chrome.tabs.captureVisibleTab` requires the literal
   `<all_urls>` pattern (or an activeTab gesture) — the manifest's scoped wildcards
