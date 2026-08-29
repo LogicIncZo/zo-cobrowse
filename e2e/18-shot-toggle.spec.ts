@@ -73,11 +73,11 @@ test.describe("📷 Image toggle (send-once screenshot)", () => {
     await h.panel.evaluate(() => {
       const ms = document.querySelector<HTMLSelectElement>("#mode-select");
       if (ms) {
-        ms.value = "summarize";
+        ms.value = "extract";
         ms.dispatchEvent(new Event("change", { bubbles: true }));
       }
     });
-    await expect(h.panel.locator("#mode-select")).toHaveValue("summarize", { timeout: 5_000 });
+    await expect(h.panel.locator("#mode-select")).toHaveValue("extract", { timeout: 5_000 });
     await h.panel.evaluate(() => document.querySelector<HTMLElement>("#shot-toggle")?.click());
     await expect(h.panel.locator("#mode-select")).toHaveValue("visual", { timeout: 5_000 });
     await h.panel.evaluate(() => document.querySelector<HTMLElement>("#shot-toggle")?.click());
@@ -87,16 +87,16 @@ test.describe("📷 Image toggle (send-once screenshot)", () => {
     await h.panel.evaluate(() => {
       const ms = document.querySelector<HTMLSelectElement>("#mode-select");
       if (ms) {
-        ms.value = "summarize";
+        ms.value = "extract";
         ms.dispatchEvent(new Event("change", { bubbles: true }));
       }
     });
-    await expect(h.panel.locator("#mode-select")).toHaveValue("summarize", { timeout: 5_000 });
+    await expect(h.panel.locator("#mode-select")).toHaveValue("extract", { timeout: 5_000 });
     await h.panel.evaluate(() => document.querySelector<HTMLElement>("#shot-toggle")?.click());
     await expect(h.panel.locator("#mode-select")).toHaveValue("visual", { timeout: 5_000 });
     await h.panel.evaluate(() => document.querySelector<HTMLElement>("#shot-toggle")?.click());
     await expect(h.panel.locator("#shot-toggle")).toHaveAttribute("aria-pressed", "false");
-    await expect(h.panel.locator("#mode-select")).toHaveValue("summarize", { timeout: 5_000 });
+    await expect(h.panel.locator("#mode-select")).toHaveValue("extract", { timeout: 5_000 });
     // Inspector back to the unforced decision (no "forced" reason string).
     await expect(h.panel.locator("#prompt-inspector-meta")).not.toContainText("forced", { timeout: 5_000 });
   });

@@ -668,15 +668,15 @@ describe("📷 Image toggle — send-once screenshot (#25 UX)", () => {
     await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "cobrowse", 5000);
 
     // A manual Mode change while armed drops the restore memory (the user
-    // owns the Mode then): arm, hand-switch to summarize, disarm → no bounce.
+    // owns the Mode then): arm, hand-switch to extract, disarm → no bounce.
     toggle.click();
     await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "visual", 5000);
     const ms = panelWin.document.querySelector("#mode-select");
-    ms.value = "summarize";
+    ms.value = "extract";
     ms.dispatchEvent(new panelWin.Event("change", { bubbles: true }));
-    await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "summarize", 5000);
+    await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "extract", 5000);
     toggle.click(); // disarm — must NOT restore cobrowse over the manual pick
-    expect(panelWin.document.querySelector("#mode-select").value).toBe("summarize");
+    expect(panelWin.document.querySelector("#mode-select").value).toBe("extract");
     await bus.storage.sync.set({ zoActiveMode: "cobrowse" });
     await waitUntil(() => panelWin.document.querySelector("#mode-select")?.value === "cobrowse", 5000);
   }, 30000);

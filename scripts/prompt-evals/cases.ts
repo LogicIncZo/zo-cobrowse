@@ -193,10 +193,12 @@ export const CASES: EvalCase[] = [
     checks: [noActionEnvelope(), nonEmpty()],
   },
   {
+    // 2026-08 rationalization: Summarize merged into Ask — the canned query
+    // carries the summarizing intent, the Ask mode supplies the contract.
     id: "summarize-brief",
     kind: "mode",
-    what: "summarize stays brief",
-    build: () => buildPrompt(BUILTIN_MODES.summarize, pageCtx(1), "Give me a brief summary of this page"),
+    what: "summarize-phrased ask stays brief",
+    build: () => buildPrompt(BUILTIN_MODES.ask, pageCtx(1), "Give me a brief summary of this page"),
     live: true,
     checks: [noActionEnvelope(), nonEmpty(), maxChars(1200)],
   },
@@ -209,10 +211,20 @@ export const CASES: EvalCase[] = [
     checks: [noActionEnvelope(), nonEmpty(), markdownTable()],
   },
   {
+    // 2026-08 rationalization: Research merged into Ask — same query, ask
+    // mode's contract (bigger text budget) drives the structured analysis.
     id: "research-claims",
     kind: "mode",
-    what: "research answers with structured analysis",
-    build: () => buildPrompt(BUILTIN_MODES.research, pageCtx(1), "Research the key claims and evidence on this page"),
+    what: "research-phrased ask answers with structured analysis",
+    build: () => buildPrompt(BUILTIN_MODES.ask, pageCtx(1), "Research the key claims and evidence on this page"),
+    live: true,
+    checks: [noActionEnvelope(), nonEmpty()],
+  },
+  {
+    id: "lean-pointer",
+    kind: "mode",
+    what: "lean mode answers from the URL pointer without acting",
+    build: () => buildPrompt(BUILTIN_MODES.lean, pageCtx(0), "What is this page about?"),
     live: true,
     checks: [noActionEnvelope(), nonEmpty()],
   },

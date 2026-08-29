@@ -7,6 +7,28 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed — mode surface rationalized (5 modes, leaner prompts)
+- **Lean Mode 🪶 (URL-only, no page interaction)** — a new built-in Mode that
+  sends only the URL + title (tier 0) and a fetch-it-yourself contract: Zo
+  never sees the page, fetches the URL itself with its web tools when needed
+  (and says so plainly when the page is inaccessible/geoblocked instead of
+  guessing), never returns browser actions, and writes + cross-references
+  notes when the request is note-shaped. Spec:
+  `docs/superpowers/specs/2026-08-29-lean-mode-design.md`.
+- **Mode lineup 6 → 5** — Summarize and Research merged into **Ask** (they
+  were tier-1 readers differing only in query phrasing). Chats with them
+  active migrate to Ask on load; `!summarize` / `!research` keep working in
+  Ask; per-mode Settings overrides migrate onto Ask only when Ask had none.
+- **Tier-0 honesty in every prompt** — turns that attach only the URL/title no
+  longer claim "using the page content provided"; the tail now says content
+  was not attached and licenses Zo to fetch the URL itself (or `read_page` on
+  action-mode follow-ups). Applies to all modes on tier-0 turns.
+- **Bang aliases trimmed** — `!qa` (use `!ask`) and `!dom`/`!ctx` (use
+  `!context`) removed; `!help` now lists the full, accurate canonical set.
+- **Quick-action chips fixed** — chips now send their stored prompt (the
+  click handler previously sent the display label and ignored `prompt`), and
+  the defaults are cut to two non-duplicative entries (Fill forms with test
+  data, Extract links); custom chips in Options are untouched.
 ### Added — typed-schema coverage completed
 - Every module in `extension/lib/` now has a Zod contract under `tests/schemas/`:
   five new schema files (parse-output, mcp, vision, intent, zo-prompts) cover the

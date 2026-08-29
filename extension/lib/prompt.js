@@ -197,11 +197,20 @@ function _compose(mode, pageContext, userQuery, opts) {
   push('sep', '');
 
   if (jsonDisabled) {
-    push('tail', 'Answer the request directly using the page content provided.');
+    push('tail', tier === 0
+      ? 'Only the page URL and title are attached — fetch the page yourself if you need its content. Answer the request directly.'
+      : 'Answer the request directly using the page content provided.');
     push('tail', PLAIN_RESPONSE_HINT);
   } else {
     push('tail', mode.instructions);
     push('tail', wantJson ? ACTION_SCHEMA_COMPACT : PLAIN_RESPONSE_HINT);
+  }
+  // Tier-0 honesty: when no page content rides, say so. Stock Mode
+  // instructions assume attached content; Zo must learn it may fetch the URL
+  // itself (or pull via read_page on action-mode follow-up turns) instead of
+  // guessing from the pointer. Skipped when there is no page pointer at all.
+  if (tier === 0 && !noPagePointer) {
+    push('tail', "Page content was not attached this turn — only the URL and title above. If you need the page's content, fetch it yourself (web fetch, or read_page).");
   }
 
   return { parts, tier, intent: detectIntent(userQuery), expectJson: wantJson, downgradeApplied: jsonDisabled };
