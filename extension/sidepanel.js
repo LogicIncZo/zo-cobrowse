@@ -2669,10 +2669,38 @@ function renderFilePopup(filterText, keepFilter) {
     sub.className = 'picker-item-desc';
     sub.textContent = e.path || e.name;
     item.appendChild(sub);
+    // #74: folders get a ＋ affordance — row click still navigates INTO the
+    // folder; ＋ arms it as a context chip (Zo lists/recurses server-side).
+    if (e.kind === 'dir') {
+      item.classList.add('has-add');
+      const add = document.createElement('span');
+      add.className = 'picker-item-add';
+      add.textContent = '＋';
+      add.title = `${e.path} — add this FOLDER as context (click the row to browse into it)`;
+      add.addEventListener('mousedown', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        armPickedFile(e, true);
+      });
+      item.appendChild(add);
+    }
     item.addEventListener('mousedown', (ev) => { ev.preventDefault(); selectFileRow(i); });
     popup.appendChild(item);
   });
   popup.classList.remove('hidden');
+}
+
+/** Arm a picked file/folder chip (#74): dirs ride as paths too — Zo resolves
+ *  them server-side with its own file tools (list_directory recurses). */
+function armPickedFile(e, isDir) {
+  if (!pickedFiles.some((p) => p.path === e.path)) {
+    pickedFiles.push(isDir ? { path: e.path, dir: true } : { path: e.path });
+  }
+  swallowTriggerToken('%');
+  closeFilePopup();
+  renderPickerChips();
+  syncSendBtn();
+  renderPromptInspector();
 }
 
 function selectFileRow(i) {
@@ -2683,12 +2711,7 @@ function selectFileRow(i) {
     loadFilesDir(e.path);
     return;
   }
-  if (!pickedFiles.some((p) => p.path === e.path)) pickedFiles.push({ path: e.path });
-  swallowTriggerToken('%');
-  closeFilePopup();
-  renderPickerChips();
-  syncSendBtn();
-  renderPromptInspector();
+  armPickedFile(e, false);
 }
 
 function pickerNoteItem(text) {
@@ -2792,7 +2815,8 @@ function renderPickerChips() {
     });
   }
   for (const f of pickedFiles) {
-    addChip(`📄 ${f.path.split('/').pop()}`, `${f.path} — attached to the next send`, () => {
+    const isDir = !!f.dir;
+    addChip(`${isDir ? '📁' : '📄'} ${f.path.split('/').pop()}${isDir ? '/' : ''}`, `${f.path} — attached to the next send`, () => {
       const idx = pickedFiles.indexOf(f);
       if (idx !== -1) pickedFiles.splice(idx, 1);
       renderPickerChips();

@@ -39,7 +39,9 @@ export const ListWorkspaceDirResponseSchema = z.union([
 /** What rides on an ASK_ZO payload for one picked skill (chip → per-turn). */
 export const PickedSkillSchema = SkillEntrySchema;
 
-/** What rides on an ASK_ZO payload for one picked file. */
+/** What rides on an ASK_ZO payload for one picked file (#74: `dir` marks a
+ *  FOLDER pick — it rides as a path too; Zo lists/recurses server-side). */
 export const PickedFileSchema = z.object({
   path: z.string().startsWith("/"),
+  dir: z.boolean().optional(),
 });
