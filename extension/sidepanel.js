@@ -2551,7 +2551,9 @@ async function ensureSkillsLoaded(force = false) {
     try {
       const resp = await chrome.runtime.sendMessage({ type: 'LIST_SKILLS' });
       if (resp && resp.ok && Array.isArray(resp.skills)) {
-        skillsCache = { list: resp.skills, fetchedAt: Date.now() };
+        // `total` (#73): total skill folders seen by the listing — lets the
+        // popup say "+N more" when folders were skipped.
+        skillsCache = { list: resp.skills, total: resp.total ?? null, fetchedAt: Date.now() };
         return resp.skills;
       }
       return null; // error rendered by the popup, not a thrown crash
@@ -2599,6 +2601,13 @@ function renderSkillPopup(filterText) {
     item.addEventListener('mousedown', (e) => { e.preventDefault(); selectSkill(i); });
     popup.appendChild(item);
   });
+  // #73 loudness: the workspace holds more skill folders than the listing
+  // returned (folders without a SKILL.md head, or a cut-short listing) —
+  // say so instead of silently showing a short list.
+  const hidden = skillsCache.total != null ? skillsCache.total - skillsCache.list.length : 0;
+  if (hidden > 0) {
+    popup.appendChild(pickerNoteItem(`+${hidden} more skill folder${hidden === 1 ? '' : 's'} not listed — no SKILL.md head found, or the listing was cut short. ⟳ refreshes.`));
+  }
   popup.classList.remove('hidden');
 }
 

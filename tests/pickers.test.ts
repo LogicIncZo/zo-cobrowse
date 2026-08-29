@@ -225,6 +225,11 @@ describe("picker message payload schemas", () => {
     expect(ListSkillsResponseSchema.safeParse({ ok: false, error: "no token" }).success).toBe(true);
     expect(ListSkillsResponseSchema.safeParse({ ok: true, skills: [{ id: "", name: "x", description: "" }] }).success).toBe(false);
   });
+  it("LIST_SKILLS ok shape validates with and without the optional total (#73)", () => {
+    expect(ListSkillsResponseSchema.safeParse({ ok: true, skills: [{ id: "a", name: "A", description: "" }], total: 5 }).success).toBe(true);
+    expect(ListSkillsResponseSchema.safeParse({ ok: true, skills: [] }).success).toBe(true);
+    expect(ListSkillsResponseSchema.safeParse({ ok: true, skills: [], total: -1 }).success).toBe(false);
+  });
   it("LIST_WORKSPACE_DIR ok + error shapes validate", () => {
     expect(ListWorkspaceDirResponseSchema.safeParse({
       ok: true, path: "/home/workspace", entries: [{ name: "Skills", path: "/home/workspace/Skills", kind: "dir" }],
