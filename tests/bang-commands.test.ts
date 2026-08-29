@@ -83,16 +83,25 @@ describe("parseBangCommand — schema conformance", () => {
     }
   });
 
-  it("!context / !dom / !ctx attach page context for one turn (no mode switch)", () => {
+  it("!context attaches page context for one turn (no mode switch)", () => {
     expect(parse("!context summarize the pricing")).toEqual({
       handled: true, kind: "context", isContext: true, query: "summarize the pricing",
     });
-    expect(parse("!dom compare the plans")).toEqual({
-      handled: true, kind: "context", isContext: true, query: "compare the plans",
-    });
-    expect(parse("!ctx extract all emails")).toEqual({
-      handled: true, kind: "context", isContext: true, query: "extract all emails",
-    });
+  });
+
+  it("former !dom / !ctx aliases are gone (2026-08 rationalization)", () => {
+    for (const raw of ["!dom compare the plans", "!ctx extract all emails"]) {
+      const r = parse(raw);
+      expect(r.handled).toBe(true);
+      expect(r.kind).toBe("inline"); // unknown-command reply
+    }
+  });
+
+  it("former !qa alias is gone; !ask is the canonical question bang", () => {
+    expect(parse("!qa what is this").kind).toBe("inline");
+    const r = parse("!ask what is this");
+    expect(r.handled).toBe(true);
+    if (r.kind === "command") expect(r.mode).toBe("ask");
   });
 
   it("!context with no args → inline usage hint", () => {
@@ -133,13 +142,19 @@ describe("parseBangCommand — schema conformance", () => {
   });
 
   it("mode field is either null or a known Mode id", () => {
-    const knownModes = ["summarize", "extract", "research", "ask"];
+    const knownModes = ["extract", "ask"];
     for (const name of Object.keys(BANG_COMMANDS)) {
       const r = parse(`!${name}`);
       if ("mode" in r) {
         expect(r.mode === null || knownModes.includes(r.mode)).toBe(true);
       }
     }
+  });
+
+  it("canned reader bangs target the merged Ask mode (2026-08 rationalization)", () => {
+    expect(BANG_COMMANDS.summarize.mode).toBe("ask");
+    expect(BANG_COMMANDS.research.mode).toBe("ask");
+    expect(BANG_COMMANDS.extract.mode).toBe("extract");
   });
 });
 

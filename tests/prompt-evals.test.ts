@@ -18,8 +18,8 @@ describe("prompt-evals catalog", () => {
   it("covers every prompt surface the extension can send", () => {
     const ids = CASES.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length); // unique ids
-    for (const kind of ["cobrowse-click", "cobrowse-readonly", "ask-topic", "summarize-brief", "extract-table", "research-claims", "visual-describe"]) {
-      expect(ids).toContain(kind); // all 6 builtin modes represented
+    for (const kind of ["cobrowse-click", "cobrowse-readonly", "ask-topic", "summarize-brief", "extract-table", "research-claims", "visual-describe", "lean-pointer"]) {
+      expect(ids).toContain(kind); // all 5 builtin modes represented (summarize/research merged into ask)
     }
     expect(ids).toContain("wa-plain-textarea"); // write-assist
     expect(ids).toContain("generate-mode"); // Mode generator

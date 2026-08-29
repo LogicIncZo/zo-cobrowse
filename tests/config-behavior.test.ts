@@ -152,11 +152,11 @@ describe("loadConfig — merge semantics", () => {
   it("sync values override DEFAULTS for known keys", async () => {
     await chromeMock.storage.sync.set({
       [STORAGE.MODEL]: "zo-1.1-pro",
-      [STORAGE.ACTIVE_MODE]: "research",
+      [STORAGE.ACTIVE_MODE]: "lean",
     });
     const config = await loadConfig();
     expect(config[STORAGE.MODEL]).toBe("zo-1.1-pro");
-    expect(config[STORAGE.ACTIVE_MODE]).toBe("research");
+    expect(config[STORAGE.ACTIVE_MODE]).toBe("lean");
   });
 
   it("sensitive values (token + endpoint) are read from storage.local, not sync", async () => {

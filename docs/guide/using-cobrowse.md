@@ -45,19 +45,20 @@ Type `!` in the composer to trigger quick commands. `!help` lists them inline:
 | `!summarize` | Condense the page into a concise summary |
 | `!extract [what]` | Extract structured data (tables, lists, contacts, prices) |
 | `!research [topic]` | Deep research on the page topic |
-| `!qa <question>` / `!ask` | Answer a specific question about the page |
+| `!ask [question]` | Answer a specific question about the page |
 | `!fill [details]` | Ask Zo to fill editable fields on the page |
 | `!skills` | List available Zo skills |
 | `!skill <name>` | Run a Zo skill on the current page |
 | `!autos` | List your scheduled Zo automations |
 | `!save [path]` | Save this page to your Zo workspace as Markdown |
-| `!query <question>` / `!data` | Natural-language DuckDB query against your datasets |
+| `!query <question>` | Natural-language DuckDB query against your datasets |
 | `!auto <instruction>` | Create a scheduled Zo automation from the current page |
 | `!help` | Show this list |
 
-Mode commands (`!summarize`, `!extract`, `!research`, `!qa`) set the active
-[Mode](../guide/modes) for a single turn. Others (`!skill`, `!query`, `!auto`)
-open Zo's tooling directly.
+Mode commands (`!summarize`, `!extract`, `!research`, `!ask`) set the active
+[Mode](../guide/modes) for a single turn — `!summarize` and `!research` run in
+**Ask** since the 2026-08 rationalization merged those modes in. Others
+(`!skill`, `!query`, `!auto`) open Zo's tooling directly.
 
 ## Reference pickers: `/` skills, `%` files, `@` tabs
 

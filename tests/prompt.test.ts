@@ -73,8 +73,9 @@ describe("buildPrompt — parity with the original assembler", () => {
   });
 
   it("starts with the Mode systemPrompt and ends with the instruction tail", () => {
-    const p = buildPrompt(BUILTIN_MODES.research, makeCtx(), "Analyze");
-    expect(p.startsWith(BUILTIN_MODES.research.systemPrompt)).toBe(true);
+    // extract is tier 2 → the tail is instructions + hint, no tier-0 clarifier.
+    const p = buildPrompt(BUILTIN_MODES.extract, makeCtx(), "Analyze");
+    expect(p.startsWith(BUILTIN_MODES.extract.systemPrompt)).toBe(true);
     expect(p.endsWith(PLAIN_RESPONSE_HINT)).toBe(true);
   });
 });
@@ -123,11 +124,11 @@ describe("buildPrompt — tier gating", () => {
   });
 
   it("caps visibleText at mode.textBudget", () => {
-    const long = "x".repeat(3000);
+    const long = "x".repeat(5000);
     const p = buildPrompt(BUILTIN_MODES.ask, makeCtx({ visibleText: long }), "q");
-    // ask.textBudget === 2000 → the fenced content is exactly 2000 chars.
+    // ask.textBudget === 4000 (raised from 2000 when Summarize/Research merged in).
     const fenced = p.split("## Page Content\n```\n")[1].split("\n```")[0];
-    expect(fenced.length).toBe(2000);
+    expect(fenced.length).toBe(4000);
   });
 
   it("tier 3 screenshot only when screenshotDataUrl is present", () => {
@@ -157,6 +158,77 @@ describe("buildPrompt — intent-aware JSON/markdown downgrade", () => {
     expect(p).not.toContain(ACTION_SCHEMA_COMPACT);
     expect(p).toContain(PLAIN_RESPONSE_HINT);
     expect(p).toContain("Answer the request directly using the page content provided.");
+  });
+});
+
+// ---- tier-0 honesty (2026-08 mode rationalization) ----------------------------
+// Tier-0 turns attach only the URL/title; the tail must never claim page
+// content was provided, and must license Zo to fetch the URL itself.
+
+describe("buildPrompt — tier-0 honesty", () => {
+  it("tier-0 turns append the content-not-attached clarifier", () => {
+    const p = buildPrompt(BUILTIN_MODES.ask, makeCtx(), "q", { effectiveTier: 0 });
+    expect(p).toContain("Page content was not attached this turn");
+    expect(p).toContain("fetch it yourself");
+  });
+
+  it("clarifier is absent at tier >= 1", () => {
+    const p = buildPrompt(BUILTIN_MODES.ask, makeCtx(), "q");
+    expect(p).not.toContain("Page content was not attached this turn");
+  });
+
+  it("clarifier is skipped when there is no page pointer (blank page)", () => {
+    const p = buildPrompt(BUILTIN_MODES.ask, { url: "about:blank", title: "about:blank" }, "q");
+    expect(p).not.toContain("Page content was not attached this turn");
+  });
+
+  it("downgrade tail uses the tier-0 variant (no 'page content provided' lie)", () => {
+    const p = buildPrompt(BUILTIN_MODES.cobrowse, makeCtx(), "Summarize this page", { effectiveTier: 0 });
+    expect(p).toContain("Only the page URL and title are attached");
+    expect(p).not.toContain("using the page content provided");
+  });
+
+  it("downgrade tail keeps the content wording at tier >= 1", () => {
+    const p = buildPrompt(BUILTIN_MODES.cobrowse, makeCtx(), "Summarize this page");
+    expect(p).toContain("Answer the request directly using the page content provided.");
+  });
+});
+
+// ---- Lean mode (URL-only, no page interaction) --------------------------------
+// See docs/superpowers/specs/2026-08-29-lean-mode-design.md.
+
+describe("buildPrompt — Lean mode", () => {
+  const mode = BUILTIN_MODES.lean;
+
+  it("emits the leanest prompt: system, page pointer, request, instructions — nothing else", () => {
+    const p = buildPrompt(
+      mode,
+      makeCtx({ visibleText: "secret", clickable: [{ text: "a", tag: "a", selector: "#a" }] }),
+      "What is this page?",
+    );
+    expect(p).toContain(mode.systemPrompt);
+    expect(p).toContain("## Page");
+    expect(p).toContain("## User Request");
+    expect(p).not.toContain("## Page Content");
+    expect(p).not.toContain("secret");
+    expect(p).not.toContain("## Elements");
+    expect(p).not.toContain(ACTION_SCHEMA_COMPACT);
+  });
+
+  it("contract instructions ride verbatim; tier-0 clarifier still appended", () => {
+    const p = buildPrompt(mode, makeCtx(), "note this page for later");
+    expect(p).toContain("The page content is NOT attached");
+    expect(p).toContain("Never return browser actions");
+    expect(p).toContain("Page content was not attached this turn");
+  });
+
+  it("describePrompt reports tier 0 and a schema-valid structure", () => {
+    const d = describePrompt(mode, makeCtx(), "q");
+    expectValid(d);
+    expect(d.tier).toBe(0);
+    expect(d.expectJson).toBe(false);
+    const ids = d.sections.map((s: { id: string }) => s.id);
+    expect(ids).toEqual(["system", "page", "userRequest", "tail"]);
   });
 });
 
