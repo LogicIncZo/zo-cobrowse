@@ -1030,3 +1030,27 @@ describe("ux — history (chat list) snippet + search highlight", () => {
     (panelWin.document.querySelector("#history-btn") as any).click();
   });
 });
+
+describe("DOM toggle (#69)", () => {
+  it("persists domContextEnabled=false on click and caps the next action send to tier 0", async () => {
+    (panelWin.document.querySelector("#dom-toggle") as any).click();
+    await waitUntil(() => bus.storage.sync._store.domContextEnabled === false, 5000);
+    expect(panelWin.document.getElementById("dom-toggle").textContent).toBe("🚫 DOM");
+
+    // An action-y query in cobrowse would attach tier-2 context on the first
+    // turn of a conversation — the cap must thin it to the URL/title pointer.
+    const before = askLog.length;
+    const composer = panelWin.document.querySelector("#query-input") as any;
+    composer.value = "Click the login button";
+    composer.dispatchEvent(new panelWin.Event("input", { bubbles: true }));
+    (panelWin.document.querySelector("#send-btn") as any).click();
+    await waitUntil(() => askLog.length > before, 10000);
+    const ask = askLog[askLog.length - 1];
+    expect(ask.effectiveTier).toBe(0);
+    expect(ask.shotOnly).toBeUndefined();
+
+    // Restore for the other describes.
+    (panelWin.document.querySelector("#dom-toggle") as any).click();
+    await waitUntil(() => bus.storage.sync._store.domContextEnabled === true, 5000);
+  });
+});

@@ -61,6 +61,18 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - **⬇ Latest pill** — appears when the chat log is scrolled away from the
   bottom (e.g. while reading during a stream); clicks snap back.
 
+### Added — sticky DOM context toggle (#69)
+- A **🧩 DOM** toggle now sits beside the 📷 Image toggle in the tab-strip row. When OFF, **no page
+  DOM is ever attached** — `decideTurn` caps every turn to the URL/title pointer, whatever the Mode
+  or context policy decided (including `!context`, which shows an inline note when capped). The
+  setting is sticky (`storage.sync`, default on) and the tier chip / prompt inspector show the cap
+  reason, so preview and send can't diverge.
+- **Precedence**: an armed 📷 with the DOM off ships pixels as a **screenshot-only** turn — tier 0
+  with just `## Screenshot` (`shotOnly` rides ASK_ZO; `buildPrompt` renders the section via
+  `opts.screenshotOnly`). The tier-0 auto-active-tab reference (T1 excerpt) is also capped — OFF
+  means URL/title pointer only. While capped, the policy state doesn't record the capture hash, so
+  re-enabling re-attaches normally instead of trusting a "context already sent" that never went out.
+
 ### Fixed — 📷 screenshots never reached Zo on real Chrome
 - **`<all_urls>` host permission**: `chrome.tabs.captureVisibleTab` requires the literal
   `<all_urls>` pattern (or an activeTab gesture) — the manifest's scoped wildcards

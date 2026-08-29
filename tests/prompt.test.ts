@@ -137,6 +137,23 @@ describe("buildPrompt — tier gating", () => {
     const noShot = buildPrompt(BUILTIN_MODES.visual, makeCtx(), "describe");
     expect(noShot).not.toContain("## Screenshot");
   });
+
+  it("#69: screenshotOnly renders the screenshot at tier 0 with NO DOM sections", () => {
+    const p = buildPrompt(
+      BUILTIN_MODES.visual,
+      makeCtx({ screenshotDataUrl: "data:image/jpeg;base64,AAA", visibleText: "secret dom text", clickable: [{ text: "a", tag: "a", selector: "#a" }] }),
+      "describe",
+      { effectiveTier: 0, screenshotOnly: true },
+    );
+    expect(p).toContain("## Screenshot");
+    expect(p).toContain("data:image/jpeg;base64,AAA");
+    expect(p).not.toContain("## Page Content");
+    expect(p).not.toContain("secret dom text");
+    expect(p).not.toContain("## Elements");
+    // The flag alone must NOT leak a screenshot section without a data URL.
+    const noData = buildPrompt(BUILTIN_MODES.visual, makeCtx({ visibleText: "text" }), "describe", { effectiveTier: 0, screenshotOnly: true });
+    expect(noData).not.toContain("## Screenshot");
+  });
 });
 
 // ---- intent downgrade (moved from background.test.ts — logic now in prompt.js)
