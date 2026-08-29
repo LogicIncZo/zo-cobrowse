@@ -15,6 +15,13 @@
         <span class="brand-zo">Zo</span>
         <span>co-browse</span>
       </div>
+      <!-- ── Page title (#63): folded into the header — the standalone
+           page-bar row cost a full line. Icon + truncating title; the full
+           URL rides the tooltip (painted by sidepanel.js like before). ── -->
+      <div class="header-page" id="header-page">
+        <span class="page-icon">◈</span>
+        <span id="page-url">— no page —</span>
+      </div>
       <div class="header-actions">
         <button id="theme-toggle" class="icon-btn theme-toggle" title="Toggle theme">☀</button>
         <div class="status-dot-wrap">
@@ -29,12 +36,6 @@
     <!-- ── Chat tabs: several conversations open at once (click to switch,
          ✕ to close; the ✚ in the header opens a new one) ── -->
     <div id="chat-tabs" class="chat-tabs" role="tablist" aria-label="Open chats"></div>
-
-    <!-- ── Page bar ── -->
-    <div class="page-bar">
-      <span class="page-icon">◈</span>
-      <span id="page-url">— no page —</span>
-    </div>
 
     <!-- ── Controls bar ── -->
     <div class="controls-bar">

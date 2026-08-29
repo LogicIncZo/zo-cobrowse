@@ -61,6 +61,11 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - **⬇ Latest pill** — appears when the chat log is scrolled away from the
   bottom (e.g. while reading during a stream); clicks snap back.
 
+### Changed — page title folded into the header (#63)
+- The standalone page-bar row (◈ + page title) cost a full vertical line. The title now lives in
+  the header between the brand and the action buttons — truncating, with the full URL as tooltip —
+  reclaiming one line of chat space. `#page-url` id and painting logic unchanged.
+
 ### Fixed — 📷 screenshots never reached Zo on real Chrome
 - **`<all_urls>` host permission**: `chrome.tabs.captureVisibleTab` requires the literal
   `<all_urls>` pattern (or an activeTab gesture) — the manifest's scoped wildcards
