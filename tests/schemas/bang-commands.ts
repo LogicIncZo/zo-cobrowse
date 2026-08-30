@@ -52,6 +52,14 @@ const ContextAttach = z.object({
   query: z.string().min(1),
 });
 
+// !handoff <goal> — delegate the goal as an unattended read-only run (Lane E)
+const Handoff = z.object({
+  handled: z.literal(true),
+  kind: z.literal("handoff"),
+  isHandoff: z.literal(true),
+  query: z.string().min(1), // the goal
+});
+
 export const BangCommandResultSchema = z.discriminatedUnion("kind", [
   Passthrough,
   InlineReply,
@@ -60,6 +68,7 @@ export const BangCommandResultSchema = z.discriminatedUnion("kind", [
   DuckdbQuery,
   ExpandedQuery,
   ContextAttach,
+  Handoff,
 ]);
 
 export type BangCommandResult = z.infer<typeof BangCommandResultSchema>;
@@ -80,4 +89,5 @@ export const BANG_COMMAND_NAMES = [
   "context",
   "dom",
   "ctx",
+  "handoff",
 ] as const;
