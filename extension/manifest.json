@@ -13,7 +13,8 @@
     "activeTab",
     "tabs",
     "scripting",
-    "tts"
+    "tts",
+    "notifications"
   ],
   "host_permissions": [
     "<all_urls>",

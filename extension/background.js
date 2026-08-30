@@ -2034,8 +2034,40 @@ async function handoffPut(run) {
   const runs = await handoffStore.load();
   runs[run.runId] = run;
   await handoffStore.save(runs);
+  handoffUpdateBadge(runs);
+  handoffMaybeNotify(run);
   await handoffNotify(run);
   return run;
+}
+
+// Extension-badge marker while any handoff run is live (Lane E item 12) —
+// visible even with the panel closed. Defensive: the action API may be
+// unavailable in test/mock contexts.
+function handoffUpdateBadge(runs) {
+  const live = Object.values(runs).some((r) => r.status === 'running' || r.status === 'priming');
+  try {
+    if (live) {
+      chrome.action.setBadgeBackgroundColor({ color: '#5b8def' });
+      chrome.action.setBadgeText({ text: '▶' });
+    } else {
+      chrome.action.setBadgeText({ text: '' });
+    }
+  } catch { /* no action API here */ }
+}
+
+// One-shot notification when a run finishes or parks at the boundary — the
+// point of delegating is walking away. Paused/aborted stay panel-only (the
+// user either caused them or can resume from the panel).
+function handoffMaybeNotify(run) {
+  if (run.status !== 'done' && run.status !== 'blocked') return;
+  try {
+    chrome.notifications.create(`handoff-${run.runId}`, {
+      type: 'basic',
+      iconUrl: 'icons/icon128.png',
+      title: run.status === 'done' ? 'Zo handoff finished' : 'Zo handoff needs you',
+      message: `${safeText(run.goal).slice(0, 120)}${run.stopReason ? ' — ' + safeText(run.stopReason).slice(0, 120) : ''}`,
+    });
+  } catch { /* notifications unavailable */ }
 }
 
 async function handoffGet({ runId, chatId } = {}) {

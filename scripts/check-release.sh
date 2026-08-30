@@ -80,6 +80,16 @@ else
 fi
 
 echo ""
+echo -e "${BOLD}Docs changelog mirror${NC}"
+# Policy (#96): docs/changelog.md's [Unreleased] mirrors root CHANGELOG.md.
+if command -v bun >/dev/null 2>&1 && bun scripts/sync-changelog.ts --check; then
+  :
+else
+  echo -e "  ${RED}✗ See above${NC}"
+  fail=1
+fi
+
+echo ""
 if [ "$fail" -eq 1 ]; then
   echo -e "${RED}❌ Some checks failed${NC}"
 else
