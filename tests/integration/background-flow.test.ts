@@ -475,3 +475,58 @@ describe("form-fill sensitivity gate (#26)", () => {
     expect(click.ok).toBe(true);
   });
 });
+
+describe("debug diagnostics (#67)", () => {
+  it("records metadata-only hops/durations while debugMode is on — and nothing while off", async () => {
+    // Off by default: no recording.
+    const off = await bus.runtime.sendMessage({ type: "GET_DEBUG_LOG" });
+    expect(off.enabled).toBe(false);
+    expect(off.entries).toHaveLength(0);
+
+    // Flip the setting (storage.onChanged drives setEnabled in the background).
+    await bus.storage.sync.set({ debugMode: true });
+    await flush();
+    // Some traffic: a capture + a stream turn.
+    await bus.runtime.sendMessage({ type: "GET_PAGE_CONTEXT", tier: 0 });
+    const port = connectRecorder();
+    port.post({ sessionId: 1, type: "ASK_ZO", userQuery: "q", pageContext: { url: "https://example.test/", title: "Example", visibleText: "SECRET PAGE TEXT" }, effectiveTier: 0 });
+    await flush();
+    await flush();
+
+    const on = await bus.runtime.sendMessage({ type: "GET_DEBUG_LOG" });
+    expect(on.enabled).toBe(true);
+    const kinds = new Set(on.entries.map((e: any) => e.kind));
+    expect(kinds.has("msg")).toBe(true);
+    expect(kinds.has("capture")).toBe(true);
+    expect(kinds.has("stream")).toBe(true);
+    const streamEntry = on.entries.find((e: any) => e.kind === "stream");
+    expect(typeof streamEntry.durMs).toBe("number");
+
+    // PRIVACY: the export must never carry page text.
+    expect(JSON.stringify(on)).not.toContain("SECRET PAGE TEXT");
+    expect(JSON.stringify(on)).not.toContain("SECRET");
+
+    // Turning it off clears the buffer.
+    await bus.storage.sync.set({ debugMode: false });
+    await flush();
+    const cleared = await bus.runtime.sendMessage({ type: "GET_DEBUG_LOG" });
+    expect(cleared.enabled).toBe(false);
+    expect(cleared.entries).toHaveLength(0);
+  });
+
+  it("CLEAR_DEBUG_LOG empties the ring", async () => {
+    await bus.storage.sync.set({ debugMode: true });
+    await flush();
+    await bus.runtime.sendMessage({ type: "GET_PAGE_CONTEXT", tier: 0 });
+    await flush();
+    const before = await bus.runtime.sendMessage({ type: "GET_DEBUG_LOG" });
+    expect(before.entries.length).toBeGreaterThan(0);
+    await bus.runtime.sendMessage({ type: "CLEAR_DEBUG_LOG" });
+    const after = await bus.runtime.sendMessage({ type: "GET_DEBUG_LOG" });
+    // The ring records its own reader hop (by design — the listener logs
+    // every message type); everything else is gone.
+    expect(after.entries).toHaveLength(1);
+    expect(after.entries[0].label).toBe("GET_DEBUG_LOG");
+    await bus.storage.sync.set({ debugMode: false });
+  });
+});

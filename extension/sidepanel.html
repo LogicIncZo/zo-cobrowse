@@ -15,6 +15,13 @@
         <span class="brand-zo">Zo</span>
         <span>co-browse</span>
       </div>
+      <!-- ── Page title (#63): folded into the header — the standalone
+           page-bar row cost a full line. Icon + truncating title; the full
+           URL rides the tooltip (painted by sidepanel.js like before). ── -->
+      <div class="header-page" id="header-page">
+        <span class="page-icon">◈</span>
+        <span id="page-url">— no page —</span>
+      </div>
       <div class="header-actions">
         <button id="theme-toggle" class="icon-btn theme-toggle" data-i18n-title="sidepanelThemeToggle">☀</button>
         <div class="status-dot-wrap">
@@ -29,12 +36,6 @@
     <!-- ── Chat tabs: several conversations open at once (click to switch,
          ✕ to close; the ✚ in the header opens a new one) ── -->
     <div id="chat-tabs" class="chat-tabs" role="tablist" aria-label="Open chats"></div>
-
-    <!-- ── Page bar ── -->
-    <div class="page-bar">
-      <span class="page-icon">◈</span>
-      <span id="page-url">— no page —</span>
-    </div>
 
     <!-- ── Controls bar ── -->
     <div class="controls-bar">
@@ -112,6 +113,10 @@
              auto-clears after that send, like the picker chips. -->
         <button id="shot-toggle" class="shot-toggle" type="button" aria-pressed="false"
                 title="Attach a screenshot of this tab to the NEXT message (one turn only — switches Mode to Visual while armed)">📷 Image</button>
+        <!-- #69: sticky DOM cap — OFF = no page DOM ever attaches (URL/title
+             pointer only), whatever the Mode or context policy decides. -->
+        <button id="dom-toggle" class="shot-toggle" type="button" aria-pressed="true"
+                title="Page DOM attached to messages — OFF sends the URL/title pointer only (privacy / token cap)">🧩 DOM ✓</button>
       </div>
       <div id="tab-autocomplete" class="tab-autocomplete hidden"></div>
 
