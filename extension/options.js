@@ -138,6 +138,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const testBtn = document.getElementById('test-btn');
   const statusMsg = document.getElementById('status-message');
   const tokenInput = document.getElementById('access-token');
+  const apiEndpointInput = document.getElementById('api-endpoint');
   const spaceEndpointInput = document.getElementById('space-endpoint');
   const modelStatus = document.getElementById('model-status');
   const themeSelect = document.getElementById(OPTIONS_THEME_SELECTOR);
@@ -267,7 +268,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Load config — sensitive fields from storage.local, rest from storage.sync
   chrome.storage.local.get(['zoAccessToken', 'zoSpaceEndpoint'], (localResult) => {
     chrome.storage.sync.get([
-      'zoModel', 'zoPersonaId',
+      'zoApiUrl', 'zoModel', 'zoPersonaId',
       'zoQuickActions',
       'zoTtsLang', 'zoTtsRate', 'zoTtsAutoRead', 'enabledMenus', 'enableScreenshots', 'enableWriteAssist'
     ], (syncResult) => {
@@ -275,6 +276,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       const spaceEndpoint = localResult.zoSpaceEndpoint;
       if (token) tokenInput.value = token;
       if (spaceEndpoint) spaceEndpointInput.value = spaceEndpoint;
+      // Restore BEFORE the model/persona loaders run — they derive their URLs
+      // from this field (QA finding B).
+      if (apiEndpointInput && syncResult.zoApiUrl) apiEndpointInput.value = syncResult.zoApiUrl;
 
       // Persona — single default; the side panel's Mode selector does the routing.
       const personaId = syncResult.zoPersonaId || '';
@@ -380,6 +384,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }, () => {
       // Non-sensitive config stays in storage.sync
       chrome.storage.sync.set({
+        zoApiUrl: (apiEndpointInput?.value || '').trim() || 'https://api.zo.computer/zo/ask',
         zoModel: getModelValue(),
         zoPersonaId: personaSelect.value,
         zoQuickActions: quickActions,
@@ -417,10 +422,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     testBtn.textContent = 'Testing…';
     statusMsg.textContent = 'Testing…';
     statusMsg.className = 'inline-status pending';
+    // Test the endpoint the form actually configures (QA finding B) — not a
+    // hardcoded api.zo.computer that a self-hosted gateway can never pass.
+    const askUrl = (apiEndpointInput?.value || '').trim() || 'https://api.zo.computer/zo/ask';
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 15000);
-      const r = await fetch('https://api.zo.computer/zo/ask', {
+      const r = await fetch(askUrl, {
         signal: controller.signal,
         method: 'POST',
         headers: {
@@ -435,12 +443,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         statusMsg.textContent = '✅ Connection successful!';
         statusMsg.className = 'inline-status ok';
       } else {
-        statusMsg.textContent = `⚠️ API returned ${r.status}`;
+        statusMsg.textContent = `⚠️ API returned ${r.status} from ${askUrl}`;
         statusMsg.className = 'inline-status err';
       }
     } catch (err) {
       if (err.name === 'AbortError') {
-        statusMsg.textContent = '❌ Request timed out after 15s. Check your token and internet.';
+        statusMsg.textContent = `❌ Request timed out after 15s (${askUrl}). Check your token and internet.`;
       } else {
         statusMsg.textContent = `❌ ${err.message}`;
       }
@@ -457,7 +465,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     resetBtn.addEventListener('click', () => {
       if (!confirm('Reset all Zo Co-browse settings to defaults? This clears your token, endpoint, model, and preferences on this device.')) return;
       // Sensitive (local) + non-sensitive (sync) keys are cleared together.
-      const syncKeys = ['zoModel', 'zoPersonaId', 'zoActiveMode', 'zoQuickActions', 'zoTtsLang', 'zoTtsRate', 'zoTtsAutoRead', 'enabledMenus', 'enableScreenshots', 'enableWriteAssist', 'cobrowse_theme'];
+      const syncKeys = ['zoApiUrl', 'zoModel', 'zoPersonaId', 'zoActiveMode', 'zoQuickActions', 'zoTtsLang', 'zoTtsRate', 'zoTtsAutoRead', 'enabledMenus', 'enableScreenshots', 'enableWriteAssist', 'cobrowse_theme'];
       const localKeys = ['zoAccessToken', 'zoSpaceEndpoint', 'cobrowse_mode_overrides'];
       Promise.all([
         new Promise((r) => chrome.storage.sync.remove(syncKeys, r)),
@@ -648,13 +656,28 @@ function initPromptsEditor(BUILTIN_MODES, mergeOverride, EDITABLE_MODE_FIELDS, d
   load();
 }
 
+// The configured Zo API endpoint (QA finding B): Test Connection and the
+// model/persona loaders derive from it instead of hardcoding api.zo.computer,
+// so self-hosted / overridden gateways behave like the prod default.
+const DEFAULT_API_URL = 'https://api.zo.computer/zo/ask';
+function configuredApiUrl() {
+  return (document.getElementById('api-endpoint')?.value || '').trim() || DEFAULT_API_URL;
+}
+function configuredApiOrigin() {
+  try {
+    return new URL(configuredApiUrl()).origin;
+  } catch {
+    return 'https://api.zo.computer';
+  }
+}
+
 async function populateModels(token, currentValue) {
   const modelStatus = document.getElementById('model-status');
   const container = document.getElementById('model');
   if (!container || !modelStatus) return;
   modelStatus.textContent = 'Loading models…';
   try {
-    const r = await fetch('https://api.zo.computer/models/available', {
+    const r = await fetch(`${configuredApiOrigin()}/models/available`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!r.ok) { modelStatus.textContent = 'Could not fetch models'; return; }
@@ -681,7 +704,7 @@ async function populateModels(token, currentValue) {
 
 async function populatePersonas(token, select, personaId) {
   try {
-    const r = await fetch('https://api.zo.computer/personas/available', {
+    const r = await fetch(`${configuredApiOrigin()}/personas/available`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!r.ok) return;

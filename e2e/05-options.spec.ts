@@ -1,33 +1,49 @@
 // E2E: the options page — Test Connection, the Prompts editor's live preview,
 // and Reset-to-defaults — against the mock endpoints.
 //
-// NOTE (finding): options.js's Test Connection posts to a HARDCODED
-// https://api.zo.computer/zo/ask, ignoring the configured zoApiUrl — the
-// spec intercepts that URL with Playwright routing to keep the test hermetic.
+// seedExtensionConfig seeds zoApiUrl = ${E2E_BASE}/zo/ask, and Test Connection
+// (plus the model/persona loaders) derive from that configured endpoint —
+// never the hardcoded prod host (QA finding B). Test 1 asserts prod is
+// NEVER hit.
 
 import { test, expect } from "@playwright/test";
-import { launchExtension, seedExtensionConfig } from "./helpers/extension";
+import { launchExtension, seedExtensionConfig, E2E_BASE } from "./helpers/extension";
 
 test.describe("options page", () => {
-  test("Test Connection succeeds against the mocked Zo API", async () => {
+  test("Test Connection hits the CONFIGURED endpoint, not hardcoded prod (QA finding B)", async () => {
     const { context, extensionId, serviceWorker } = await launchExtension({ freshProfile: true });
     try {
       await seedExtensionConfig(serviceWorker);
       const page = await context.newPage();
-      // The options page fetches the hardcoded prod URL — intercept it.
-      await page.route("https://api.zo.computer/zo/ask", (route) =>
+      // The configured endpoint answers; any prod-host request is a FAILURE
+      // signal — the field must drive the fetch.
+      let prodHit = false;
+      await page.route("https://api.zo.computer/**", (route) => {
+        prodHit = true;
+        return route.fulfill({ status: 500, contentType: "text/plain", body: "prod must not be called" });
+      });
+      await page.route(`${E2E_BASE}/zo/ask`, (route) =>
         route.fulfill({ status: 200, contentType: "text/plain", body: "ZO_OK" }),
-      );
-      await page.route("https://cashlessconsumer.zo.space", (route) =>
-        route.fulfill({ status: 200, contentType: "text/plain", body: "" }),
       );
       await page.goto(`chrome-extension://${extensionId}/options.html`);
 
-      // The seeded token shows as present; Test Connection goes green
+      // The Connection pane shows the configured endpoint in the new field.
       await expect(page.locator("#access-token")).toHaveValue(/.+/);
+      await expect(page.locator("#api-endpoint")).toHaveValue(`${E2E_BASE}/zo/ask`);
+
+      // Test Connection goes green against the configured URL.
       await page.click("#test-btn");
       await expect(page.locator("#status-message")).toContainText("Connection successful", { timeout: 10_000 });
       await expect(page.locator("#status-message")).toHaveClass(/ok/);
+      expect(prodHit).toBe(false);
+
+      // Saving persists the endpoint (storage.sync, non-sensitive).
+      await page.click("button[type=submit]");
+      await expect(page.locator("#status-message")).toContainText("Saved");
+      const stored = await serviceWorker.evaluate(() =>
+        new Promise((r) => chrome.storage.sync.get("zoApiUrl", (v) => r(v.zoApiUrl))),
+      );
+      expect(stored).toBe(`${E2E_BASE}/zo/ask`);
     } finally {
       await context.close();
     }
