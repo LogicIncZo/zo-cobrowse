@@ -18,6 +18,7 @@ import { extractUrls, MAX_LINK_CHIPS } from './lib/links.js';
 import { WORKSPACE_ROOT, filterPickerEntries } from './lib/pickers.js';
 import { applyI18nDom } from './lib/i18n.js';
 import { handoffInstructions, runProgress } from './lib/handoff.js';
+import { conversationToMarkdown, exportFileName } from './lib/export.js';
 import {
   openChatTab,
   closeChatTab,
@@ -1148,8 +1149,25 @@ function updateHistoryBadge() {
 
 // ---- History view ----
 
-function renderHistoryView() {
-  historyViewEl.classList.remove('hidden');
+// Chat export (Lane D): serialize the conversation to Markdown and trigger a
+// Blob download — pure half lives in lib/export.js (unit-tested + schema'd).
+function exportConversation(convId) {
+  const conv = conversations[convId];
+  if (!conv || !Array.isArray(conv.messages)) return;
+  const exportedAt = Date.now();
+  const markdown = conversationToMarkdown({ title: conv.title || 'Zo conversation', messages: conv.messages, exportedAt });
+  const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = exportFileName(conv.title, exportedAt);
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+function renderHistoryView() {  historyViewEl.classList.remove('hidden');
   chatView.classList.add('hidden');
   historyBtn.classList.add('active');
 
@@ -1208,6 +1226,16 @@ function renderHistoryView() {
         startCardRename(card, item);
       });
 
+      // Chat export (Lane D): download the conversation as Markdown.
+      const exportBtn = document.createElement('button');
+      exportBtn.className = 'history-card-rename';
+      exportBtn.textContent = '⬇';
+      exportBtn.title = 'Export as Markdown';
+      exportBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        exportConversation(item.id);
+      });
+
       const deleteBtn = document.createElement('button');
       deleteBtn.className = 'history-card-delete';
       deleteBtn.textContent = '✕';
@@ -1222,6 +1250,7 @@ function renderHistoryView() {
       card.appendChild(mainEl);
       card.appendChild(metaEl);
       card.appendChild(renameBtn);
+      card.appendChild(exportBtn);
       card.appendChild(deleteBtn);
 
       card.addEventListener('click', () => switchToConversation(item.id));

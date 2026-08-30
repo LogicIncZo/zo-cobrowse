@@ -7,6 +7,15 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — chat export: download a conversation as Markdown (#108)
+- **⬇ Export on every history card**: serializes the conversation to a clean Markdown
+  transcript — title header, role-labeled turns with timestamps, the 💭 reasoning as a
+  blockquote, context-tier chip and duration on Zo turns — and downloads it as
+  `zo-chat-<slug>-<date>.md`. System/error rows are omitted; it's the conversation a reader
+  wants, not a debug log.
+- Pure serializer in `lib/export.js` (schema + unit tests); the panel only triggers the Blob
+  download — no new message types.
+
 ### Added — handoff polish: badge marker, finish notifications, changelog-drift gate (#103)
 - **▶ extension badge while a handoff run is live** — visible even with the panel closed;
   cleared when no run is active.
