@@ -142,6 +142,14 @@ and this project uses [Semantic Versioning](https://semver.org/).
   set of sidepanel strings migrated. **Scope: UI strings only** — prompt templates stay English
   (they're LLM instructions, not user-facing text). CI guard test: every `data-i18n` key must
   resolve in every locale dir; message entries must carry translator descriptions.
+### Added — prompt-bloat audit (#71)
+- `bun scripts/prompt-audit/prompt-audit.ts` runs `describePrompt` across the mode × turn-shape
+  matrix and writes **`docs/qa/prompt-bloat-audit.md`** — per-section token-cost tables. Findings:
+  tier-0 duplication already fixed (#70); the next trim target is cross-mode instruction overlap
+  (no-submit/no-secrets rules restated across persona/systemPrompt/instructions); elements/forms
+  caps look right; tabs/skills/files sections are cheap; `approxTokens` overstates screenshot
+  sections (base64 bills as image tokens, not text). Trims land only with before/after totals +
+  an evals refresh.
 >>>>>>> dev
 
 ### Fixed — 📷 screenshots never reached Zo on real Chrome
