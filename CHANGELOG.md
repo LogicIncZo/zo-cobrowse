@@ -61,10 +61,63 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - **⬇ Latest pill** — appears when the chat log is scrolled away from the
   bottom (e.g. while reading during a stream); clicks snap back.
 
+<<<<<<< HEAD
 ### Fixed — `@` tabs and chip strip show page titles (#72)
 - The `@` tab autocomplete and the tab-context chip strip rendered bare hostnames — with two
   `github.com` tabs open the entries were indistinguishable. Both now lead with the page title
   (host dimmed/secondary in the popup; host + full URL in tooltips).
+=======
+### Fixed — skills picker (`/`) re-fetched on every open
+- **Cache survives service-worker restarts (#73)**: the MV3 SW is killed after ~30s idle, which
+  wiped the in-memory 5-min skills cache — the `/` picker showed "Loading skills…" on essentially
+  every open. New `lib/sw-cache.js` (`createSessionCache()`) keeps the memory fast-path but backs
+  the cache with `chrome.storage.session`, so it survives worker restarts; the vision model-catalog
+  cache gets the same treatment (`cobrowse_skills_list` / `cobrowse_catalog_cache`).
+- **Truncated listings are loud, not silent**: the skills bash listing now carries a
+  `##SKILL_COUNT n` line, and a listing cut short by a server-side output cap surfaces an honest
+  error ("truncated or unparseable — refresh to retry") instead of a silent empty list. When the
+  workspace holds more skill folders than were listed (folders without a parseable SKILL.md head),
+  the picker shows "+N more skill folders not listed — ⟳ refreshes."
+
+### Added — `%` picker: hand Zo a whole FOLDER as context (#74)
+- Directory rows in the `%` browser gained a **＋** affordance beside click-to-navigate: arming a
+  folder rides its path in `## Referenced Files` (Zo lists/recurses server-side — the wire format
+  was already paths-only). Folder chips render 📁 with a trailing slash; the section instruction
+  line now teaches "files: read them; directories: list/recurse as needed."
+
+### Fixed — theme consistency across surfaces (#65)
+- **Live theme sync**: changing the theme in the sidepanel popover now updates an open Settings
+  tab immediately (and vice versa) — both surfaces follow `storage.onChanged` for
+  `cobrowse_theme` instead of only reading it at load.
+- **Write-assist popover follows the theme**: the page-injected shadow-DOM widget now resolves
+  `cobrowse_theme` (dark → dark widget; light/sepia/forest/ocean → light; system mirror follows
+  `prefers-color-scheme`, live) via CSS custom properties + a `:host(.zo-wa-dark)` block — it no
+  longer ships hardcoded light colors.
+### Added — sticky DOM context toggle (#69)
+- A **🧩 DOM** toggle now sits beside the 📷 Image toggle in the tab-strip row. When OFF, **no page
+  DOM is ever attached** — `decideTurn` caps every turn to the URL/title pointer, whatever the Mode
+  or context policy decided (including `!context`, which shows an inline note when capped). The
+  setting is sticky (`storage.sync`, default on) and the tier chip / prompt inspector show the cap
+  reason, so preview and send can't diverge.
+- **Precedence**: an armed 📷 with the DOM off ships pixels as a **screenshot-only** turn — tier 0
+  with just `## Screenshot` (`shotOnly` rides ASK_ZO; `buildPrompt` renders the section via
+  `opts.screenshotOnly`). The tier-0 auto-active-tab reference (T1 excerpt) is also capped — OFF
+  means URL/title pointer only. While capped, the policy state doesn't record the capture hash, so
+  re-enabling re-attaches normally instead of trusting a "context already sent" that never went out.
+### Fixed — tier-0 prompt bloat (#70)
+- **Exactly ONE content-not-attached disclaimer per tier-0 turn**: Lean turns and
+  read-downgraded turns stacked the generic honesty tail on top of a disclaimer already present
+  in the prompt (~120 tokens of pure duplication every tier-0 turn). The generic tail is now
+  suppressed when Lean's contract instructions or the read-downgrade short variant already
+  disclaimed. `lean-pointer` eval cache refreshed live.
+### Fixed — Model/Persona/Mode dropdowns open on mouse click in the side panel (#62)
+- Native `<select>` popups don't open on mouse click inside the side-panel shell (a Chromium
+  quirk invisible to our tab-based e2e — keyboard still worked). The three controls-bar dropdowns
+  now render through a **select shim**: the native select stays in the DOM as the data source
+  (every existing `change` listener, including Settings-override merging, untouched) while a
+  custom trigger + popup — the same pattern as the `@`/`/`/`%` pickers — handles the interaction,
+  with full keyboard support (↑/↓/Enter/Esc).
+>>>>>>> dev
 
 ### Fixed — 📷 screenshots never reached Zo on real Chrome
 - **`<all_urls>` host permission**: `chrome.tabs.captureVisibleTab` requires the literal

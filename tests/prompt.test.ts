@@ -137,6 +137,23 @@ describe("buildPrompt — tier gating", () => {
     const noShot = buildPrompt(BUILTIN_MODES.visual, makeCtx(), "describe");
     expect(noShot).not.toContain("## Screenshot");
   });
+
+  it("#69: screenshotOnly renders the screenshot at tier 0 with NO DOM sections", () => {
+    const p = buildPrompt(
+      BUILTIN_MODES.visual,
+      makeCtx({ screenshotDataUrl: "data:image/jpeg;base64,AAA", visibleText: "secret dom text", clickable: [{ text: "a", tag: "a", selector: "#a" }] }),
+      "describe",
+      { effectiveTier: 0, screenshotOnly: true },
+    );
+    expect(p).toContain("## Screenshot");
+    expect(p).toContain("data:image/jpeg;base64,AAA");
+    expect(p).not.toContain("## Page Content");
+    expect(p).not.toContain("secret dom text");
+    expect(p).not.toContain("## Elements");
+    // The flag alone must NOT leak a screenshot section without a data URL.
+    const noData = buildPrompt(BUILTIN_MODES.visual, makeCtx({ visibleText: "text" }), "describe", { effectiveTier: 0, screenshotOnly: true });
+    expect(noData).not.toContain("## Screenshot");
+  });
 });
 
 // ---- intent downgrade (moved from background.test.ts — logic now in prompt.js)
@@ -188,6 +205,15 @@ describe("buildPrompt — tier-0 honesty", () => {
     expect(p).not.toContain("using the page content provided");
   });
 
+  it("tier-0 carries exactly ONE content-not-attached disclaimer (#70 dedupe)", () => {
+    // Downgraded action mode: the short variant disclaims → generic tail suppressed.
+    const downgraded = buildPrompt(BUILTIN_MODES.cobrowse, makeCtx(), "Summarize this page", { effectiveTier: 0 });
+    expect(downgraded).toContain("Only the page URL and title are attached");
+    expect(downgraded).not.toContain("Page content was not attached this turn");
+    const disclaimers = downgraded.match(/attached/gi)?.length ?? 0;
+    expect(disclaimers).toBe(1);
+  });
+
   it("downgrade tail keeps the content wording at tier >= 1", () => {
     const p = buildPrompt(BUILTIN_MODES.cobrowse, makeCtx(), "Summarize this page");
     expect(p).toContain("Answer the request directly using the page content provided.");
@@ -215,11 +241,12 @@ describe("buildPrompt — Lean mode", () => {
     expect(p).not.toContain(ACTION_SCHEMA_COMPACT);
   });
 
-  it("contract instructions ride verbatim; tier-0 clarifier still appended", () => {
+  it("contract instructions ride verbatim; the generic tier-0 tail is NOT duplicated (#70)", () => {
     const p = buildPrompt(mode, makeCtx(), "note this page for later");
     expect(p).toContain("The page content is NOT attached");
     expect(p).toContain("Never return browser actions");
-    expect(p).toContain("Page content was not attached this turn");
+    // Lean's instructions already disclaim — the generic tail must stay silent.
+    expect(p).not.toContain("Page content was not attached this turn");
   });
 
   it("describePrompt reports tier 0 and a schema-valid structure", () => {

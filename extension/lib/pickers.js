@@ -65,10 +65,13 @@ export function shellQuote(s) {
   return `'${String(s).replace(/'/g, `'\\''`)}'`;
 }
 
-/** One bash command that dumps every skill folder's SKILL.md head. */
+/** One bash command that dumps every skill folder's SKILL.md head. The
+ *  ##SKILL_COUNT line rides FIRST (inside the markers) so a server-side
+ *  output truncation can still be detected by comparing counts (#73). */
 export function skillsListCommand(skillsDir = SKILLS_DIR) {
   return [
     `echo ${STDOUT_BEGIN};`,
+    `echo "##SKILL_COUNT $(ls -1d ${shellQuote(skillsDir)}/*/ 2>/dev/null | wc -l)";`,
     `for d in ${shellQuote(skillsDir)}/*/; do`,
     `f="\${d}SKILL.md";`,
     `if [ -f "$f" ]; then echo "##SKILL \${d%/}"; sed -n '1,${SKILL_HEAD_LINES}p' "$f"; echo; fi;`,
@@ -190,17 +193,21 @@ export function parseSkillFrontmatter(head) {
 
 /**
  * Parse the full skills bundle (the ##SKILL-delimited output of
- * skillsListCommand) into skill entries, sorted by name. Folders whose
- * frontmatter lacks a name use the folder name; entries with no parseable
- * SKILL.md head at all are skipped.
+ * skillsListCommand) into a report: the skill entries (sorted by name) plus
+ * the total folder count from the ##SKILL_COUNT line (#73 — lets the UI say
+ * "+N more" when folders were skipped). Folders whose frontmatter lacks a
+ * name use the folder name; entries with no parseable SKILL.md head at all
+ * are skipped. Missing markers (truncated/unparseable listing) yield an
+ * empty report with totalFolders null — callers surface that honestly.
  *
  * @param {string} rawText bash tool result text
- * @returns {Array<{id: string, name: string, description: string}>}
+ * @returns {{ skills: Array<{id: string, name: string, description: string}>, totalFolders: number | null }}
  */
 export function parseSkillsBundle(rawText) {
   const stdout = extractMarkedStdout(rawText);
-  if (stdout == null) return [];
+  if (stdout == null) return { skills: [], totalFolders: null };
   const skills = [];
+  let totalFolders = null;
   let current = null;
   let head = [];
   const flush = () => {
@@ -221,6 +228,8 @@ export function parseSkillsBundle(rawText) {
     head = [];
   };
   for (const line of stdout.split('\n')) {
+    const cm = line.match(/^##SKILL_COUNT\s+(\d+)$/);
+    if (cm) { totalFolders = parseInt(cm[1], 10); continue; }
     const m = line.match(/^##SKILL\s+(\/\S+)$/);
     if (m) {
       flush();
@@ -231,7 +240,7 @@ export function parseSkillsBundle(rawText) {
   }
   flush();
   skills.sort((a, b) => a.name.localeCompare(b.name));
-  return skills;
+  return { skills, totalFolders };
 }
 
 /**

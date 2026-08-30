@@ -422,15 +422,17 @@ describe("cold start — sidepanel wiring", () => {
 
 describe("auto-active-tab — sidepanel wiring", () => {
   it("auto-references the active tab on tier-0 turns and sends the merged list", () => {
-    expect(spCode).toMatch(/effectiveTier === 0 && currentContext && currentContext\.tabId != null && !pageBlank/);
+    // #69: the auto-T1 reference is also capped by the sticky DOM toggle.
+    expect(spCode).toMatch(/effectiveTier === 0 && domContextOn && currentContext && currentContext\.tabId != null && !pageBlank/);
     expect(spCode).toMatch(/ensureActiveTabRef\(tabContexts, activeRef\)/);
     expect(spCode).toMatch(/tabContexts: sendTabContexts/);
   });
 
   it("mirrors the auto-reference in the inspector preview", () => {
     // effTier = decision.effectiveTier after the 📷-toggle force (sendQuery
-    // and the inspector share the same post-force value).
-    expect(spCode).toMatch(/previewTabContexts\(\{ includeActive: effTier === 0 \}\)/);
+    // and the inspector share the same post-force value). #69: the auto-T1
+    // reference is capped by the sticky DOM toggle in both paths.
+    expect(spCode).toMatch(/previewTabContexts\(\{ includeActive: effTier === 0 && domContextOn \}\)/);
     expect(spCode).toMatch(/includeActive = false/);
   });
 
