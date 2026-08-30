@@ -1044,7 +1044,6 @@ describe("theme live-sync (#65)", () => {
 });
 
 describe("DOM toggle (#69)", () => {
-describe("DOM toggle (#69)", () => {
   it("persists domContextEnabled=false on click and caps the next action send to tier 0", async () => {
     (panelWin.document.querySelector("#dom-toggle") as any).click();
     await waitUntil(() => bus.storage.sync._store.domContextEnabled === false, 5000);
@@ -1065,6 +1064,5 @@ describe("DOM toggle (#69)", () => {
     // Restore for the other describes.
     (panelWin.document.querySelector("#dom-toggle") as any).click();
     await waitUntil(() => bus.storage.sync._store.domContextEnabled === true, 5000);
-
   });
 });
