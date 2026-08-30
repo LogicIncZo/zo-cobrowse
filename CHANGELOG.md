@@ -7,6 +7,15 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — `Reconnecting…` banner actually shows on transient stream failures (#95)
+- **The banner was dead code on the exact path it was built for (QA finding D, P4)**: on a
+  retriable network error the background posted a `STREAM_ERROR` *before* retrying, which the
+  panel treats as terminal — the session died, the "➳ Reconnecting… attempt 2 of 3" banner was
+  ignored, and recovery only rendered through the inactive-`STREAM_DONE` fallback.
+- The streaming impl no longer posts premature errors: retriable failures stay silent during
+  backoff (the banner shows via `STREAM_RECONNECT`), and the one terminal `STREAM_ERROR` arrives
+  only after all retries are exhausted. 4xx/in-stream Zo errors keep their specific messages.
+
 ### Fixed — Test Connection & Settings honor the configured API endpoint (#94)
 - **New "API Endpoint" field** in Settings → Connection: `zoApiUrl` existed in storage (and was
   seeded by the e2e harness) but had no UI — self-hosted / overridden gateways were unconfigurable.
