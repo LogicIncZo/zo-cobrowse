@@ -1432,8 +1432,12 @@ async function _askZoStreamImpl(port, msg) {
     // Stream ended (no End event received — graceful fallback)
     await finishStreamWithPullLoop(port, sid, fullText, { reasoning: reasoningText }, loop);
   } catch (err) {
-    safePost(port, { sessionId: sid, type: 'STREAM_ERROR', error: `Connection failed: ${err.message}` });
-    throw err; // let the retry wrapper decide
+    // No STREAM_ERROR post here (QA finding D): askZoStream may retry this
+    // error, and a transient error post kills the panel's session before the
+    // Reconnecting banner can show. Terminal surfacing belongs to the ASK_ZO
+    // handler's catch — after retries are exhausted — and to the specific
+    // branches above that post AND return/throw non-retriably.
+    throw err;
   }
 }
 

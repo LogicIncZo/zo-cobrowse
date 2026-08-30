@@ -120,7 +120,7 @@ describe("background streaming pipeline", () => {
     expect(req.body.input).toContain("hi");
   });
 
-  it("a transient network failure surfaces STREAM_ERROR, then reconnects and completes", async () => {
+  it("a transient network failure shows the reconnect banner — no terminal error — then completes (QA finding D)", async () => {
     let attempt = 0;
     fm.handle(() => {
       attempt++;
@@ -132,16 +132,32 @@ describe("background streaming pipeline", () => {
     await waitUntil(() => rec.seen.some((m) => m.type === "STREAM_DONE"), 8000);
 
     const types = rec.seen.map((m) => m.type);
-    const errIdx = types.indexOf("STREAM_ERROR");
     const reconnIdx = types.indexOf("STREAM_RECONNECT");
     const doneIdx = types.indexOf("STREAM_DONE");
-    expect(errIdx).toBeGreaterThanOrEqual(0);
-    expect(reconnIdx).toBeGreaterThan(errIdx); // banner comes after the surfaced error…
-    expect(doneIdx).toBeGreaterThan(reconnIdx); // …and before the completed stream
+    expect(reconnIdx).toBeGreaterThanOrEqual(0);
+    expect(doneIdx).toBeGreaterThan(reconnIdx);
+    // The fix: NO STREAM_ERROR on the retried path — the old transient post
+    // killed the panel session so the Reconnecting banner never showed.
+    expect(rec.seen.some((m) => m.type === "STREAM_ERROR")).toBe(false);
     const reconn = rec.seen.find((m) => m.type === "STREAM_RECONNECT");
     expect(reconn.attempt).toBe(2);
     expect(reconn.maxRetries).toBe(3);
     expect(rec.seen.find((m) => m.type === "STREAM_DONE").fullText).toBe("Recovered");
+  });
+
+  it("all retries exhausted: ONE terminal STREAM_ERROR after the reconnect attempts (QA finding D)", async () => {
+    fm.handle(() => { throw new Error("fetch failed"); });
+    const rec = connectRecorder();
+    rec.post({ sessionId: 6, type: "ASK_ZO", userQuery: "q", modeId: "ask", chatId: "chat-6" });
+    await waitUntil(() => rec.seen.some((m) => m.type === "STREAM_ERROR"), 15000);
+
+    const errs = rec.seen.filter((m) => m.type === "STREAM_ERROR");
+    expect(errs).toHaveLength(1); // terminal only — no transient per-attempt kills
+    expect(errs[0].error).toContain("fetch failed");
+    const lastReconnIdx = rec.seen.map((m) => m.type).lastIndexOf("STREAM_RECONNECT");
+    expect(rec.seen.indexOf(errs[0])).toBeGreaterThan(lastReconnIdx);
+    expect(rec.seen.filter((m) => m.type === "STREAM_RECONNECT").map((m) => m.attempt)).toEqual([2, 3]);
+    expect(rec.seen.some((m) => m.type === "STREAM_DONE")).toBe(false);
   });
 
   it("a 4xx is terminal: surfaced error, wrapped error, final error — no retry, no DONE", async () => {
@@ -153,9 +169,9 @@ describe("background streaming pipeline", () => {
     );
 
     const errs = rec.seen.filter((m) => m.type === "STREAM_ERROR");
+    expect(errs).toHaveLength(2); // impl's specific post + the handler's terminal wrap (QA finding D removed the third)
     expect(errs[0].error).toContain("Zo API error: 401");
-    expect(errs[1].error).toContain("Connection failed: Zo API error: 401");
-    expect(errs[2].error).toContain("Failed: Zo API error: 401");
+    expect(errs[1].error).toContain("Failed: Zo API error: 401");
     expect(rec.seen.some((m) => m.type === "STREAM_RECONNECT")).toBe(false);
     expect(rec.seen.some((m) => m.type === "STREAM_DONE")).toBe(false);
   });
