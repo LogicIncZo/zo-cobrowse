@@ -1259,16 +1259,26 @@ function renderPromptInspector() {
     state: contextState,
     pageHash,
     pageBlank: isBlankPage(currentContext?.url || ''),
+    domEnabled: domContextOn,
   });
   // Mirror sendQuery's 📷-toggle force so the preview can't diverge from the
-  // send: armed toggle = tier 3 this turn, same reason string.
+  // send: armed toggle = tier 3 this turn, same reason string. With the #69
+  // DOM toggle off, the cap wins → screenshot-only turn at tier 0.
   let effTier = decision.effectiveTier;
   let effReason = decision.reason;
-  if (shotArmed && effTier < 3) {
+  if (shotArmed && !domContextOn) {
+    effReason = '🚫 DOM off — 📷 screenshot-only this turn';
+  } else if (shotArmed && effTier < 3) {
     effTier = 3;
     effReason = '📷 Image toggle — screenshot forced this turn';
   }
-  const described = describePrompt(mode, currentContext, query, { effectiveTier: effTier, tabContexts: previewTabContexts({ includeActive: effTier === 0 }), skills: pickedSkills, workspaceFiles: pickedFiles });
+  const described = describePrompt(mode, currentContext, query, {
+    effectiveTier: effTier,
+    ...(shotArmed && !domContextOn ? { screenshotOnly: true } : {}),
+    tabContexts: previewTabContexts({ includeActive: effTier === 0 && domContextOn }),
+    skills: pickedSkills,
+    workspaceFiles: pickedFiles,
+  });
 
   summary.textContent = `🔎 Prompt preview · ~${described.approxTokens} tokens`;
   meta.replaceChildren();
@@ -2188,6 +2198,46 @@ let shotArmed = false;
 let shotPrevModeId = null;
 let shotModeAuto = false;
 
+// #69 — sticky DOM cap (#dom-toggle). Unlike the send-once 📷 toggle this is
+// persistent (storage.sync `domContextEnabled`, default on): when OFF no page
+// DOM ever attaches — decideTurn caps every turn to the URL/title pointer,
+// whatever the Mode or policy wanted (including !context). An armed 📷 with
+// the DOM off still ships pixels (screenshot-only turn — separate channel).
+let domContextOn = true;
+
+function renderDomToggle() {
+  const btn = document.getElementById('dom-toggle');
+  if (!btn) return;
+  btn.setAttribute('aria-pressed', String(domContextOn));
+  btn.classList.toggle('shot-toggle-on', domContextOn);
+  btn.textContent = domContextOn ? '🧩 DOM ✓' : '🚫 DOM';
+  btn.title = domContextOn
+    ? 'Page DOM attached per the context policy — click to turn OFF (URL/title pointer only, privacy / token cap)'
+    : 'DOM OFF — no page DOM is sent (URL/title pointer only). Click to re-enable.';
+  const wrap = document.getElementById('tab-contexts');
+  if (wrap) wrap.classList.remove('hidden'); // the toggles must stay reachable
+}
+
+function toggleDomContext() {
+  domContextOn = !domContextOn;
+  try {
+    chrome.storage.sync.set({ domContextEnabled: domContextOn });
+  } catch { /* storage unavailable — session-only */ }
+  renderDomToggle();
+  renderPromptInspector();
+}
+
+async function initDomToggle() {
+  const btn = document.getElementById('dom-toggle');
+  if (!btn) return;
+  btn.addEventListener('click', toggleDomContext);
+  try {
+    const saved = await chrome.storage.sync.get({ domContextEnabled: true });
+    domContextOn = saved.domContextEnabled !== false;
+  } catch { /* default on */ }
+  renderDomToggle();
+}
+
 /** Re-render the toggle chip's pressed state + label. Also keeps the
  * tab-contexts row visible when armed even if no tabs are open (the row
  * hides itself when the strip is empty). */
@@ -2246,6 +2296,7 @@ function initTabStrip() {
   }
   refreshOpenTabs();
   initShotToggle();
+  initDomToggle();
   // Keep the strip fresh when the user refocuses the panel.
   window.addEventListener('focus', refreshOpenTabs);
   // Track browser-tab switches: adopt the newly active tab for DISPLAY (page
@@ -2302,10 +2353,8 @@ function renderTabStrip() {
   const strip = document.getElementById('tab-strip');
   const countEl = document.getElementById('tab-strip-count');
   if (!wrap || !strip) return;
-  if (!openTabs.length && !shotArmed) {
-    wrap.classList.add('hidden');
-    return;
-  }
+  // Always visible since #69: the row hosts the sticky toggles (📷 / 🧩 DOM),
+  // which must stay reachable even with no tabs open.
   wrap.classList.remove('hidden');
   if (countEl) countEl.textContent = `(${tabRefsEnabled.size}/${openTabs.length})`;
 
@@ -4277,6 +4326,7 @@ sendQuery = async function() {
     pageHash,
     pageBlank,
     hasThread: !!threadId,
+    domEnabled: domContextOn,
   });
   contextState = turnDecision.newState;
   saveConversationState(activeId, contextState);
@@ -4284,18 +4334,27 @@ sendQuery = async function() {
   // policy decision — the user explicitly asked for pixels this turn. The
   // capture itself is still truthful: the background's vision gate may skip
   // it (model can't take images) and turnHadScreenshot stays honest.
+  // #69: with the DOM toggle OFF the cap wins — pixels ride as a
+  // screenshot-only turn (tier stays 0; only ## Screenshot renders).
   let effectiveTier = turnDecision.effectiveTier;
   let turnReason = turnDecision.reason;
-  if (turnShot && effectiveTier < 3) {
+  const shotOnlyTurn = turnShot && !domContextOn;
+  if (shotOnlyTurn) {
+    turnReason = '🚫 DOM off — 📷 screenshot-only this turn';
+  } else if (turnShot && effectiveTier < 3) {
     effectiveTier = 3;
     turnReason = '📷 Image toggle — screenshot forced this turn';
+  }
+  if (bangResult && bangResult.kind === 'context' && !domContextOn) {
+    addMessage('system', '🚫 DOM toggle is OFF — !context was capped to the URL/title pointer this turn.');
   }
 
   // Truthful per-turn screenshot flag: the prompt embeds the image only when
   // the policy attaches tier-3 context AND the capture actually produced a
   // data URL (the vision gate may skip it, or captureVisibleTab may fail).
+  // Screenshot-only turns (#69) ship pixels at tier 0.
   // Drives the 📷 footer chip + its persistence on the assistant message.
-  const turnHadScreenshot = effectiveTier >= 3 && !!currentContext?.screenshotDataUrl;
+  const turnHadScreenshot = (effectiveTier >= 3 || shotOnlyTurn) && !!currentContext?.screenshotDataUrl;
 
   // The 📷 pill marks a screenshot that SHIPPED, not intent: render it (and
   // persist `shot`) only when the capture produced a data URL. An armed
@@ -4322,7 +4381,7 @@ sendQuery = async function() {
   // (!context / action turns). Refs renumber so the active tab is T1.
   // Blank/new-tab pages are never auto-referenced (cold start: no page).
   let sendTabContexts = tabContexts;
-  if (effectiveTier === 0 && currentContext && currentContext.tabId != null && !pageBlank) {
+  if (effectiveTier === 0 && domContextOn && currentContext && currentContext.tabId != null && !pageBlank) {
     const activeRef = await fetchTabContext(currentContext.tabId);
     if (activeRef) sendTabContexts = assignRefs(ensureActiveTabRef(tabContexts, activeRef));
   }
@@ -4372,6 +4431,7 @@ sendQuery = async function() {
         customModes,
         effectiveTier,
         modeOverrides,
+        ...(shotOnlyTurn ? { shotOnly: true } : {}),
         ...(sendTabContexts.length ? { tabContexts: sendTabContexts } : {}),
         ...(turnSkills.length ? { skills: turnSkills } : {}),
         ...(turnFiles.length ? { workspaceFiles: turnFiles } : {}),
@@ -4400,6 +4460,7 @@ sendQuery = async function() {
     customModes,
     effectiveTier,
     modeOverrides,
+    ...(shotOnlyTurn ? { shotOnly: true } : {}),
     ...(sendTabContexts.length ? { tabContexts: sendTabContexts } : {}),
     ...(turnSkills.length ? { skills: turnSkills } : {}),
     ...(turnFiles.length ? { workspaceFiles: turnFiles } : {}),

@@ -307,7 +307,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
     }
     case 'ASK_ZO': {
-      askZo(request.pageContext, request.userQuery, request.modelName, request.personaId, request.modeId, request.customModes, request.effectiveTier, request.modeOverrides, request.conversationId, request.skills, request.workspaceFiles).then(sendResponse);
+      askZo(request.pageContext, request.userQuery, request.modelName, request.personaId, request.modeId, request.customModes, request.effectiveTier, request.modeOverrides, request.conversationId, request.skills, request.workspaceFiles, !!request.shotOnly).then(sendResponse);
       return true;
     }
     case 'RECREATE_CONTEXT_MENUS':
@@ -1081,7 +1081,9 @@ async function _askZoStreamImpl(port, msg) {
   // effectiveTier is resolved by the side-panel context policy (opt-in DOM +
   // send-once) and passed on the ASK_ZO payload. When absent (legacy callers),
   // buildPrompt falls back to the Mode's configured tier.
-  const prompt = msg._followUpInput || buildPrompt(mode, pageContext, userQuery, { effectiveTier, tabContexts: loop.tabContexts, skills: msg.skills, workspaceFiles: msg.workspaceFiles });
+  // #69: msg.shotOnly (DOM toggle off + 📷 armed) renders the ## Screenshot
+  // section at tier 0 — pixels ride even though the DOM is capped out.
+  const prompt = msg._followUpInput || buildPrompt(mode, pageContext, userQuery, { effectiveTier, ...(msg.shotOnly ? { screenshotOnly: true } : {}), tabContexts: loop.tabContexts, skills: msg.skills, workspaceFiles: msg.workspaceFiles });
 
   try {
     const response = await fetch(config.zoApiUrl, {
@@ -1578,7 +1580,7 @@ function emitPullTrace(port, sid, req, target, fu) {
   });
 }
 
-async function askZo(pageContext, userQuery, modelName, personaId, modeId, customModes, effectiveTier, modeOverrides, conversationId, skills, workspaceFiles) {
+async function askZo(pageContext, userQuery, modelName, personaId, modeId, customModes, effectiveTier, modeOverrides, conversationId, skills, workspaceFiles, shotOnly) {
   if (!config.zoAccessToken) {
     return { error: '❌ Zo access token not configured. Open extension settings to set it up.' };
   }
@@ -1587,7 +1589,7 @@ async function askZo(pageContext, userQuery, modelName, personaId, modeId, custo
   const mode = resolveMode(modeId || config.zoActiveMode || DEFAULT_MODE_ID, customModes || {}, modeOverrides || {});
   const resolvedPersonaId = personaId || config.zoPersonaId || '';
 
-  const prompt = buildPrompt(mode, pageContext, userQuery, { effectiveTier, skills, workspaceFiles });
+  const prompt = buildPrompt(mode, pageContext, userQuery, { effectiveTier, ...(shotOnly ? { screenshotOnly: true } : {}), skills, workspaceFiles });
   // Per-chat threading: the sidepanel sends the chat's stored thread id; the
   // global stays as the fallback for ambient callers (context menu, omnibox).
   const threadId = msgThreadId(conversationId);

@@ -185,7 +185,10 @@ function _compose(mode, pageContext, userQuery, opts) {
       push('forms', forms.slice(0, 30).map(compactForm).join(''));
     }
   }
-  if (tier >= 3 && ctx.screenshotDataUrl) {
+  // Screenshot: rides at tier 3, OR on a DOM-capped turn when the user armed
+  // the 📷 toggle with the #69 DOM toggle off (screenshot-only turn — pixels
+  // are a separate channel from the capped-out DOM).
+  if ((tier >= 3 || (opts && opts.screenshotOnly)) && ctx.screenshotDataUrl) {
     push('sep', '');
     push('screenshot', '## Screenshot');
     push('screenshot', `![page](${ctx.screenshotDataUrl})`);
