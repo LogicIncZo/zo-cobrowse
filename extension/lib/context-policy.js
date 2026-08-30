@@ -104,10 +104,10 @@ export function stripToPointer(pageContext) {
  * buildPrompt emits only `## Page`. `newState` is the updated conversation
  * state (attach records the hash; non-attach just advances the turn counter).
  *
- * @param {{ mode: object, query: string, bang?: object, state?: object, pageHash?: string, pageBlank?: boolean, forceRefresh?: boolean, hasThread?: boolean }} args
+ * @param {{ mode: object, query: string, bang?: object, state?: object, pageHash?: string, pageBlank?: boolean, forceRefresh?: boolean, hasThread?: boolean, domEnabled?: boolean }} args
  * @returns {{ effectiveTier: number, reason: string, attach: boolean, newState: object }}
  */
-export function decideTurn({ mode, query, bang, state, pageHash, pageBlank = false, forceRefresh = false, hasThread = true }) {
+export function decideTurn({ mode, query, bang, state, pageHash, pageBlank = false, forceRefresh = false, hasThread = true, domEnabled = true }) {
   const st = state || createConversationState();
   const isAction = !!mode && !!mode.expectJson && !shouldDowngradeToJsonDisabled(mode, query);
   const contextRequested = !!bang && bang.kind === 'context';
@@ -122,7 +122,7 @@ export function decideTurn({ mode, query, bang, state, pageHash, pageBlank = fal
   else attach = false; // reads: opt-in only
 
   const modeTier = mode && Number.isInteger(mode.contextTier) ? mode.contextTier : 0;
-  const effectiveTier = attach ? modeTier : 0;
+  let effectiveTier = attach ? modeTier : 0;
 
   let reason;
   if (pageBlank) reason = 'Blank page · no page context';
@@ -134,7 +134,18 @@ export function decideTurn({ mode, query, bang, state, pageHash, pageBlank = fal
   else if (isAction && !pageChanged) reason = 'Follow-up · URL only (context already sent)';
   else reason = 'Read · URL only (type !context to attach)';
 
-  const newState = attach
+  // #69: the sticky DOM toggle is a HARD cap — it wins over everything,
+  // including !context and first-turn action attach. The state does NOT
+  // record the capture hash while capped, so re-enabling the toggle (or a
+  // later page change) re-attaches normally instead of trusting a "context
+  // already sent" that never went out.
+  const domCapped = domEnabled === false && effectiveTier > 0;
+  if (domCapped) {
+    effectiveTier = 0;
+    reason = '🚫 DOM toggle — page DOM off';
+  }
+
+  const newState = (attach && !domCapped)
     ? {
         ...st,
         lastCaptureHash: pageHash,
@@ -143,7 +154,7 @@ export function decideTurn({ mode, query, bang, state, pageHash, pageBlank = fal
       }
     : { ...st, turnsSinceFullCapture: st.turnsSinceFullCapture + 1 };
 
-  return { effectiveTier, reason, attach, newState };
+  return { effectiveTier, reason, attach: attach && !domCapped, newState };
 }
 
 // ---- chrome.storage.session helpers (the only chrome.* touch in this module)

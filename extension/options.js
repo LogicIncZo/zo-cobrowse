@@ -32,6 +32,50 @@ function applyOptionsTheme(theme) {
   chrome.storage.sync.set({ [THEME_STORAGE_KEY]: theme });
 }
 
+// ---- TTS voice picker (#64) ----
+// The speak path in sidepanel.js already passes voiceName from `zoTtsVoice`;
+// this populates the chooser from chrome.tts.getVoices(), filtered by the
+// configured language prefix. Zero-voice systems get an honest disabled state.
+function populateTtsVoices(selected) {
+  const sel = document.getElementById('tts-voice');
+  if (!sel) return;
+  const hint = document.getElementById('tts-voice-hint');
+  if (!chrome.tts || typeof chrome.tts.getVoices !== 'function') {
+    sel.disabled = true;
+    if (hint) hint.textContent = 'Voice enumeration unavailable in this browser.';
+    return;
+  }
+  chrome.tts.getVoices((voices) => {
+    const all = Array.isArray(voices) ? voices : [];
+    if (!all.length) {
+      sel.disabled = true;
+      sel.replaceChildren();
+      const def = document.createElement('option');
+      def.value = '';
+      def.textContent = 'System default';
+      sel.appendChild(def);
+      if (hint) hint.textContent = 'No TTS voices installed on this system.';
+      return;
+    }
+    const lang = (document.getElementById('tts-lang')?.value || '').trim().toLowerCase();
+    const langRoot = lang.split('-')[0];
+    const filtered = langRoot ? all.filter((v) => String(v.lang || '').toLowerCase().startsWith(langRoot)) : all;
+    const list = filtered.length ? filtered : all;
+    sel.disabled = false;
+    sel.replaceChildren();
+    const def = document.createElement('option');
+    def.value = '';
+    def.textContent = 'System default';
+    sel.appendChild(def);
+    for (const v of list) {
+      const opt = document.createElement('option');
+      opt.value = String(v.voiceName || '');
+      opt.textContent = `${v.voiceName || 'voice'}${v.lang ? ' — ' + v.lang : ''}`;
+      sel.appendChild(opt);
+    }
+    sel.value = list.some((v) => String(v.voiceName || '') === selected) ? selected : '';
+    if (hint) hint.textContent = filtered.length ? '' : `No voices match "${lang}" — showing all.`;
+  });
 // ---- Debug diagnostics (#67) ----
 // The background records metadata-only timings while debugMode is on; this
 // exports them via clipboard (nothing leaves the browser otherwise).
@@ -80,6 +124,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   loadOptionsTheme();
   // Listen for system theme changes when no override is set
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', loadOptionsTheme);
+  // #65: follow theme changes made in the sidepanel (or another Settings tab) live.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'sync' && changes[THEME_STORAGE_KEY]) loadOptionsTheme();
+  });
 
   const form = document.getElementById('settings-form');
   const testBtn = document.getElementById('test-btn');
@@ -239,6 +287,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (langInput) langInput.value = syncResult.zoTtsLang || 'en-US';
       if (rateInput) rateInput.value = syncResult.zoTtsRate || '1.0';
       if (autoReadCheck) autoReadCheck.checked = syncResult.zoTtsAutoRead || false;
+      populateTtsVoices(syncResult.zoTtsVoice || '');
 
       // Restore screenshot toggle
       const screenshotsCheck = document.getElementById('enable-screenshots');
@@ -261,6 +310,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (token) populateModels(token, getModelValue());
   });
 
+  // Language change → re-filter the voice list (#64; keeps a still-valid selection)
+  document.getElementById('tts-lang')?.addEventListener('change', () => {
+    populateTtsVoices(document.getElementById('tts-voice')?.value || '');
+  });
   // Debug diagnostics (#67): apply immediately (the ring is cheap + local),
   // and also persist via the normal Save mapping.
   document.getElementById('debug-mode')?.addEventListener('change', (e) => {
@@ -326,6 +379,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         zoPersonaId: personaSelect.value,
         zoQuickActions: quickActions,
         zoTtsLang: (document.getElementById('tts-lang')?.value || 'en-US').trim(),
+        zoTtsVoice: (document.getElementById('tts-voice')?.value || '').trim(),
         zoTtsRate: (document.getElementById('tts-rate')?.value || '1.0').trim(),
         zoTtsAutoRead: !!(document.getElementById('tts-auto-read')?.checked),
         enableScreenshots: !!(document.getElementById('enable-screenshots')?.checked),

@@ -127,4 +127,21 @@ test.describe("options page", () => {
       await context.close();
     }
   });
+
+  test("TTS voice picker: honest zero-voice state (#64)", async () => {
+    const { context, extensionId } = await launchExtension({ freshProfile: true });
+    try {
+      const page = await context.newPage();
+      await page.goto(`chrome-extension://${extensionId}/options.html`);
+      await page.click(`#settings-nav .settings-tab[data-pane="pane-features"]`);
+      const voice = page.locator("#tts-voice");
+      await expect(voice).toBeVisible();
+      // Headless Chromium ships zero TTS voices — the picker says so instead
+      // of offering a bare "System default" that silently does nothing.
+      await expect(voice).toBeDisabled();
+      await expect(page.locator("#tts-voice-hint")).toContainText("No TTS voices");
+    } finally {
+      await context.close();
+    }
+  });
 });
