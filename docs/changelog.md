@@ -6,6 +6,133 @@ This page mirrors everything **unreleased** on `dev`.
 
 ## [Unreleased]
 
+
+### Fixed — `Reconnecting…` banner actually shows on transient stream failures (#95)
+- **The banner was dead code on the exact path it was built for (QA finding D, P4)**: on a
+  retriable network error the background posted a `STREAM_ERROR` *before* retrying, which the
+  panel treats as terminal — the session died, the "➳ Reconnecting… attempt 2 of 3" banner was
+  ignored, and recovery only rendered through the inactive-`STREAM_DONE` fallback.
+- The streaming impl no longer posts premature errors: retriable failures stay silent during
+  backoff (the banner shows via `STREAM_RECONNECT`), and the one terminal `STREAM_ERROR` arrives
+  only after all retries are exhausted. 4xx/in-stream Zo errors keep their specific messages.
+
+### Fixed — Test Connection & Settings honor the configured API endpoint (#94)
+- **New "API Endpoint" field** in Settings → Connection: `zoApiUrl` existed in storage (and was
+  seeded by the e2e harness) but had no UI — self-hosted / overridden gateways were unconfigurable.
+- **Test Connection now tests what you configured**: it posted to a hardcoded
+  `https://api.zo.computer/zo/ask`, so a custom endpoint could never pass (QA finding B, P3).
+  It now posts to the field's value (default unchanged) and error messages quote the actual URL
+  tried. The model/persona dropdown loaders derive their `/models/available` +
+  `/personas/available` URLs from the same origin. Reset-to-defaults clears the field.
+
+### Fixed — `@` tabs and chip strip show page titles (#72)
+- The `@` tab autocomplete and the tab-context chip strip rendered bare hostnames — with two
+  `github.com` tabs open the entries were indistinguishable. Both now lead with the page title
+  (host dimmed/secondary in the popup; host + full URL in tooltips).
+
+### Fixed — skills picker (`/`) re-fetched on every open
+- **Cache survives service-worker restarts (#73)**: the MV3 SW is killed after ~30s idle, which
+  wiped the in-memory 5-min skills cache — the `/` picker showed "Loading skills…" on essentially
+  every open. New `lib/sw-cache.js` (`createSessionCache()`) keeps the memory fast-path but backs
+  the cache with `chrome.storage.session`, so it survives worker restarts; the vision model-catalog
+  cache gets the same treatment (`cobrowse_skills_list` / `cobrowse_catalog_cache`).
+- **Truncated listings are loud, not silent**: the skills bash listing now carries a
+  `##SKILL_COUNT n` line, and a listing cut short by a server-side output cap surfaces an honest
+  error ("truncated or unparseable — refresh to retry") instead of a silent empty list. When the
+  workspace holds more skill folders than were listed (folders without a parseable SKILL.md head),
+  the picker shows "+N more skill folders not listed — ⟳ refreshes."
+
+### Added — `%` picker: hand Zo a whole FOLDER as context (#74)
+- Directory rows in the `%` browser gained a **＋** affordance beside click-to-navigate: arming a
+  folder rides its path in `## Referenced Files` (Zo lists/recurses server-side — the wire format
+  was already paths-only). Folder chips render 📁 with a trailing slash; the section instruction
+  line now teaches "files: read them; directories: list/recurse as needed."
+
+### Fixed — theme consistency across surfaces (#65)
+- **Live theme sync**: changing the theme in the sidepanel popover now updates an open Settings
+  tab immediately (and vice versa) — both surfaces follow `storage.onChanged` for
+  `cobrowse_theme` instead of only reading it at load.
+- **Write-assist popover follows the theme**: the page-injected shadow-DOM widget now resolves
+  `cobrowse_theme` (dark → dark widget; light/sepia/forest/ocean → light; system mirror follows
+  `prefers-color-scheme`, live) via CSS custom properties + a `:host(.zo-wa-dark)` block — it no
+  longer ships hardcoded light colors.
+
+### Added — sticky DOM context toggle (#69)
+- A **🧩 DOM** toggle now sits beside the 📷 Image toggle in the tab-strip row. When OFF, **no page
+  DOM is ever attached** — `decideTurn` caps every turn to the URL/title pointer, whatever the Mode
+  or context policy decided (including `!context`, which shows an inline note when capped). The
+  setting is sticky (`storage.sync`, default on) and the tier chip / prompt inspector show the cap
+  reason, so preview and send can't diverge.
+- **Precedence**: an armed 📷 with the DOM off ships pixels as a **screenshot-only** turn — tier 0
+  with just `## Screenshot` (`shotOnly` rides ASK_ZO; `buildPrompt` renders the section via
+  `opts.screenshotOnly`). The tier-0 auto-active-tab reference (T1 excerpt) is also capped — OFF
+  means URL/title pointer only. While capped, the policy state doesn't record the capture hash, so
+  re-enabling re-attaches normally instead of trusting a "context already sent" that never went out.
+
+### Fixed — tier-0 prompt bloat (#70)
+- **Exactly ONE content-not-attached disclaimer per tier-0 turn**: Lean turns and
+  read-downgraded turns stacked the generic honesty tail on top of a disclaimer already present
+  in the prompt (~120 tokens of pure duplication every tier-0 turn). The generic tail is now
+  suppressed when Lean's contract instructions or the read-downgrade short variant already
+  disclaimed. `lean-pointer` eval cache refreshed live.
+
+### Fixed — Model/Persona/Mode dropdowns open on mouse click in the side panel (#62)
+- Native `<select>` popups don't open on mouse click inside the side-panel shell (a Chromium
+  quirk invisible to our tab-based e2e — keyboard still worked). The three controls-bar dropdowns
+  now render through a **select shim**: the native select stays in the DOM as the data source
+  (every existing `change` listener, including Settings-override merging, untouched) while a
+  custom trigger + popup — the same pattern as the `@`/`/`/`%` pickers — handles the interaction,
+  with full keyboard support (↑/↓/Enter/Esc).
+
+### Changed — page title folded into the header (#63)
+- The standalone page-bar row (◈ + page title) cost a full vertical line. The title now lives in
+  the header between the brand and the action buttons — truncating, with the full URL as tooltip —
+  reclaiming one line of chat space. `#page-url` id and painting logic unchanged.
+
+### Added — TTS voice picker (#64)
+- Settings → Speech gains a **TTS Voice** dropdown (the speak path already passed `voiceName`
+  from `zoTtsVoice` — there was just no way to set it). Populated from `chrome.tts.getVoices()`,
+  filtered by the configured language prefix, "System default" when unset; re-filters when the
+  language changes. Zero-voice systems (headless, minimal Linux) get an honest disabled state
+  with a hint instead of an empty list.
+
+### Added — debug mode + perf baseline (#67)
+- Settings → **Debug & Diagnostics**: a toggle that turns on a metadata-only timing ring in the
+  background (message hops, capture durations, stream durations — capped at 500 events) plus a
+  **Copy diagnostics** export for bug reports. Privacy enforced in `lib/debug-log.js`: scalar
+  extras only, strings truncated, never page text/prompts/tokens; disabling clears the buffer.
+- `docs/qa/perf-baseline.md`: the evidence-first baseline — prompt/policy compute measured at
+  microseconds (not worth optimizing), the real costs named (SW cold start, message hops, stream
+  latency) with an on-device measurement recipe using the new instrument.
+
+### Added — i18n scaffolding (#68)
+- `chrome.i18n` is wired for future localization: `_locales/en/messages.json` (default locale),
+  manifest `name`/`description` via `__MSG_` placeholders (strings byte-identical — asserted),
+  a pure `lib/i18n.js` (`t()` + `applyI18nDom()` walking `data-i18n*` attributes), and a pilot
+  set of sidepanel strings migrated. **Scope: UI strings only** — prompt templates stay English
+  (they're LLM instructions, not user-facing text). CI guard test: every `data-i18n` key must
+  resolve in every locale dir; message entries must carry translator descriptions.
+
+### Added — prompt-bloat audit (#71)
+- `bun scripts/prompt-audit/prompt-audit.ts` runs `describePrompt` across the mode × turn-shape
+  matrix and writes **`docs/qa/prompt-bloat-audit.md`** — per-section token-cost tables. Findings:
+  tier-0 duplication already fixed (#70); the next trim target is cross-mode instruction overlap
+  (no-submit/no-secrets rules restated across persona/systemPrompt/instructions); elements/forms
+  caps look right; tabs/skills/files sections are cheap; `approxTokens` overstates screenshot
+  sections (base64 bills as image tokens, not text). Trims land only with before/after totals +
+  an evals refresh.
+
+### Added — test safety net + real-panel manual QA checklist (#66)
+- **Coverage audit** (`docs/qa/coverage-audit.md`): a per-module line/branch snapshot of the
+  suite with verdicts and the dark corners named (background SSE retry/reconnect, sidepanel
+  render branches) — the basis for what this slate's tests cover.
+- **Coverage report in CI**: `bun run test:coverage` runs on every push/PR and uploads an lcov
+  artifact (advisory — no hard threshold while the bigger files are still climbing).
+- **Real-panel manual QA checklist** (`docs/qa/manual-panel-checklist.md`): the structured
+  release gate for the class of bugs automation structurally cannot see (the side-panel shell
+  isn't CDP-drivable, so our e2e drives the panel as a tab — exhibit A: #62). Dropdowns,
+  toggles, theming, pickers — each with the expected result spelled out.
+
 ## [0.2.5] — 2026-08-30
 
 ### Changed — mode surface rationalized (5 modes, leaner prompts)

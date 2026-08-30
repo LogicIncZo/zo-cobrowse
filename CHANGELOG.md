@@ -7,6 +7,17 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed — version/docs hygiene (#96)
+- **`package.json` version mirrors the extension manifest** (was `0.1.0` while the manifest said
+  `0.2.5`); `bun run lint` now **fails on drift** between the two files, so the release-prep rule
+  ("bump both together") is self-enforcing.
+- **`docs/roadmap.md` is a pointer, not a snapshot** — its hand-maintained status claimed v0.2.0
+  was current; it now points at the authoritative `BACKLOG.md` / `CHANGELOG.md`.
+- **The docs-site changelog mirror is re-synced** — its `[Unreleased]` section had been left empty
+  while root `CHANGELOG.md` accumulated the 0.2.6 slate.
+- **`STREAM_RECONNECT_DONE` is live**: the sidepanel's handler case existed but nothing posted it;
+  the background now sends it after a successful retried attempt (completes the #95 dead-code sweep).
+
 ### Fixed — `Reconnecting…` banner actually shows on transient stream failures (#95)
 - **The banner was dead code on the exact path it was built for (QA finding D, P4)**: on a
   retriable network error the background posted a `STREAM_ERROR` *before* retrying, which the
