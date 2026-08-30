@@ -32,11 +32,107 @@ function applyOptionsTheme(theme) {
   chrome.storage.sync.set({ [THEME_STORAGE_KEY]: theme });
 }
 
+// ---- TTS voice picker (#64) ----
+// The speak path in sidepanel.js already passes voiceName from `zoTtsVoice`;
+// this populates the chooser from chrome.tts.getVoices(), filtered by the
+// configured language prefix. Zero-voice systems get an honest disabled state.
+function populateTtsVoices(selected) {
+  const sel = document.getElementById('tts-voice');
+  if (!sel) return;
+  const hint = document.getElementById('tts-voice-hint');
+  if (!chrome.tts || typeof chrome.tts.getVoices !== 'function') {
+    sel.disabled = true;
+    if (hint) hint.textContent = 'Voice enumeration unavailable in this browser.';
+    return;
+  }
+  chrome.tts.getVoices((voices) => {
+    const all = Array.isArray(voices) ? voices : [];
+    if (!all.length) {
+      sel.disabled = true;
+      sel.replaceChildren();
+      const def = document.createElement('option');
+      def.value = '';
+      def.textContent = 'System default';
+      sel.appendChild(def);
+      if (hint) hint.textContent = 'No TTS voices installed on this system.';
+      return;
+    }
+    const lang = (document.getElementById('tts-lang')?.value || '').trim().toLowerCase();
+    const langRoot = lang.split('-')[0];
+    const filtered = langRoot ? all.filter((v) => String(v.lang || '').toLowerCase().startsWith(langRoot)) : all;
+    const list = filtered.length ? filtered : all;
+    sel.disabled = false;
+    sel.replaceChildren();
+    const def = document.createElement('option');
+    def.value = '';
+    def.textContent = 'System default';
+    sel.appendChild(def);
+    for (const v of list) {
+      const opt = document.createElement('option');
+      opt.value = String(v.voiceName || '');
+      opt.textContent = `${v.voiceName || 'voice'}${v.lang ? ' — ' + v.lang : ''}`;
+      sel.appendChild(opt);
+    }
+    sel.value = list.some((v) => String(v.voiceName || '') === selected) ? selected : '';
+    if (hint) hint.textContent = filtered.length ? '' : `No voices match "${lang}" — showing all.`;
+  });
+}
+
+// ---- Debug diagnostics (#67) ----
+// The background records metadata-only timings while debugMode is on; this
+// exports them via clipboard (nothing leaves the browser otherwise).
+async function refreshDebugControls(on) {
+  const btn = document.getElementById('copy-diagnostics');
+  const status = document.getElementById('debug-status');
+  if (!btn) return;
+  btn.disabled = !on;
+  if (!on) {
+    if (status) status.textContent = '';
+    return;
+  }
+  try {
+    const resp = await chrome.runtime.sendMessage({ type: 'GET_DEBUG_LOG' });
+    if (status) {
+      status.textContent = resp && Array.isArray(resp.entries)
+        ? `${resp.entries.length} event(s) recorded${resp.dropped ? ` · ${resp.dropped} dropped (ring full)` : ''}`
+        : '';
+    }
+  } catch { /* background unavailable */ }
+}
+
+async function copyDiagnostics() {
+  const status = document.getElementById('debug-status');
+  const btn = document.getElementById('copy-diagnostics');
+  try {
+    const resp = await chrome.runtime.sendMessage({ type: 'GET_DEBUG_LOG' });
+    const text = JSON.stringify({
+      exportedAt: new Date().toISOString(),
+      userAgent: navigator.userAgent,
+      version: chrome.runtime.getManifest().version,
+      ...resp,
+    }, null, 2);
+    await navigator.clipboard.writeText(text);
+    if (btn) btn.textContent = '✅ Copied';
+    if (status) status.textContent = `Copied ${resp?.entries?.length ?? 0} event(s) — paste into your bug report.`;
+  } catch (err) {
+    if (status) status.textContent = `Export failed: ${err?.message || err}`;
+  } finally {
+    setTimeout(() => { if (btn) btn.textContent = '📋 Copy diagnostics'; }, 2000);
+  }
+}
+
 // ---- Init ----
 document.addEventListener('DOMContentLoaded', async () => {
   loadOptionsTheme();
+  // #68: resolve data-i18n attributes (UI strings only — prompts stay English).
+  // options.js stays a classic script — lib/ loads via dynamic import().
+  import('./lib/i18n.js').then(({ applyI18nDom }) => applyI18nDom()).catch(() => {});
   // Listen for system theme changes when no override is set
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', loadOptionsTheme);
+  // #65: follow theme changes made in the sidepanel (or another Settings tab) live.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'sync' && changes[THEME_STORAGE_KEY]) loadOptionsTheme();
+  });
 
   const form = document.getElementById('settings-form');
   const testBtn = document.getElementById('test-btn');
@@ -196,6 +292,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (langInput) langInput.value = syncResult.zoTtsLang || 'en-US';
       if (rateInput) rateInput.value = syncResult.zoTtsRate || '1.0';
       if (autoReadCheck) autoReadCheck.checked = syncResult.zoTtsAutoRead || false;
+      populateTtsVoices(syncResult.zoTtsVoice || '');
 
       // Restore screenshot toggle
       const screenshotsCheck = document.getElementById('enable-screenshots');
@@ -204,6 +301,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Restore write-assist toggle
       const writeAssistCheck = document.getElementById('enable-write-assist');
       if (writeAssistCheck) writeAssistCheck.checked = syncResult.enableWriteAssist !== false;
+
+      // Debug diagnostics (#67)
+      const debugCheck = document.getElementById('debug-mode');
+      if (debugCheck) debugCheck.checked = !!syncResult.debugMode;
+      refreshDebugControls(!!syncResult.debugMode);
     });
   });
 
@@ -212,6 +314,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     const token = tokenInput.value.trim();
     if (token) populateModels(token, getModelValue());
   });
+
+  // Language change → re-filter the voice list (#64; keeps a still-valid selection)
+  document.getElementById('tts-lang')?.addEventListener('change', () => {
+    populateTtsVoices(document.getElementById('tts-voice')?.value || '');
+  });
+  // Debug diagnostics (#67): apply immediately (the ring is cheap + local),
+  // and also persist via the normal Save mapping.
+  document.getElementById('debug-mode')?.addEventListener('change', (e) => {
+    const on = !!e.target.checked;
+    chrome.storage.sync.set({ debugMode: on });
+    refreshDebugControls(on);
+  });
+  document.getElementById('copy-diagnostics')?.addEventListener('click', copyDiagnostics);
 
   // Quick Actions live editing
   document.getElementById('quick-actions-list')?.addEventListener('input', (e) => {
@@ -269,10 +384,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         zoPersonaId: personaSelect.value,
         zoQuickActions: quickActions,
         zoTtsLang: (document.getElementById('tts-lang')?.value || 'en-US').trim(),
+        zoTtsVoice: (document.getElementById('tts-voice')?.value || '').trim(),
         zoTtsRate: (document.getElementById('tts-rate')?.value || '1.0').trim(),
         zoTtsAutoRead: !!(document.getElementById('tts-auto-read')?.checked),
         enableScreenshots: !!(document.getElementById('enable-screenshots')?.checked),
         enableWriteAssist: !!(document.getElementById('enable-write-assist')?.checked),
+        debugMode: !!(document.getElementById('debug-mode')?.checked),
       enabledMenus: {
         page: document.getElementById('menu-ask-page')?.checked ?? true,
         selection: document.getElementById('menu-ask-selection')?.checked ?? true,

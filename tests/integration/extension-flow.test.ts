@@ -1030,3 +1030,94 @@ describe("ux — history (chat list) snippet + search highlight", () => {
     (panelWin.document.querySelector("#history-btn") as any).click();
   });
 });
+
+describe("theme live-sync (#65)", () => {
+  it("sidepanel re-applies data-theme when Settings (or another surface) changes cobrowse_theme", async () => {
+    await bus.storage.sync.set({ cobrowse_theme: "dark" });
+    await waitUntil(() => panelWin.document.documentElement.getAttribute("data-theme") === "dark", 5000);
+    await bus.storage.sync.set({ cobrowse_theme: "light" });
+    await waitUntil(() => panelWin.document.documentElement.getAttribute("data-theme") === "light", 5000);
+    // '' = follow system → happy-dom's prefers-color-scheme default is light.
+    await bus.storage.sync.set({ cobrowse_theme: "" });
+    await waitUntil(() => panelWin.document.documentElement.getAttribute("data-theme") === "light", 5000);
+  });
+});
+
+describe("DOM toggle (#69)", () => {
+  it("persists domContextEnabled=false on click and caps the next action send to tier 0", async () => {
+    (panelWin.document.querySelector("#dom-toggle") as any).click();
+    await waitUntil(() => bus.storage.sync._store.domContextEnabled === false, 5000);
+    expect(panelWin.document.getElementById("dom-toggle").textContent).toBe("🚫 DOM");
+
+    // An action-y query in cobrowse would attach tier-2 context on the first
+    // turn of a conversation — the cap must thin it to the URL/title pointer.
+    const before = askLog.length;
+    const composer = panelWin.document.querySelector("#query-input") as any;
+    composer.value = "Click the login button";
+    composer.dispatchEvent(new panelWin.Event("input", { bubbles: true }));
+    (panelWin.document.querySelector("#send-btn") as any).click();
+    await waitUntil(() => askLog.length > before, 10000);
+    const ask = askLog[askLog.length - 1];
+    expect(ask.effectiveTier).toBe(0);
+    expect(ask.shotOnly).toBeUndefined();
+
+    // Restore for the other describes.
+    (panelWin.document.querySelector("#dom-toggle") as any).click();
+    await waitUntil(() => bus.storage.sync._store.domContextEnabled === true, 5000);
+  });
+});
+
+describe("select shim (#62) — panel-safe dropdowns", () => {
+  it("wraps the mode select: trigger mirrors the value, choosing fires change and applyMode", async () => {
+    const modeSel = panelWin.document.querySelector("#mode-select") as any;
+    // Native select hidden but still the data store.
+    expect(modeSel.classList.contains("select-shim-native")).toBe(true);
+    const btn = modeSel.closest(".select-shim").querySelector(".select-shim-btn") as any;
+    expect(btn.textContent).toContain("Co-browse");
+
+    // Open the popup via the trigger (the panel-only broken path, now shimmed).
+    btn.dispatchEvent(new panelWin.MouseEvent("mousedown", { bubbles: true }));
+    const pop = panelWin.document.querySelector(".select-shim-pop:not(.hidden)");
+    expect(pop).toBeTruthy();
+    const items = [...pop.querySelectorAll(".select-shim-item")] as any[];
+    expect(items.length).toBeGreaterThanOrEqual(5);
+
+    // Choose Ask → change dispatched on the native select → applyMode runs.
+    const ask = items.find((el) => (el.textContent || "").includes("Ask"));
+    ask.dispatchEvent(new panelWin.MouseEvent("mousedown", { bubbles: true }));
+    await waitUntil(() => modeSel.value === "ask", 5000);
+    expect(btn.textContent).toContain("Ask");
+
+    // Restore cobrowse for the other describes.
+    const reopen = modeSel.closest(".select-shim").querySelector(".select-shim-btn") as any;
+    reopen.dispatchEvent(new panelWin.MouseEvent("mousedown", { bubbles: true }));
+    const pop2 = panelWin.document.querySelector(".select-shim-pop:not(.hidden)") as any;
+    const cobrowse = [...pop2.querySelectorAll(".select-shim-item")].find((el: any) => (el.textContent || "").includes("Co-browse"));
+    cobrowse.dispatchEvent(new panelWin.MouseEvent("mousedown", { bubbles: true }));
+    await waitUntil(() => modeSel.value === "cobrowse", 5000);
+  });
+});
+
+describe("@ titles (#72) — chips + autocomplete distinguish same-host tabs", () => {
+  it("renders page titles for two github.com tabs, in the strip and the @ popup", async () => {
+    bus.tabs.registerTab({ id: 901, url: "https://github.com/a/repo-a", title: "Repo A · GitHub", active: false });
+    bus.tabs.registerTab({ id: 902, url: "https://github.com/b/repo-b", title: "Repo B · GitHub", active: true });
+    // refreshOpenTabs rides the window-focus listener.
+    panelWin.dispatchEvent(new panelWin.Event("focus"));
+    await waitUntil(() => panelWin.document.querySelectorAll("#tab-strip .tab-chip").length >= 3, 5000);
+    const chipLabels = [...panelWin.document.querySelectorAll("#tab-strip .tab-chip")].map((c: any) => c.textContent || "");
+    expect(chipLabels.some((l: string) => l.includes("Repo A"))).toBe(true);
+    expect(chipLabels.some((l: string) => l.includes("Repo B"))).toBe(true);
+
+    // @ popup: title primary, host secondary.
+    const composer = panelWin.document.querySelector("#query-input") as any;
+    composer.value = "@repo";
+    composer.dispatchEvent(new panelWin.Event("input", { bubbles: true }));
+    await waitUntil(() => panelWin.document.querySelectorAll("#tab-autocomplete .tab-ac-item").length >= 2, 5000);
+    const rows = [...panelWin.document.querySelectorAll("#tab-autocomplete .tab-ac-item")];
+    expect(rows.some((r: any) => (r.querySelector(".tab-ac-name")?.textContent || "").includes("Repo A"))).toBe(true);
+    expect(rows.some((r: any) => r.querySelector(".tab-ac-host")?.textContent === "github.com")).toBe(true);
+    composer.value = "";
+    composer.dispatchEvent(new panelWin.Event("input", { bubbles: true }));
+  });
+});
