@@ -23,7 +23,13 @@ export const FileEntrySchema = z.object({
 });
 
 export const ListSkillsResponseSchema = z.union([
-  z.object({ ok: z.literal(true), skills: z.array(SkillEntrySchema) }),
+  z.object({
+    ok: z.literal(true),
+    skills: z.array(SkillEntrySchema),
+    /** Total skill FOLDERS seen by the bash listing (#73) — lets the UI say
+     *  "+N more" when folders were skipped (no SKILL.md head / cut listing). */
+    total: z.number().int().nonnegative().optional(),
+  }),
   z.object({ ok: z.literal(false), error: z.string() }),
 ]);
 
