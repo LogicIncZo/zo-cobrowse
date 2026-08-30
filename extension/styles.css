@@ -644,16 +644,15 @@ input, textarea, select {
   box-shadow: 0 0 8px rgba(248, 113, 113, 0.3);
 }
 
-/* ── Page bar ── */
-.page-bar {
+/* ── Page title, folded into the header (#63 — the standalone page-bar row
+   cost a full vertical line; the brand sits beside it, controls right) ── */
+.header-page {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 14px;
-  background: var(--bg-surface);
-  border-bottom: 1px solid var(--border-soft);
-  flex-shrink: 0;
-  min-height: 28px;
+  flex: 1;
+  min-width: 0; /* let the title ellipsize instead of pushing the actions out */
+  margin-left: 2px;
 }
 .page-icon {
   font-size: 11px;
@@ -668,6 +667,7 @@ input, textarea, select {
   overflow: hidden;
   text-overflow: ellipsis;
   line-height: 1.3;
+  min-width: 0;
 }
 
 /* ── Controls bar (model/persona/preset) ── */

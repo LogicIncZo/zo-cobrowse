@@ -117,6 +117,10 @@ and this project uses [Semantic Versioning](https://semver.org/).
   (every existing `change` listener, including Settings-override merging, untouched) while a
   custom trigger + popup — the same pattern as the `@`/`/`/`%` pickers — handles the interaction,
   with full keyboard support (↑/↓/Enter/Esc).
+### Changed — page title folded into the header (#63)
+- The standalone page-bar row (◈ + page title) cost a full vertical line. The title now lives in
+  the header between the brand and the action buttons — truncating, with the full URL as tooltip —
+  reclaiming one line of chat space. `#page-url` id and painting logic unchanged.
 >>>>>>> dev
 
 ### Fixed — 📷 screenshots never reached Zo on real Chrome
