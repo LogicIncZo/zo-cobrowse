@@ -53,7 +53,19 @@ test.describe("composer reference pickers (#28)", () => {
       await pressComposerKey(h.panel, "Enter");
       await expect(h.panel.locator("#file-autocomplete button.picker-item").filter({ hasText: "README.md" }))
         .toBeVisible({ timeout: 10_000 });
-      // Rows are [⬆ .., 📂 e2e-skill/, 📄 README.md] — down twice to the file.
+      // Rows are [⬆ .., 📂 e2e-skill/, 📄 README.md] — #74: arm the FOLDER as
+      // context via its ＋ affordance (row click still navigates).
+      const addBtn = h.panel.locator("#file-autocomplete button.picker-item")
+        .filter({ hasText: "e2e-skill" })
+        .locator(".picker-item-add");
+      await addBtn.click();
+      await expect(h.panel.locator(".picker-chip").filter({ hasText: "📁 e2e-skill/" })).toBeVisible();
+
+      // Reopen % — browsing resumes INSIDE Skills (filesDir persisted), so
+      // pick the file directly.
+      await typeIntoComposer(h.panel, "%");
+      await expect(h.panel.locator("#file-autocomplete button.picker-item").filter({ hasText: "README.md" }))
+        .toBeVisible({ timeout: 10_000 });
       await pressComposerKey(h.panel, "ArrowDown");
       await pressComposerKey(h.panel, "ArrowDown");
       await pressComposerKey(h.panel, "Enter");
@@ -74,6 +86,9 @@ test.describe("composer reference pickers (#28)", () => {
       expect(last.body.input).toContain("read its SKILL.md");
       expect(last.body.input).toContain("## Referenced Files");
       expect(last.body.input).toContain("/home/workspace/Skills/README.md");
+      // #74: the folder rides as a path; the instruction line teaches dirs.
+      expect(last.body.input).toContain("/home/workspace/Skills/e2e-skill");
+      expect(last.body.input).toContain("directories: list/recurse as needed");
 
       // Send-once: chips cleared after the turn.
       await expect(h.panel.locator("#picker-chips")).toBeHidden();

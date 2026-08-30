@@ -61,6 +61,32 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - **⬇ Latest pill** — appears when the chat log is scrolled away from the
   bottom (e.g. while reading during a stream); clicks snap back.
 
+### Fixed — skills picker (`/`) re-fetched on every open
+- **Cache survives service-worker restarts (#73)**: the MV3 SW is killed after ~30s idle, which
+  wiped the in-memory 5-min skills cache — the `/` picker showed "Loading skills…" on essentially
+  every open. New `lib/sw-cache.js` (`createSessionCache()`) keeps the memory fast-path but backs
+  the cache with `chrome.storage.session`, so it survives worker restarts; the vision model-catalog
+  cache gets the same treatment (`cobrowse_skills_list` / `cobrowse_catalog_cache`).
+- **Truncated listings are loud, not silent**: the skills bash listing now carries a
+  `##SKILL_COUNT n` line, and a listing cut short by a server-side output cap surfaces an honest
+  error ("truncated or unparseable — refresh to retry") instead of a silent empty list. When the
+  workspace holds more skill folders than were listed (folders without a parseable SKILL.md head),
+  the picker shows "+N more skill folders not listed — ⟳ refreshes."
+
+### Added — `%` picker: hand Zo a whole FOLDER as context (#74)
+- Directory rows in the `%` browser gained a **＋** affordance beside click-to-navigate: arming a
+  folder rides its path in `## Referenced Files` (Zo lists/recurses server-side — the wire format
+  was already paths-only). Folder chips render 📁 with a trailing slash; the section instruction
+  line now teaches "files: read them; directories: list/recurse as needed."
+
+### Fixed — theme consistency across surfaces (#65)
+- **Live theme sync**: changing the theme in the sidepanel popover now updates an open Settings
+  tab immediately (and vice versa) — both surfaces follow `storage.onChanged` for
+  `cobrowse_theme` instead of only reading it at load.
+- **Write-assist popover follows the theme**: the page-injected shadow-DOM widget now resolves
+  `cobrowse_theme` (dark → dark widget; light/sepia/forest/ocean → light; system mirror follows
+  `prefers-color-scheme`, live) via CSS custom properties + a `:host(.zo-wa-dark)` block — it no
+  longer ships hardcoded light colors.
 ### Added — sticky DOM context toggle (#69)
 - A **🧩 DOM** toggle now sits beside the 📷 Image toggle in the tab-strip row. When OFF, **no page
   DOM is ever attached** — `decideTurn` caps every turn to the URL/title pointer, whatever the Mode

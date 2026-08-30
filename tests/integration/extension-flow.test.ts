@@ -1031,6 +1031,19 @@ describe("ux — history (chat list) snippet + search highlight", () => {
   });
 });
 
+describe("theme live-sync (#65)", () => {
+  it("sidepanel re-applies data-theme when Settings (or another surface) changes cobrowse_theme", async () => {
+    await bus.storage.sync.set({ cobrowse_theme: "dark" });
+    await waitUntil(() => panelWin.document.documentElement.getAttribute("data-theme") === "dark", 5000);
+    await bus.storage.sync.set({ cobrowse_theme: "light" });
+    await waitUntil(() => panelWin.document.documentElement.getAttribute("data-theme") === "light", 5000);
+    // '' = follow system → happy-dom's prefers-color-scheme default is light.
+    await bus.storage.sync.set({ cobrowse_theme: "" });
+    await waitUntil(() => panelWin.document.documentElement.getAttribute("data-theme") === "light", 5000);
+  });
+});
+
+describe("DOM toggle (#69)", () => {
 describe("DOM toggle (#69)", () => {
   it("persists domContextEnabled=false on click and caps the next action send to tier 0", async () => {
     (panelWin.document.querySelector("#dom-toggle") as any).click();
@@ -1052,5 +1065,6 @@ describe("DOM toggle (#69)", () => {
     // Restore for the other describes.
     (panelWin.document.querySelector("#dom-toggle") as any).click();
     await waitUntil(() => bus.storage.sync._store.domContextEnabled === true, 5000);
+
   });
 });

@@ -161,7 +161,7 @@ function _compose(mode, pageContext, userQuery, opts) {
     push('sep', '');
     push('files', '## Referenced Files');
     for (const line of buildFileLines(wfFiles)) push('files', line);
-    push('files', 'Resolve these files with your file tools when the request needs their content.');
+    push('files', 'Resolve these paths with your file tools when the request needs their content — files: read them; directories: list/recurse as needed.');
   }
 
   if (tier >= 1) {
