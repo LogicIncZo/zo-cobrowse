@@ -6,6 +6,14 @@ This page mirrors everything **unreleased** on `dev`.
 
 ## [Unreleased]
 
+### Fixed — stale-build guard: extension updates refresh open tabs (#109)
+- **Kills the "still broken after reload" loop**: after an extension update, open tabs kept
+  running the OLD content script until they navigated. The background now re-injects the fresh
+  `content.js` into open http(s) tabs on `onInstalled(update)`, and the panel shows a one-time
+  dismissible "Extension updated" banner.
+- **`content.js` is injection-idempotent**: a window-level guard flag makes re-injection a no-op
+  (no double-bound listeners, no duplicate write-assist widget) — verified by test.
+
 ### Added — chat export: download a conversation as Markdown (#108)
 - **⬇ Export on every history card**: serializes the conversation to a clean Markdown
   transcript — title header, role-labeled turns with timestamps, the 💭 reasoning as a

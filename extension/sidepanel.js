@@ -307,6 +307,7 @@ async function finishInit() {
         startNewConversation();
       }
     });
+    initUpdateBanner();
     renderPromptInspector(); // first paint once modes + context are loaded
   } catch (e) {
     console.error('finishInit error:', e);
@@ -1149,6 +1150,28 @@ function updateHistoryBadge() {
 
 // ---- History view ----
 
+// Lane D stale-build guard: the background leaves `cobrowse_updated_at` in
+// storage.session when the extension updates (and re-injects content scripts).
+// Show the one-time banner, then clear the flag — it never shows again for
+// that update.
+async function initUpdateBanner() {
+  try {
+    const o = await chrome.storage.session.get('cobrowse_updated_at');
+    if (!o || !o.cobrowse_updated_at) return;
+    await chrome.storage.session.remove('cobrowse_updated_at');
+    const el = addMessageDOM('system', '', {});
+    const body = el.querySelector('.msg-body');
+    if (!body) return;
+    body.textContent = '🔄 Extension updated — open tabs were refreshed with the new content script. Reload a page if anything still looks stale.';
+    const dismiss = document.createElement('button');
+    dismiss.textContent = 'OK';
+    dismiss.className = 'update-banner-dismiss';
+    dismiss.addEventListener('click', () => el.remove());
+    body.appendChild(document.createElement('br'));
+    body.appendChild(dismiss);
+  } catch { /* storage unavailable — banner is best-effort */ }
+}
+
 // Chat export (Lane D): serialize the conversation to Markdown and trigger a
 // Blob download — pure half lives in lib/export.js (unit-tested + schema'd).
 function exportConversation(convId) {
@@ -1167,7 +1190,8 @@ function exportConversation(convId) {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
-function renderHistoryView() {  historyViewEl.classList.remove('hidden');
+function renderHistoryView() {
+  historyViewEl.classList.remove('hidden');
   chatView.classList.add('hidden');
   historyBtn.classList.add('active');
 
