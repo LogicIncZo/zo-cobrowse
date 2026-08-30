@@ -2446,6 +2446,29 @@ body.options-page {
 .tab-ac-item:hover, .tab-ac-item.tab-ac-active {
   background: var(--amber-glow, rgba(240,168,50,0.15));
 }
+/* #74: folder rows in the % popup get a ＋ affordance (arm as context)
+   beside the row's click-to-navigate. */
+#file-autocomplete .picker-item {
+  position: relative;
+}
+#file-autocomplete .picker-item.has-add {
+  padding-right: 44px;
+}
+#file-autocomplete .picker-item-add {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 2px 8px;
+  border: 1px solid var(--border, #3a4150);
+  border-radius: 6px;
+  color: var(--amber, #f0a832);
+  font-size: 13px;
+  line-height: 1.2;
+}
+#file-autocomplete .picker-item-add:hover {
+  background: var(--amber-glow, rgba(240,168,50,0.15));
+}
 /* Non-selectable note rows inside picker popups (loading / errors / header). */
 .tab-ac-item.tab-ac-note {
   cursor: default;
