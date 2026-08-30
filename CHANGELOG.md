@@ -121,6 +121,12 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - The standalone page-bar row (◈ + page title) cost a full vertical line. The title now lives in
   the header between the brand and the action buttons — truncating, with the full URL as tooltip —
   reclaiming one line of chat space. `#page-url` id and painting logic unchanged.
+### Added — TTS voice picker (#64)
+- Settings → Speech gains a **TTS Voice** dropdown (the speak path already passed `voiceName`
+  from `zoTtsVoice` — there was just no way to set it). Populated from `chrome.tts.getVoices()`,
+  filtered by the configured language prefix, "System default" when unset; re-filters when the
+  language changes. Zero-voice systems (headless, minimal Linux) get an honest disabled state
+  with a hint instead of an empty list.
 >>>>>>> dev
 
 ### Fixed — 📷 screenshots never reached Zo on real Chrome
