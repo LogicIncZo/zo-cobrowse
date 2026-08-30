@@ -79,6 +79,15 @@ and this project uses [Semantic Versioning](https://semver.org/).
   was already paths-only). Folder chips render 📁 with a trailing slash; the section instruction
   line now teaches "files: read them; directories: list/recurse as needed."
 
+### Fixed — theme consistency across surfaces (#65)
+- **Live theme sync**: changing the theme in the sidepanel popover now updates an open Settings
+  tab immediately (and vice versa) — both surfaces follow `storage.onChanged` for
+  `cobrowse_theme` instead of only reading it at load.
+- **Write-assist popover follows the theme**: the page-injected shadow-DOM widget now resolves
+  `cobrowse_theme` (dark → dark widget; light/sepia/forest/ocean → light; system mirror follows
+  `prefers-color-scheme`, live) via CSS custom properties + a `:host(.zo-wa-dark)` block — it no
+  longer ships hardcoded light colors.
+
 ### Fixed — 📷 screenshots never reached Zo on real Chrome
 - **`<all_urls>` host permission**: `chrome.tabs.captureVisibleTab` requires the literal
   `<all_urls>` pattern (or an activeTab gesture) — the manifest's scoped wildcards

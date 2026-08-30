@@ -1030,3 +1030,15 @@ describe("ux — history (chat list) snippet + search highlight", () => {
     (panelWin.document.querySelector("#history-btn") as any).click();
   });
 });
+
+describe("theme live-sync (#65)", () => {
+  it("sidepanel re-applies data-theme when Settings (or another surface) changes cobrowse_theme", async () => {
+    await bus.storage.sync.set({ cobrowse_theme: "dark" });
+    await waitUntil(() => panelWin.document.documentElement.getAttribute("data-theme") === "dark", 5000);
+    await bus.storage.sync.set({ cobrowse_theme: "light" });
+    await waitUntil(() => panelWin.document.documentElement.getAttribute("data-theme") === "light", 5000);
+    // '' = follow system → happy-dom's prefers-color-scheme default is light.
+    await bus.storage.sync.set({ cobrowse_theme: "" });
+    await waitUntil(() => panelWin.document.documentElement.getAttribute("data-theme") === "light", 5000);
+  });
+});
