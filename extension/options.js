@@ -37,6 +37,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   loadOptionsTheme();
   // Listen for system theme changes when no override is set
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', loadOptionsTheme);
+  // #65: follow theme changes made in the sidepanel (or another Settings tab) live.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'sync' && changes[THEME_STORAGE_KEY]) loadOptionsTheme();
+  });
 
   const form = document.getElementById('settings-form');
   const testBtn = document.getElementById('test-btn');

@@ -367,3 +367,61 @@ describe("decideTurn — hasThread guard (follow-up dedup safety)", () => {
     expectValidState(st);
   });
 });
+
+describe("decideTurn — sticky DOM toggle cap (#69)", () => {
+  const ctxHash = () => computePageHash(ctx(), TIER.ELEMENTS);
+
+  it("domEnabled:false caps a first action turn to tier 0 and does NOT record the capture", () => {
+    const hash = ctxHash();
+    const d = decideTurn({
+      mode: BUILTIN_MODES.cobrowse, query: "Click the login button",
+      bang: null, state: createConversationState(), pageHash: hash,
+      domEnabled: false,
+    });
+    expectValidDecision(d);
+    expect(d.attach).toBe(false);
+    expect(d.effectiveTier).toBe(0);
+    expect(d.reason).toMatch(/DOM toggle/);
+    // The hash must NOT be recorded — re-enabling the toggle re-attaches
+    // instead of trusting a "context already sent" that never went out.
+    expect(d.newState.lastCaptureHash).toBeNull();
+  });
+
+  it("domEnabled:false caps !context to tier 0 (the cap wins over explicit attach)", () => {
+    const hash = ctxHash();
+    const d = decideTurn({
+      mode: BUILTIN_MODES.ask, query: "explain this page",
+      bang: { kind: "context", query: "explain this page", mode: "ask" },
+      state: createConversationState(), pageHash: hash,
+      domEnabled: false,
+    });
+    expectValidDecision(d);
+    expect(d.attach).toBe(false);
+    expect(d.effectiveTier).toBe(0);
+    expect(d.reason).toMatch(/DOM toggle/);
+  });
+
+  it("re-enabling the toggle re-attaches on the next action turn (state was not poisoned)", () => {
+    const hash = ctxHash();
+    const capped = decideTurn({
+      mode: BUILTIN_MODES.cobrowse, query: "Click the login button",
+      bang: null, state: createConversationState(), pageHash: hash,
+      domEnabled: false,
+    });
+    const reEnabled = decideTurn({
+      mode: BUILTIN_MODES.cobrowse, query: "Click the login button",
+      bang: null, state: capped.newState, pageHash: hash,
+    });
+    expect(reEnabled.attach).toBe(true);
+    expect(reEnabled.effectiveTier).toBe(BUILTIN_MODES.cobrowse.contextTier);
+  });
+
+  it("domEnabled defaults to true (legacy callers unaffected)", () => {
+    const hash = ctxHash();
+    const d = decideTurn({
+      mode: BUILTIN_MODES.cobrowse, query: "Click the login button",
+      bang: null, state: createConversationState(), pageHash: hash,
+    });
+    expect(d.attach).toBe(true);
+  });
+});

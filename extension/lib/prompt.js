@@ -161,7 +161,7 @@ function _compose(mode, pageContext, userQuery, opts) {
     push('sep', '');
     push('files', '## Referenced Files');
     for (const line of buildFileLines(wfFiles)) push('files', line);
-    push('files', 'Resolve these files with your file tools when the request needs their content.');
+    push('files', 'Resolve these paths with your file tools when the request needs their content — files: read them; directories: list/recurse as needed.');
   }
 
   if (tier >= 1) {
@@ -185,7 +185,10 @@ function _compose(mode, pageContext, userQuery, opts) {
       push('forms', forms.slice(0, 30).map(compactForm).join(''));
     }
   }
-  if (tier >= 3 && ctx.screenshotDataUrl) {
+  // Screenshot: rides at tier 3, OR on a DOM-capped turn when the user armed
+  // the 📷 toggle with the #69 DOM toggle off (screenshot-only turn — pixels
+  // are a separate channel from the capped-out DOM).
+  if ((tier >= 3 || (opts && opts.screenshotOnly)) && ctx.screenshotDataUrl) {
     push('sep', '');
     push('screenshot', '## Screenshot');
     push('screenshot', `![page](${ctx.screenshotDataUrl})`);
