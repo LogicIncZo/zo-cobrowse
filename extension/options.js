@@ -124,6 +124,9 @@ async function copyDiagnostics() {
 // ---- Init ----
 document.addEventListener('DOMContentLoaded', async () => {
   loadOptionsTheme();
+  // #68: resolve data-i18n attributes (UI strings only — prompts stay English).
+  // options.js stays a classic script — lib/ loads via dynamic import().
+  import('./lib/i18n.js').then(({ applyI18nDom }) => applyI18nDom()).catch(() => {});
   // Listen for system theme changes when no override is set
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', loadOptionsTheme);
   // #65: follow theme changes made in the sidepanel (or another Settings tab) live.

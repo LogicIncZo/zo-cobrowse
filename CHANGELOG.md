@@ -135,6 +135,13 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - `docs/qa/perf-baseline.md`: the evidence-first baseline — prompt/policy compute measured at
   microseconds (not worth optimizing), the real costs named (SW cold start, message hops, stream
   latency) with an on-device measurement recipe using the new instrument.
+### Added — i18n scaffolding (#68)
+- `chrome.i18n` is wired for future localization: `_locales/en/messages.json` (default locale),
+  manifest `name`/`description` via `__MSG_` placeholders (strings byte-identical — asserted),
+  a pure `lib/i18n.js` (`t()` + `applyI18nDom()` walking `data-i18n*` attributes), and a pilot
+  set of sidepanel strings migrated. **Scope: UI strings only** — prompt templates stay English
+  (they're LLM instructions, not user-facing text). CI guard test: every `data-i18n` key must
+  resolve in every locale dir; message entries must carry translator descriptions.
 >>>>>>> dev
 
 ### Fixed — 📷 screenshots never reached Zo on real Chrome

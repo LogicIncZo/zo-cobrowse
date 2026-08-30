@@ -16,6 +16,7 @@ import { assignRefs, ensureActiveTabRef, isBlankPage, thinTabExcerpts } from './
 import { visionModelSuggestion, modelVisionSupport, findModelEntry } from './lib/vision.js';
 import { extractUrls, MAX_LINK_CHIPS } from './lib/links.js';
 import { WORKSPACE_ROOT, filterPickerEntries } from './lib/pickers.js';
+import { applyI18nDom } from './lib/i18n.js';
 import {
   openChatTab,
   closeChatTab,
@@ -246,6 +247,7 @@ async function finishInit() {
     await fetchModelsAndPersonas();
     await loadQuickActions();
     await loadTtsConfig();
+    applyI18nDom(); // #68: resolve data-i18n attributes (UI strings only)
     initTabStrip();
     initJumpToLatest();
     connectStreamingPort();

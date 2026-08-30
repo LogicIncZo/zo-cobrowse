@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Zo Co-browse",
+  "name": "__MSG_extName__",
   "version": "0.2.5",
-  "description": "Co-browsing extension powered by Zo — AI backend that sees your page and takes actions through it.",
+  "description": "__MSG_extDescription__",
+  "default_locale": "en",
   "homepage_url": "https://github.com/CCAgentOrg/zo-cobrowse",
   "permissions": [
     "debugger",
