@@ -447,6 +447,26 @@
       </div>
     </div>
 
+    <!-- ── Developer / debug (#67) ── -->
+    <div class="card" id="card-debug">
+      <h2>🛠️ Debug &amp; Diagnostics</h2>
+      <div class="field-group">
+        <label class="row-label">
+          <input type="checkbox" id="debug-mode" />
+          Enable debug diagnostics
+        </label>
+        <p class="desc" style="margin-top:4px;">
+          Records timing metadata (message hops, capture and stream durations) in a capped in-memory
+          ring while the browser runs. Metadata only — never page text, prompts, or tokens. Nothing
+          leaves the browser unless you export it below.
+        </p>
+      </div>
+      <div class="field-group">
+        <button type="button" id="copy-diagnostics" class="btn btn-sm" disabled>📋 Copy diagnostics</button>
+        <span id="debug-status" class="form-hint"></span>
+      </div>
+    </div>
+
     <!-- ── Speech ── -->
     <div class="card" id="card-speech">
       <h2>🎤 Speech</h2>
