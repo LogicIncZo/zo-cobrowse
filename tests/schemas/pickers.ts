@@ -23,7 +23,13 @@ export const FileEntrySchema = z.object({
 });
 
 export const ListSkillsResponseSchema = z.union([
-  z.object({ ok: z.literal(true), skills: z.array(SkillEntrySchema) }),
+  z.object({
+    ok: z.literal(true),
+    skills: z.array(SkillEntrySchema),
+    /** Total skill FOLDERS seen by the bash listing (#73) — lets the UI say
+     *  "+N more" when folders were skipped (no SKILL.md head / cut listing). */
+    total: z.number().int().nonnegative().optional(),
+  }),
   z.object({ ok: z.literal(false), error: z.string() }),
 ]);
 
@@ -39,7 +45,9 @@ export const ListWorkspaceDirResponseSchema = z.union([
 /** What rides on an ASK_ZO payload for one picked skill (chip → per-turn). */
 export const PickedSkillSchema = SkillEntrySchema;
 
-/** What rides on an ASK_ZO payload for one picked file. */
+/** What rides on an ASK_ZO payload for one picked file (#74: `dir` marks a
+ *  FOLDER pick — it rides as a path too; Zo lists/recurses server-side). */
 export const PickedFileSchema = z.object({
   path: z.string().startsWith("/"),
+  dir: z.boolean().optional(),
 });

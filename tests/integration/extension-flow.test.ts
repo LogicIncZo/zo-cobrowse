@@ -1031,6 +1031,39 @@ describe("ux — history (chat list) snippet + search highlight", () => {
   });
 });
 
+describe("theme live-sync (#65)", () => {
+  it("sidepanel re-applies data-theme when Settings (or another surface) changes cobrowse_theme", async () => {
+    await bus.storage.sync.set({ cobrowse_theme: "dark" });
+    await waitUntil(() => panelWin.document.documentElement.getAttribute("data-theme") === "dark", 5000);
+    await bus.storage.sync.set({ cobrowse_theme: "light" });
+    await waitUntil(() => panelWin.document.documentElement.getAttribute("data-theme") === "light", 5000);
+    // '' = follow system → happy-dom's prefers-color-scheme default is light.
+    await bus.storage.sync.set({ cobrowse_theme: "" });
+    await waitUntil(() => panelWin.document.documentElement.getAttribute("data-theme") === "light", 5000);
+  });
+});
+
+describe("DOM toggle (#69)", () => {
+  it("persists domContextEnabled=false on click and caps the next action send to tier 0", async () => {
+    (panelWin.document.querySelector("#dom-toggle") as any).click();
+    await waitUntil(() => bus.storage.sync._store.domContextEnabled === false, 5000);
+    expect(panelWin.document.getElementById("dom-toggle").textContent).toBe("🚫 DOM");
+
+    // An action-y query in cobrowse would attach tier-2 context on the first
+    // turn of a conversation — the cap must thin it to the URL/title pointer.
+    const before = askLog.length;
+    const composer = panelWin.document.querySelector("#query-input") as any;
+    composer.value = "Click the login button";
+    composer.dispatchEvent(new panelWin.Event("input", { bubbles: true }));
+    (panelWin.document.querySelector("#send-btn") as any).click();
+    await waitUntil(() => askLog.length > before, 10000);
+    const ask = askLog[askLog.length - 1];
+    expect(ask.effectiveTier).toBe(0);
+    expect(ask.shotOnly).toBeUndefined();
+
+    // Restore for the other describes.
+    (panelWin.document.querySelector("#dom-toggle") as any).click();
+    await waitUntil(() => bus.storage.sync._store.domContextEnabled === true, 5000);
 describe("select shim (#62) — panel-safe dropdowns", () => {
   it("wraps the mode select: trigger mirrors the value, choosing fires change and applyMode", async () => {
     const modeSel = panelWin.document.querySelector("#mode-select") as any;

@@ -1,6 +1,6 @@
 {
   "id": "lean-pointer",
-  "promptHash": "5afe4da05d6db648f7e288b876173f995c64862455a8f4c2872eb61cebd30e04",
-  "fetchedAt": "2026-08-29T17:18:03.685Z",
-  "output": "The page doesn't exist. `https://example.com/test-page` returns **HTTP 404** — example.com only serves its single root page; any path under it (like `/test-page`) 404s.\n\nThe title \"Test Page for Zo Co-browse\" appears to be a label supplied by the extension's test harness, not something the server actually serves. So there's no real content to summarize — this looks like a test payload for the [Zo Co-browse extension](https://logicinczo.github.io/zo-cobrowse/) (`Projects/zo-cobrowse/`), probably verifying that the page-URL + title + request plumbing reaches Zo correctly. It does — but a live URL with real content would be needed to test actual page capture."
+  "promptHash": "3f3f1c2fdb294664246aa8dd339694490c7e705bdc127572ec1114578de0fe8f",
+  "fetchedAt": "2026-08-29T21:50:02.714Z",
+  "output": "The URL itself doesn't exist — `https://example.com/test-page` returns a **404**. What's actually at that domain is `example.com`'s root page: the IANA-reserved \"Example Domain\" placeholder, a bare page reserved by RFC 2606 for use in documentation examples. [^1]\n\nSo this looks like a synthetic test fixture for the Zo Co-browse extension (`Projects/zo-cobrowse/`) — a made-up URL + title pair used to verify that the extension correctly hands off URL and title to Zo. There's no real content to summarize; if you expected a live test page, the fixture needs to be hosted somewhere that actually serves it.\n\n[^1]: https://example.com/"
 }
