@@ -61,6 +61,12 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - **⬇ Latest pill** — appears when the chat log is scrolled away from the
   bottom (e.g. while reading during a stream); clicks snap back.
 
+<<<<<<< HEAD
+### Fixed — `@` tabs and chip strip show page titles (#72)
+- The `@` tab autocomplete and the tab-context chip strip rendered bare hostnames — with two
+  `github.com` tabs open the entries were indistinguishable. Both now lead with the page title
+  (host dimmed/secondary in the popup; host + full URL in tooltips).
+=======
 ### Fixed — skills picker (`/`) re-fetched on every open
 - **Cache survives service-worker restarts (#73)**: the MV3 SW is killed after ~30s idle, which
   wiped the in-memory 5-min skills cache — the `/` picker showed "Loading skills…" on essentially
@@ -111,6 +117,7 @@ and this project uses [Semantic Versioning](https://semver.org/).
   (every existing `change` listener, including Settings-override merging, untouched) while a
   custom trigger + popup — the same pattern as the `@`/`/`/`%` pickers — handles the interaction,
   with full keyboard support (↑/↓/Enter/Esc).
+>>>>>>> dev
 
 ### Fixed — 📷 screenshots never reached Zo on real Chrome
 - **`<all_urls>` host permission**: `chrome.tabs.captureVisibleTab` requires the literal

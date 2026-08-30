@@ -2507,6 +2507,12 @@ body.options-page {
 .tab-ac-item:hover, .tab-ac-item.tab-ac-active {
   background: var(--amber-glow, rgba(240,168,50,0.15));
 }
+/* #72: title primary + dimmed host secondary inside @ autocomplete rows. */
+.tab-ac-item .tab-ac-host {
+  opacity: 0.55;
+  margin-left: 6px;
+  font-size: 11px;
+}
 /* #74: folder rows in the % popup get a ＋ affordance (arm as context)
    beside the row's click-to-navigate. */
 #file-autocomplete .picker-item {
