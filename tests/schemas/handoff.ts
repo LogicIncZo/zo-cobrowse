@@ -54,6 +54,9 @@ export const HandoffRun = z.object({
   pagesVisited: z.array(z.string()),
   parkLog: z.array(ParkedAction),
   stopReason: z.string().optional(),
+  // The driven tab (panel-bound at HANDOFF_START). Optional so the pure
+  // createRun stays tab-agnostic; the background stamps it.
+  tabId: z.number().optional(),
   createdAt: z.number(),
   updatedAt: z.number(),
 });
