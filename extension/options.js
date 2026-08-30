@@ -76,6 +76,8 @@ function populateTtsVoices(selected) {
     sel.value = list.some((v) => String(v.voiceName || '') === selected) ? selected : '';
     if (hint) hint.textContent = filtered.length ? '' : `No voices match "${lang}" — showing all.`;
   });
+}
+
 // ---- Debug diagnostics (#67) ----
 // The background records metadata-only timings while debugMode is on; this
 // exports them via clipboard (nothing leaves the browser otherwise).
