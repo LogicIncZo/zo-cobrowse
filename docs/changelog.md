@@ -6,6 +6,51 @@ This page mirrors everything **unreleased** on `dev`.
 
 ## [Unreleased]
 
+### Added — handoff polish: badge marker, finish notifications, changelog-drift gate (#103)
+- **▶ extension badge while a handoff run is live** — visible even with the panel closed;
+  cleared when no run is active.
+- **One-shot `chrome.notifications` on handoff done/blocked** ("the point of delegating is
+  walking away") with the goal + stop reason; paused/aborted stay panel-only (new
+  `notifications` permission).
+- **`bun run lint` now fails on docs-changelog drift**: `scripts/sync-changelog.ts --check`
+  verifies the docs-site `[Unreleased]` mirror matches root `CHANGELOG.md` (the mirror had
+  silently gone empty once); `bun scripts/sync-changelog.ts` re-syncs it.
+
+### Added — `!handoff`: delegate a goal to Zo as an unattended run (#102)
+- **`!handoff <goal>`** starts a read-only handoff run from the panel: Zo works the pages
+  unattended (navigate/extract/scroll), the panel executes each turn's actions as one batch,
+  and the background chains turns until Zo reports the digest via `done()` — budget-capped,
+  boundary-parked, stoppable via the ✕ on the live progress line.
+- **Chained-turn adoption**: the loop re-enters the stream with derived sessionIds
+  (`<base>-h<n>-…`); the panel adopts descendants of its own sent turn instead of dropping
+  them as stale, so the whole run renders live in the run's chat tab.
+- The run's state pushes (`HANDOFF_UPDATE`) render a compact progress line (pages · turns ·
+  parked · minutes) and an honest end card — ✅ done / ⏸️ paused (with reason) / 🛑 stopped.
+
+### Added — handoff run loop: the background half of delegate-mode runs (#101)
+- **`HANDOFF_START` / `HANDOFF_STOP` / `HANDOFF_STATUS`** message types (message-contract test
+  enforced) + a **`HANDOFF_UPDATE`** background→panel push (declared in a new
+  `BACKGROUND_PUSH_TYPES` schema list — pushes get no router case by design).
+- **The loop is event-driven, never SW-resident**: each turn's `EXECUTE_ACTIONS` completion
+  re-enters `askZoStream` with a continuation turn (progress report + budget line from
+  `lib/handoff.js`) and a fresh capture of the driven tab. Run state persists in
+  `storage.session` (`cobrowse_handoff_runs`); an MV3 service-worker restart pauses the run
+  ("extension restarted — resume to continue") instead of stranding it. `done()` completes;
+  budget exhaustion and mid-run failures pause honestly.
+- **Boundary enforcement in the executor**: under a run's boundary mode, interactive actions
+  (click/fill) are refused *before execution* and parked into the run's park log
+  (`handoffParked` results) — parking never stops sibling actions. 0.2.7 runs are `readonly`.
+
+### Changed — version/docs hygiene (#96)
+- **`package.json` version mirrors the extension manifest** (was `0.1.0` while the manifest said
+  `0.2.5`); `bun run lint` now **fails on drift** between the two files, so the release-prep rule
+  ("bump both together") is self-enforcing.
+- **`docs/roadmap.md` is a pointer, not a snapshot** — its hand-maintained status claimed v0.2.0
+  was current; it now points at the authoritative `BACKLOG.md` / `CHANGELOG.md`.
+- **The docs-site changelog mirror is re-synced** — its `[Unreleased]` section had been left empty
+  while root `CHANGELOG.md` accumulated the 0.2.6 slate.
+- **`STREAM_RECONNECT_DONE` is live**: the sidepanel's handler case existed but nothing posted it;
+  the background now sends it after a successful retried attempt (completes the #95 dead-code sweep).
 
 ### Fixed — `Reconnecting…` banner actually shows on transient stream failures (#95)
 - **The banner was dead code on the exact path it was built for (QA finding D, P4)**: on a

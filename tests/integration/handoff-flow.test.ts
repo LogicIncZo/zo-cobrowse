@@ -24,6 +24,17 @@ bus.runtime.onMessage.addListener((m: any) => {
   if (m?.type === "HANDOFF_UPDATE") pushes.push(m);
 });
 
+// Lane E item 12: badge + notification surface (absent from the base mock).
+const badgeCalls: any[] = [];
+(bus as any).action = {
+  setBadgeBackgroundColor: (o: any) => { badgeCalls.push({ kind: "bg", ...o }); return Promise.resolve(); },
+  setBadgeText: (o: any) => { badgeCalls.push({ kind: "text", text: o.text }); return Promise.resolve(); },
+};
+const notifications: any[] = [];
+(bus as any).notifications = {
+  create: (id: any, opts: any) => { notifications.push({ id, opts }); return id; },
+};
+
 const flush = () => new Promise((r) => setTimeout(r, 30));
 
 let port: any;
@@ -168,5 +179,24 @@ describe("handoff run loop (Lane E)", () => {
     expect(fm.to("/zo/ask").length).toBe(asksBefore + 1);
     const st = await bus.runtime.sendMessage({ type: "HANDOFF_STATUS", runId: run.runId });
     expect(st.run.status).toBe("aborted");
+  });
+
+  it("badge marks live runs; finishing a run notifies (Lane E item 12)", async () => {
+    const run = await startRun();
+    fm.handle(() => envelope({ actions: [{ type: "done", response: "All finished" }] }));
+    port.postMessage({ sessionId: 950, type: "ASK_ZO", chatId: run.chatId, modeId: "cobrowse", userQuery: run.goal, handoffRunId: run.runId });
+    const finalRun = await panelLoop(run, { sessionBase: "950" });
+
+    // While the run was live the badge lit up…
+    expect(badgeCalls.some((b) => b.kind === "text" && b.text === "▶")).toBe(true);
+    // …and finishing clears it and fires the one-shot notification.
+    expect(finalRun.status).toBe("done");
+    expect(badgeCalls.filter((b) => b.kind === "text").at(-1)?.text).toBe("");
+    const note = notifications.find((n) => n.id === `handoff-${run.runId}`);
+    expect(note).toBeTruthy();
+    expect(note.opts.title).toBe("Zo handoff finished");
+    expect(note.opts.message).toContain("Digest the tabs");
+    // aborted/paused runs never notified (panel-only).
+    expect(notifications.every((n) => !n.id.startsWith("handoff-run") || n.opts.title.includes("finished"))).toBe(true);
   });
 });

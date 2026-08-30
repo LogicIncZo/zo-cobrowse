@@ -7,6 +7,16 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — handoff polish: badge marker, finish notifications, changelog-drift gate (#103)
+- **▶ extension badge while a handoff run is live** — visible even with the panel closed;
+  cleared when no run is active.
+- **One-shot `chrome.notifications` on handoff done/blocked** ("the point of delegating is
+  walking away") with the goal + stop reason; paused/aborted stay panel-only (new
+  `notifications` permission).
+- **`bun run lint` now fails on docs-changelog drift**: `scripts/sync-changelog.ts --check`
+  verifies the docs-site `[Unreleased]` mirror matches root `CHANGELOG.md` (the mirror had
+  silently gone empty once); `bun scripts/sync-changelog.ts` re-syncs it.
+
 ### Added — `!handoff`: delegate a goal to Zo as an unattended run (#102)
 - **`!handoff <goal>`** starts a read-only handoff run from the panel: Zo works the pages
   unattended (navigate/extract/scroll), the panel executes each turn's actions as one batch,
