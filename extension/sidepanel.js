@@ -16,6 +16,7 @@ import { assignRefs, ensureActiveTabRef, isBlankPage, thinTabExcerpts } from './
 import { visionModelSuggestion, modelVisionSupport, findModelEntry } from './lib/vision.js';
 import { extractUrls, MAX_LINK_CHIPS } from './lib/links.js';
 import { WORKSPACE_ROOT, filterPickerEntries } from './lib/pickers.js';
+import { applyI18nDom } from './lib/i18n.js';
 import {
   openChatTab,
   closeChatTab,
@@ -246,10 +247,15 @@ async function finishInit() {
     await fetchModelsAndPersonas();
     await loadQuickActions();
     await loadTtsConfig();
+    applyI18nDom(); // #68: resolve data-i18n attributes (UI strings only)
     initTabStrip();
     initJumpToLatest();
     connectStreamingPort();
     chrome.storage.onChanged.addListener((changes) => {
+      // #65: follow theme changes made in Settings (or another panel) live.
+      if (changes[THEME_STORAGE_KEY]) {
+        applyTheme(changes[THEME_STORAGE_KEY].newValue || '', true);
+      }
       if (changes[STORAGE_ACTIONS_KEY]) {
         const actions = changes[STORAGE_ACTIONS_KEY].newValue;
         renderQuickActions(actions || []);
@@ -324,6 +330,142 @@ async function loadConfig() {
 // Reflect activeModeId into the #mode-select dropdown.
 function syncModeSelect() {
   if (modeSelect) modeSelect.value = activeModeId;
+  refreshSelectShim(modeSelect);
+}
+
+// ---- Select shim (#62) — panel-safe dropdowns ----
+// Native <select> popups don't open on mouse click inside the real side-panel
+// shell (Chromium quirk; keyboard still worked). The shim hides the native
+// select (kept in the DOM as the source of truth — every existing `change`
+// listener keeps working) and renders a custom trigger + popup reusing the
+// same popup patterns as the @//% pickers. In a normal tab the native select
+// would work fine, but the shim is identical there — one code path everywhere.
+const selectShims = new Map();
+
+function refreshSelectShim(select) {
+  selectShims.get(select)?.refresh();
+}
+
+function shimSelect(select) {
+  if (!select || selectShims.has(select)) return;
+  const shim = createSelectShim(select);
+  selectShims.set(select, shim);
+  shim.refresh();
+}
+
+function createSelectShim(select) {
+  const wrap = document.createElement('span');
+  wrap.className = 'select-shim';
+  select.parentNode.insertBefore(wrap, select);
+  wrap.appendChild(select);
+  select.classList.add('select-shim-native'); // hidden; still the data store
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'select-shim-btn';
+  btn.setAttribute('aria-haspopup', 'listbox');
+  btn.setAttribute('aria-expanded', 'false');
+  wrap.appendChild(btn);
+
+  const pop = document.createElement('div');
+  pop.className = 'select-shim-pop hidden';
+  pop.setAttribute('role', 'listbox');
+  document.body.appendChild(pop);
+
+  let activeIdx = -1;
+
+  const selectedOption = () => select.options[select.selectedIndex] || null;
+  const rows = () => [...select.options].filter((o) => !o.disabled);
+
+  function refresh() {
+    const opt = selectedOption();
+    btn.textContent = `${safeText(opt ? opt.textContent : '')} ▾`;
+  }
+
+  function renderRows() {
+    pop.replaceChildren();
+    const opts = rows();
+    activeIdx = Math.max(0, opts.indexOf(selectedOption()));
+    const current = selectedOption();
+    opts.forEach((o, i) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'select-shim-item' + (o === current ? ' select-shim-active' : '');
+      item.setAttribute('role', 'option');
+      item.textContent = safeText(o.textContent);
+      item.title = safeText(o.title || '');
+      item.addEventListener('mousedown', (ev) => { ev.preventDefault(); choose(o.value); });
+      item.addEventListener('mousemove', () => {
+        if (activeIdx !== i) {
+          activeIdx = i;
+          pop.querySelectorAll('.select-shim-item').forEach((el, j) => el.classList.toggle('select-shim-active', j === i));
+        }
+      });
+      pop.appendChild(item);
+    });
+  }
+
+  function open() {
+    renderRows();
+    const r = btn.getBoundingClientRect();
+    pop.style.left = `${Math.round(r.left)}px`;
+    pop.style.top = `${Math.round(r.bottom + 4)}px`;
+    pop.style.minWidth = `${Math.round(r.width)}px`;
+    pop.classList.remove('hidden');
+    btn.setAttribute('aria-expanded', 'true');
+  }
+
+  function close() {
+    pop.classList.add('hidden');
+    btn.setAttribute('aria-expanded', 'false');
+  }
+
+  const isOpen = () => !pop.classList.contains('hidden');
+
+  function choose(value) {
+    if (select.value !== value) {
+      select.value = value;
+      // Existing listeners (applyMode, config persistence) hang off `change`.
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    refresh();
+    close();
+    btn.focus();
+  }
+
+  function move(delta) {
+    const opts = rows();
+    if (!opts.length) return;
+    activeIdx = (activeIdx + delta + opts.length) % opts.length;
+    const items = pop.querySelectorAll('.select-shim-item');
+    items.forEach((el, i) => el.classList.toggle('select-shim-active', i === activeIdx));
+    items[activeIdx]?.scrollIntoView({ block: 'nearest' });
+  }
+
+  btn.addEventListener('mousedown', (ev) => {
+    ev.preventDefault();
+    if (isOpen()) close(); else open();
+  });
+  btn.addEventListener('keydown', (ev) => {
+    if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+      ev.preventDefault();
+      if (!isOpen()) { open(); return; }
+      move(ev.key === 'ArrowDown' ? 1 : -1);
+    } else if (ev.key === 'Enter' || ev.key === ' ') {
+      ev.preventDefault();
+      if (!isOpen()) { open(); return; }
+      const target = rows()[activeIdx];
+      if (target) choose(target.value);
+    } else if (ev.key === 'Escape') {
+      close();
+    }
+  });
+  document.addEventListener('mousedown', (ev) => {
+    if (isOpen() && !pop.contains(ev.target) && ev.target !== btn) close();
+  });
+  window.addEventListener('resize', close);
+
+  return { refresh, close };
 }
 
 // ---- Onboarding ----
@@ -1255,16 +1397,26 @@ function renderPromptInspector() {
     state: contextState,
     pageHash,
     pageBlank: isBlankPage(currentContext?.url || ''),
+    domEnabled: domContextOn,
   });
   // Mirror sendQuery's 📷-toggle force so the preview can't diverge from the
-  // send: armed toggle = tier 3 this turn, same reason string.
+  // send: armed toggle = tier 3 this turn, same reason string. With the #69
+  // DOM toggle off, the cap wins → screenshot-only turn at tier 0.
   let effTier = decision.effectiveTier;
   let effReason = decision.reason;
-  if (shotArmed && effTier < 3) {
+  if (shotArmed && !domContextOn) {
+    effReason = '🚫 DOM off — 📷 screenshot-only this turn';
+  } else if (shotArmed && effTier < 3) {
     effTier = 3;
     effReason = '📷 Image toggle — screenshot forced this turn';
   }
-  const described = describePrompt(mode, currentContext, query, { effectiveTier: effTier, tabContexts: previewTabContexts({ includeActive: effTier === 0 }), skills: pickedSkills, workspaceFiles: pickedFiles });
+  const described = describePrompt(mode, currentContext, query, {
+    effectiveTier: effTier,
+    ...(shotArmed && !domContextOn ? { screenshotOnly: true } : {}),
+    tabContexts: previewTabContexts({ includeActive: effTier === 0 && domContextOn }),
+    skills: pickedSkills,
+    workspaceFiles: pickedFiles,
+  });
 
   summary.textContent = `🔎 Prompt preview · ~${described.approxTokens} tokens`;
   meta.replaceChildren();
@@ -1312,6 +1464,7 @@ async function fetchModelsAndPersonas() {
     cachedModels = [];
     modelSelect.innerHTML = '<option value="">Models unavailable</option>';
   }
+  refreshSelectShim(modelSelect);
 
   const personasResp = await chrome.runtime.sendMessage({ type: 'LIST_PERSONAS' });
   if (personasResp?.success && Array.isArray(personasResp.personas)) {
@@ -1324,6 +1477,7 @@ async function fetchModelsAndPersonas() {
       personaSelect.appendChild(opt);
     }
   }
+  refreshSelectShim(personaSelect);
 }
 
 // ---- Bang Commands (!) — Quick Command Templates (#07) ----
@@ -2184,6 +2338,46 @@ let shotArmed = false;
 let shotPrevModeId = null;
 let shotModeAuto = false;
 
+// #69 — sticky DOM cap (#dom-toggle). Unlike the send-once 📷 toggle this is
+// persistent (storage.sync `domContextEnabled`, default on): when OFF no page
+// DOM ever attaches — decideTurn caps every turn to the URL/title pointer,
+// whatever the Mode or policy wanted (including !context). An armed 📷 with
+// the DOM off still ships pixels (screenshot-only turn — separate channel).
+let domContextOn = true;
+
+function renderDomToggle() {
+  const btn = document.getElementById('dom-toggle');
+  if (!btn) return;
+  btn.setAttribute('aria-pressed', String(domContextOn));
+  btn.classList.toggle('shot-toggle-on', domContextOn);
+  btn.textContent = domContextOn ? '🧩 DOM ✓' : '🚫 DOM';
+  btn.title = domContextOn
+    ? 'Page DOM attached per the context policy — click to turn OFF (URL/title pointer only, privacy / token cap)'
+    : 'DOM OFF — no page DOM is sent (URL/title pointer only). Click to re-enable.';
+  const wrap = document.getElementById('tab-contexts');
+  if (wrap) wrap.classList.remove('hidden'); // the toggles must stay reachable
+}
+
+function toggleDomContext() {
+  domContextOn = !domContextOn;
+  try {
+    chrome.storage.sync.set({ domContextEnabled: domContextOn });
+  } catch { /* storage unavailable — session-only */ }
+  renderDomToggle();
+  renderPromptInspector();
+}
+
+async function initDomToggle() {
+  const btn = document.getElementById('dom-toggle');
+  if (!btn) return;
+  btn.addEventListener('click', toggleDomContext);
+  try {
+    const saved = await chrome.storage.sync.get({ domContextEnabled: true });
+    domContextOn = saved.domContextEnabled !== false;
+  } catch { /* default on */ }
+  renderDomToggle();
+}
+
 /** Re-render the toggle chip's pressed state + label. Also keeps the
  * tab-contexts row visible when armed even if no tabs are open (the row
  * hides itself when the strip is empty). */
@@ -2242,6 +2436,12 @@ function initTabStrip() {
   }
   refreshOpenTabs();
   initShotToggle();
+  initDomToggle();
+  // #62: panel-safe dropdowns (native select popups don't open on click in
+  // the side-panel shell). The native selects stay as the data store.
+  shimSelect(modelSelect);
+  shimSelect(personaSelect);
+  shimSelect(modeSelect);
   // Keep the strip fresh when the user refocuses the panel.
   window.addEventListener('focus', refreshOpenTabs);
   // Track browser-tab switches: adopt the newly active tab for DISPLAY (page
@@ -2298,10 +2498,8 @@ function renderTabStrip() {
   const strip = document.getElementById('tab-strip');
   const countEl = document.getElementById('tab-strip-count');
   if (!wrap || !strip) return;
-  if (!openTabs.length && !shotArmed) {
-    wrap.classList.add('hidden');
-    return;
-  }
+  // Always visible since #69: the row hosts the sticky toggles (📷 / 🧩 DOM),
+  // which must stay reachable even with no tabs open.
   wrap.classList.remove('hidden');
   if (countEl) countEl.textContent = `(${tabRefsEnabled.size}/${openTabs.length})`;
 
@@ -2313,9 +2511,12 @@ function renderTabStrip() {
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'tab-chip' + (tabRefsEnabled.has(t.tabId) ? ' tab-chip-on' : '');
-    const label = safeText(t.host || t.title || t.url).slice(0, 24);
+    // #72: title preferred over bare host — two github.com tabs must be
+    // distinguishable at a glance; host + full url live in the tooltip.
+    const label = safeText(t.title || t.host || t.url).slice(0, 24);
     chip.textContent = (t.active ? '◈ ' : '') + label;
-    chip.title = safeText(t.title || t.url) + (t.active ? ' — this tab' : '') +
+    chip.title = safeText(t.title || t.url) + (t.url ? `\n${safeText(t.url)}` : '') +
+      (t.active ? ' — this tab' : '') +
       (tabRefsEnabled.has(t.tabId) ? ' — referenced (click to remove)' : ' — click to reference as context');
     chip.setAttribute('aria-pressed', String(tabRefsEnabled.has(t.tabId)));
     chip.addEventListener('click', () => {
@@ -2456,8 +2657,19 @@ function renderTabAutocomplete(filterText) {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'tab-ac-item' + (i === tabAcIndex ? ' tab-ac-active' : '');
-    item.textContent = (t.active ? '◈ ' : '') + safeText(t.host || t.title || t.url).slice(0, 30);
-    item.title = safeText(t.title || t.url);
+    // #72: page title primary, dimmed host secondary — bare hostnames made
+    // same-site tabs indistinguishable.
+    const name = document.createElement('span');
+    name.className = 'tab-ac-name';
+    name.textContent = (t.active ? '◈ ' : '') + safeText(t.title || t.host || t.url).slice(0, 40);
+    item.appendChild(name);
+    if (t.host && (t.title || '') !== t.host) {
+      const host = document.createElement('span');
+      host.className = 'tab-ac-host';
+      host.textContent = safeText(t.host);
+      item.appendChild(host);
+    }
+    item.title = safeText(t.title || t.url) + (t.url ? `\n${safeText(t.url)}` : '');
     item.addEventListener('mousedown', (e) => { e.preventDefault(); selectTabAutocomplete(i); });
     popup.appendChild(item);
   });
@@ -2551,7 +2763,9 @@ async function ensureSkillsLoaded(force = false) {
     try {
       const resp = await chrome.runtime.sendMessage({ type: 'LIST_SKILLS' });
       if (resp && resp.ok && Array.isArray(resp.skills)) {
-        skillsCache = { list: resp.skills, fetchedAt: Date.now() };
+        // `total` (#73): total skill folders seen by the listing — lets the
+        // popup say "+N more" when folders were skipped.
+        skillsCache = { list: resp.skills, total: resp.total ?? null, fetchedAt: Date.now() };
         return resp.skills;
       }
       return null; // error rendered by the popup, not a thrown crash
@@ -2599,6 +2813,13 @@ function renderSkillPopup(filterText) {
     item.addEventListener('mousedown', (e) => { e.preventDefault(); selectSkill(i); });
     popup.appendChild(item);
   });
+  // #73 loudness: the workspace holds more skill folders than the listing
+  // returned (folders without a SKILL.md head, or a cut-short listing) —
+  // say so instead of silently showing a short list.
+  const hidden = skillsCache.total != null ? skillsCache.total - skillsCache.list.length : 0;
+  if (hidden > 0) {
+    popup.appendChild(pickerNoteItem(`+${hidden} more skill folder${hidden === 1 ? '' : 's'} not listed — no SKILL.md head found, or the listing was cut short. ⟳ refreshes.`));
+  }
   popup.classList.remove('hidden');
 }
 
@@ -2669,10 +2890,38 @@ function renderFilePopup(filterText, keepFilter) {
     sub.className = 'picker-item-desc';
     sub.textContent = e.path || e.name;
     item.appendChild(sub);
+    // #74: folders get a ＋ affordance — row click still navigates INTO the
+    // folder; ＋ arms it as a context chip (Zo lists/recurses server-side).
+    if (e.kind === 'dir') {
+      item.classList.add('has-add');
+      const add = document.createElement('span');
+      add.className = 'picker-item-add';
+      add.textContent = '＋';
+      add.title = `${e.path} — add this FOLDER as context (click the row to browse into it)`;
+      add.addEventListener('mousedown', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        armPickedFile(e, true);
+      });
+      item.appendChild(add);
+    }
     item.addEventListener('mousedown', (ev) => { ev.preventDefault(); selectFileRow(i); });
     popup.appendChild(item);
   });
   popup.classList.remove('hidden');
+}
+
+/** Arm a picked file/folder chip (#74): dirs ride as paths too — Zo resolves
+ *  them server-side with its own file tools (list_directory recurses). */
+function armPickedFile(e, isDir) {
+  if (!pickedFiles.some((p) => p.path === e.path)) {
+    pickedFiles.push(isDir ? { path: e.path, dir: true } : { path: e.path });
+  }
+  swallowTriggerToken('%');
+  closeFilePopup();
+  renderPickerChips();
+  syncSendBtn();
+  renderPromptInspector();
 }
 
 function selectFileRow(i) {
@@ -2683,12 +2932,7 @@ function selectFileRow(i) {
     loadFilesDir(e.path);
     return;
   }
-  if (!pickedFiles.some((p) => p.path === e.path)) pickedFiles.push({ path: e.path });
-  swallowTriggerToken('%');
-  closeFilePopup();
-  renderPickerChips();
-  syncSendBtn();
-  renderPromptInspector();
+  armPickedFile(e, false);
 }
 
 function pickerNoteItem(text) {
@@ -2792,7 +3036,8 @@ function renderPickerChips() {
     });
   }
   for (const f of pickedFiles) {
-    addChip(`📄 ${f.path.split('/').pop()}`, `${f.path} — attached to the next send`, () => {
+    const isDir = !!f.dir;
+    addChip(`${isDir ? '📁' : '📄'} ${f.path.split('/').pop()}${isDir ? '/' : ''}`, `${f.path} — attached to the next send`, () => {
       const idx = pickedFiles.indexOf(f);
       if (idx !== -1) pickedFiles.splice(idx, 1);
       renderPickerChips();
@@ -3183,6 +3428,7 @@ function rebuildModeOptions() {
   }
 
   if (currentVal) modeSelect.value = currentVal;
+  refreshSelectShim(modeSelect);
 }
 
 async function startModeCreation() {
@@ -4240,6 +4486,7 @@ sendQuery = async function() {
     pageHash,
     pageBlank,
     hasThread: !!threadId,
+    domEnabled: domContextOn,
   });
   contextState = turnDecision.newState;
   saveConversationState(activeId, contextState);
@@ -4247,18 +4494,27 @@ sendQuery = async function() {
   // policy decision — the user explicitly asked for pixels this turn. The
   // capture itself is still truthful: the background's vision gate may skip
   // it (model can't take images) and turnHadScreenshot stays honest.
+  // #69: with the DOM toggle OFF the cap wins — pixels ride as a
+  // screenshot-only turn (tier stays 0; only ## Screenshot renders).
   let effectiveTier = turnDecision.effectiveTier;
   let turnReason = turnDecision.reason;
-  if (turnShot && effectiveTier < 3) {
+  const shotOnlyTurn = turnShot && !domContextOn;
+  if (shotOnlyTurn) {
+    turnReason = '🚫 DOM off — 📷 screenshot-only this turn';
+  } else if (turnShot && effectiveTier < 3) {
     effectiveTier = 3;
     turnReason = '📷 Image toggle — screenshot forced this turn';
+  }
+  if (bangResult && bangResult.kind === 'context' && !domContextOn) {
+    addMessage('system', '🚫 DOM toggle is OFF — !context was capped to the URL/title pointer this turn.');
   }
 
   // Truthful per-turn screenshot flag: the prompt embeds the image only when
   // the policy attaches tier-3 context AND the capture actually produced a
   // data URL (the vision gate may skip it, or captureVisibleTab may fail).
+  // Screenshot-only turns (#69) ship pixels at tier 0.
   // Drives the 📷 footer chip + its persistence on the assistant message.
-  const turnHadScreenshot = effectiveTier >= 3 && !!currentContext?.screenshotDataUrl;
+  const turnHadScreenshot = (effectiveTier >= 3 || shotOnlyTurn) && !!currentContext?.screenshotDataUrl;
 
   // The 📷 pill marks a screenshot that SHIPPED, not intent: render it (and
   // persist `shot`) only when the capture produced a data URL. An armed
@@ -4285,7 +4541,7 @@ sendQuery = async function() {
   // (!context / action turns). Refs renumber so the active tab is T1.
   // Blank/new-tab pages are never auto-referenced (cold start: no page).
   let sendTabContexts = tabContexts;
-  if (effectiveTier === 0 && currentContext && currentContext.tabId != null && !pageBlank) {
+  if (effectiveTier === 0 && domContextOn && currentContext && currentContext.tabId != null && !pageBlank) {
     const activeRef = await fetchTabContext(currentContext.tabId);
     if (activeRef) sendTabContexts = assignRefs(ensureActiveTabRef(tabContexts, activeRef));
   }
@@ -4335,6 +4591,7 @@ sendQuery = async function() {
         customModes,
         effectiveTier,
         modeOverrides,
+        ...(shotOnlyTurn ? { shotOnly: true } : {}),
         ...(sendTabContexts.length ? { tabContexts: sendTabContexts } : {}),
         ...(turnSkills.length ? { skills: turnSkills } : {}),
         ...(turnFiles.length ? { workspaceFiles: turnFiles } : {}),
@@ -4363,6 +4620,7 @@ sendQuery = async function() {
     customModes,
     effectiveTier,
     modeOverrides,
+    ...(shotOnlyTurn ? { shotOnly: true } : {}),
     ...(sendTabContexts.length ? { tabContexts: sendTabContexts } : {}),
     ...(turnSkills.length ? { skills: turnSkills } : {}),
     ...(turnFiles.length ? { workspaceFiles: turnFiles } : {}),

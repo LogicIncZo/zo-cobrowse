@@ -1,0 +1,58 @@
+{
+  "extName": {
+    "message": "Zo Co-browse",
+    "description": "The extension's display name (store + chrome://extensions)."
+  },
+  "extDescription": {
+    "message": "Co-browsing extension powered by Zo — AI backend that sees your page and takes actions through it.",
+    "description": "The extension's store description."
+  },
+  "sidepanelNewChat": {
+    "message": "New chat",
+    "description": "Header + new-chat button tooltip."
+  },
+  "sidepanelThemeToggle": {
+    "message": "Toggle theme",
+    "description": "Theme button tooltip."
+  },
+  "sidepanelHelp": {
+    "message": "About co-browsing",
+    "description": "Help button tooltip."
+  },
+  "sidepanelHistory": {
+    "message": "History",
+    "description": "History button tooltip."
+  },
+  "sidepanelModeLabel": {
+    "message": "Zo mode",
+    "description": "Mode select tooltip."
+  },
+  "sidepanelModelLabel": {
+    "message": "AI model",
+    "description": "Model select tooltip."
+  },
+  "sidepanelPersonaLabel": {
+    "message": "Persona",
+    "description": "Persona select tooltip."
+  },
+  "sidepanelCreateMode": {
+    "message": "Create custom mode",
+    "description": "✦ create-mode button tooltip."
+  },
+  "sidepanelComposerPlaceholder": {
+    "message": "Ask Zo about this page…",
+    "description": "Composer textarea placeholder."
+  },
+  "shotToggleTitle": {
+    "message": "Attach a screenshot of this tab to the NEXT message (one turn only — switches Mode to Visual while armed)",
+    "description": "📷 Image toggle tooltip (disarmed)."
+  },
+  "domToggleTitleOn": {
+    "message": "Page DOM attached per the context policy — click to turn OFF (URL/title pointer only, privacy / token cap)",
+    "description": "🧩 DOM toggle tooltip (on)."
+  },
+  "domToggleTitleOff": {
+    "message": "DOM OFF — no page DOM is sent (URL/title pointer only). Click to re-enable.",
+    "description": "🧩 DOM toggle tooltip (off)."
+  }
+}

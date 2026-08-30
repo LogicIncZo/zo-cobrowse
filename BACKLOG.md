@@ -1,20 +1,29 @@
 # Zo Co-browse — Backlog
 
-> Updated 2026-08-28 — **v0.2.0 RELEASED** (tag `v0.2.0`, 2026-08-28; form-fill #26 shipped — see the 🎯 section).
-> All QA-report findings from the 2026-08-08 round are **resolved**
-> (see `QA_REPORT.md` remediation log). Remaining items are feature work.
-> An **infrastructure round** (2026-08-09) added the loop-engineering gate, CI on
-> all branches, and a dormant release workflow — see below.
+> Updated 2026-08-30 — **v0.2.5 RELEASED** (tag `v0.2.5`, 2026-08-29: Lean Mode + mode-surface rationalization #59, full Zod schema coverage #60, `<all_urls>` vision-capture fix #58).
+> The 0.2.x carry-over feature slate (#19 model picker, #10 cross-tab actions, #29 watch-tasks) is **deferred** — v0.2.6 is an owner-driven bug-fix & polish round (#62–#74, see the 🎯 0.2.6 section); the 0.3.0 round (#46–#54) is unchanged.
 
 ## Current state
 
 - **Branches:** git-flow (`dev` integration, `main` releases); local branch tree pruned 2026-08-28 after v0.2.0 (15 merged/stale branches deleted)
-- **Tests:** ✅ **977 pass / 0 fail** (42 files, 2662 expect() calls) + 32 Playwright e2e across 17 numbered specs (+2 demo specs)
+- **Tests:** ✅ **998 pass / 0 fail** (42 files, 2706 expect() calls) + 33 Playwright e2e across 17 numbered specs (+2 demo specs)
 - **Loop engineering:** `bun run verify` gate + committed hard-gate pre-commit hook (`bun run setup-hooks` to install)
 - **CI/CD:** CI runs on every branch push + PR to `main` (tests + transpile + release checks + zip artifact); `.github/workflows/release.yml` publishes `v*` tag releases (used for v0.0.2)
 - **Streaming:** hardened end-to-end (sessionId isolation, port-disconnect safety, retry correctness, 60s liveness timeout)
 - **P0/P1/P2/P3 QA findings:** all closed (P2-31 deferred by design — see below)
-- **Release:** ✅ **v0.2.0** tagged + released (2026-08-28; v0.1.0 was 2026-08-19). Next milestones: **v0.2.1** — carry-over slate per the 0.2.0 build order: **#19 → #10 → #29** — then **v0.3.0** (competitive round 2, issues #46–#54, see the 🎯 section below); Chrome Web Store submission (#11) stays its own milestone after 0.3.0 features land
+- **Release:** ✅ **v0.2.5** tagged + released (2026-08-29). Next milestone: **v0.2.6** — bug-fix & polish round, owner-observed issues **#62–#74** (see 🎯 0.2.6 below); then the deferred 0.2.x carry-overs (#19 → #10 → #29) re-slot before/into **v0.3.0** (#46–#54); Chrome Web Store submission (#11) stays its own milestone after 0.3.0 features land
+
+## 🎯 0.2.6 — planned 2026-08-30 (bug-fix & polish round)
+
+Slate chosen in-session from the owner's daily-use observations; each item diagnosed with code evidence and filed as an issue (all in the `0.2.6` milestone). Slate shape + build order + cross-cutting rules: **`docs/superpowers/specs/2026-08-30-0.2.6-slate-design.md`**.
+
+**Lane A — small fixes** (build order): [#73](https://github.com/LogicIncZo/zo-cobrowse/issues/73) skills cache (`storage.session`, SW restarts kill the in-memory 5-min TTL; loud truncation) → [#70](https://github.com/LogicIncZo/zo-cobrowse/issues/70) tier-0 prompt dedupe (two overlapping not-attached clarifiers) → [#65](https://github.com/LogicIncZo/zo-cobrowse/issues/65) theme consistency (live storage.onChanged sync + write-assist shadow theme) → [#64](https://github.com/LogicIncZo/zo-cobrowse/issues/64) TTS voice picker (plumbing exists, UI missing) → [#72](https://github.com/LogicIncZo/zo-cobrowse/issues/72) `@` titles (bare hostnames are ambiguous) → [#63](https://github.com/LogicIncZo/zo-cobrowse/issues/63) fold page-title bar into the header → [#74](https://github.com/LogicIncZo/zo-cobrowse/issues/74) `%` folder-as-context (dirs navigate-only today; wire format is paths-only, Zo resolves server-side).
+
+**Lane B — features**: [#69](https://github.com/LogicIncZo/zo-cobrowse/issues/69) DOM context toggle (sticky never-send-DOM cap beside 📷; precedence rules in-issue) → [#62](https://github.com/LogicIncZo/zo-cobrowse/issues/62) panel selects dead on mouse click (repro + root-cause first; custom-dropdown fallback on the picker machinery; e2e structurally blind — panel opens as a tab).
+
+**Lane C — audit-first tracks** (parallel): [#66](https://github.com/LogicIncZo/zo-cobrowse/issues/66) test safety net (coverage measurement + report in CI, real-panel manual QA checklist) · [#67](https://github.com/LogicIncZo/zo-cobrowse/issues/67) debug mode then profile-first perf (before/after numbers required) · [#68](https://github.com/LogicIncZo/zo-cobrowse/issues/68) i18n scaffolding (`chrome.i18n`, UI strings only — prompts stay English) · [#71](https://github.com/LogicIncZo/zo-cobrowse/issues/71) prompt-bloat audit (`describePrompt()`-driven token-cost table; trims need evals re-run).
+
+**Deferred (rationale):** #19/#10/#29 carry-overs and all of 0.3.0 (#46–#54) — unchanged; #11 store listing stays its own milestone.
 
 ## ✅ Completed this round
 

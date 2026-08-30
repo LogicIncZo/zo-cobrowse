@@ -29,10 +29,18 @@ describe("sticky top region layout", () => {
   });
 
   it("top-region bars do not shrink (they stay pinned above the scroller)", () => {
-    for (const sel of [".header", ".page-bar", ".controls-bar", ".chips-wrap"]) {
+    // .page-bar is gone (#63): the page title folded into .header-page.
+    for (const sel of [".header", ".controls-bar", ".chips-wrap"]) {
       const block = ruleBlock(sel);
       expect(block).toContain("flex-shrink: 0");
     }
+  });
+
+  it("#63: the page title lives in the header and ellipsizes, never pushes the actions out", () => {
+    const block = ruleBlock(".header-page");
+    expect(block).toContain("flex: 1");
+    expect(block).toContain("min-width: 0");
+    expect(ruleBlock("#page-url")).toContain("text-overflow: ellipsis");
   });
 
   it("#chat-view fills remaining space and allows its children to scroll (not height:100%)", () => {
