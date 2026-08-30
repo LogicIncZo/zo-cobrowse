@@ -1023,9 +1023,35 @@ if (chrome.debugger) {
   });
 }
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
   recreateContextMenus();
+  // Lane D stale-build guard (#109): after an extension UPDATE, open tabs
+  // keep running the OLD content script until they navigate — the recurring
+  // "still broken after git pull + reload" trap. Re-inject the fresh
+  // content.js into eligible open tabs and leave a one-time banner flag for
+  // the panel.
+  if (details.reason === 'update') {
+    chrome.storage.session.set({ cobrowse_updated_at: Date.now() }).catch((e) => console.debug('session.set:', e));
+    reinjectContentScripts();
+  }
 });
+
+// Re-inject content.js into open http(s) tabs. Excluded by the query:
+// chrome:// pages, extension pages, about: — everything content.js itself
+// refuses to run on (its PAGE_DEAD guard). Tabs where injection fails
+// (discarded, restricted) are skipped silently.
+async function reinjectContentScripts() {
+  try {
+    const tabs = await chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] });
+    for (const tab of tabs) {
+      try {
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
+      } catch { /* tab ineligible — skip */ }
+    }
+  } catch (e) {
+    console.debug('reinjectContentScripts:', e);
+  }
+}
 chrome.runtime.onStartup.addListener(() => recreateContextMenus());
 
 // ── Keyboard Shortcuts (chrome.commands) ──
