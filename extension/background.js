@@ -112,7 +112,12 @@ async function askZoStream(port, msg) {
           throw new Error('Port disconnected');
         }
       }
-      return await _askZoStreamImpl(port, msg);
+      // Success after a retry — tell the panel explicitly that the banner can
+      // drop (the sidepanel's STREAM_RECONNECT_DONE case was dead code until
+      // this post existed; the first chunk also clears it, this is the honest contract).
+      const result = await _askZoStreamImpl(port, msg);
+      if (attempt > 1) safePost(port, { sessionId: msg.sessionId, type: 'STREAM_RECONNECT_DONE' });
+      return result;
     } catch (err) {
       lastError = err;
       // Don't retry if the port is gone or the error is non-transient.

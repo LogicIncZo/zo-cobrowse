@@ -64,6 +64,22 @@ else
 fi
 
 echo ""
+echo -e "${BOLD}Version sync (package.json ↔ manifest)${NC}"
+# Policy (0.2.7 spec, item 5): package.json version mirrors extension/manifest.json
+# and both bump together at release prep. This gate makes drift impossible to merge.
+pkg_ver=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' package.json 2>/dev/null | head -1)
+man_ver=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' extension/manifest.json 2>/dev/null | head -1)
+if [ -z "$pkg_ver" ] || [ -z "$man_ver" ]; then
+  echo -e "  ${RED}✗ Could not read version fields${NC}"
+  fail=1
+elif [ "$pkg_ver" != "$man_ver" ]; then
+  echo -e "  ${RED}✗ package.json ($pkg_ver) != extension/manifest.json ($man_ver) — bump them together at release prep${NC}"
+  fail=1
+else
+  echo -e "  ${GREEN}✓ $pkg_ver${NC}"
+fi
+
+echo ""
 if [ "$fail" -eq 1 ]; then
   echo -e "${RED}❌ Some checks failed${NC}"
 else
