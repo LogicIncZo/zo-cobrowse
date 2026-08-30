@@ -73,6 +73,12 @@ and this project uses [Semantic Versioning](https://semver.org/).
   workspace holds more skill folders than were listed (folders without a parseable SKILL.md head),
   the picker shows "+N more skill folders not listed — ⟳ refreshes."
 
+### Added — `%` picker: hand Zo a whole FOLDER as context (#74)
+- Directory rows in the `%` browser gained a **＋** affordance beside click-to-navigate: arming a
+  folder rides its path in `## Referenced Files` (Zo lists/recurses server-side — the wire format
+  was already paths-only). Folder chips render 📁 with a trailing slash; the section instruction
+  line now teaches "files: read them; directories: list/recurse as needed."
+
 ### Fixed — 📷 screenshots never reached Zo on real Chrome
 - **`<all_urls>` host permission**: `chrome.tabs.captureVisibleTab` requires the literal
   `<all_urls>` pattern (or an activeTab gesture) — the manifest's scoped wildcards
