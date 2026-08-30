@@ -17,6 +17,7 @@ import { visionModelSuggestion, modelVisionSupport, findModelEntry } from './lib
 import { extractUrls, MAX_LINK_CHIPS } from './lib/links.js';
 import { WORKSPACE_ROOT, filterPickerEntries } from './lib/pickers.js';
 import { applyI18nDom } from './lib/i18n.js';
+import { handoffInstructions, runProgress } from './lib/handoff.js';
 import {
   openChatTab,
   closeChatTab,
@@ -161,6 +162,9 @@ let tabsState = { openIds: [], activeId: null }; // chat tab bar (lib/chat-tabs.
 const chatTabRefs = new Map(); // chatId → Set<tabId> — per-chat tab-context toggles
 let pendingActions = null;
 let pendingActionsReasoning = '';   // reasoning to attach to the done-answer bubble
+// Lane E: the live handoff run started from THIS panel (null when none).
+// Cleared by HANDOFF_UPDATE on done/paused/aborted, or on HANDOFF_STOP.
+let activeHandoffRun = null;
 let currentContext = null;
 let actionRunning = false;
 let isHistoryView = false;
@@ -279,6 +283,21 @@ async function finishInit() {
       if (msg.type === 'PENDING_ZO_QUERY' && msg.text) {
         input.value = msg.text;
         sendQuery();
+      }
+      // Lane E: run-state pushes from the background handoff loop.
+      if (msg.type === 'HANDOFF_UPDATE' && msg.run) {
+        const run = msg.run;
+        if (activeHandoffRun && activeHandoffRun.runId !== run.runId) return; // another chat's run
+        if (run.status === 'running') {
+          renderHandoffLine(run);
+        } else {
+          // done / paused / aborted / blocked — the loop has left the chat.
+          activeHandoffRun = null;
+          removeHandoffLine();
+          const icon = { done: '✅', paused: '⏸️', aborted: '🛑', blocked: '⛔' }[run.status] || 'ℹ️';
+          const reason = run.stopReason ? ` — ${safeText(run.stopReason)}` : '';
+          addMessage('system', `${icon} Handoff ${run.status}${reason}`);
+        }
       }
       // Ctrl+Shift+N shortcut: the background broadcasts NEW_CONVERSATION; the
       // panel starts a fresh chat locally (its startNewConversation also tells
@@ -3789,8 +3808,21 @@ function connectStreamingPort() {
 }
 
 function handleStreamMessage(msg) {
-  // Ignore stale messages from previous sessions
-  if (msg.sessionId && msg.sessionId !== streamSession.sessionId) return;
+  // Ignore stale messages from previous sessions — UNLESS this is a chained
+  // handoff turn (Lane E): the background re-enters the stream with a fresh
+  // derived sessionId (`<base>-h<n>-<ts>`) for a run this panel started, and
+  // the panel adopts it as the live session so the loop keeps rendering.
+  if (msg.sessionId && msg.sessionId !== streamSession.sessionId) {
+    const chainedHandoff = activeHandoffRun
+      && String(msg.sessionId).startsWith(`${streamSession.sessionId}-h`);
+    if (!chainedHandoff) return;
+    streamSession.sessionId = msg.sessionId;
+    streamSession.active = true;
+    streamSession.chatId = activeHandoffRun.chatId ?? streamSession.chatId;
+    streamSession.msgEl = null; // fresh bubble for the new turn
+    streamSession.fullText = '';
+    streamSession.reasoningText = '';
+  }
   // True when this stream belongs to a chat the user has switched away from —
   // keep accumulating into streamSession, never touch the visible chat DOM.
   const streamIsBackground = () =>
@@ -4248,6 +4280,12 @@ function handleStreamMessage(msg) {
 }
 
 function handleStreamActions(actions, reasoning) {
+  // Lane E: handoff turns execute as ONE batch carrying handoffRunId — the
+  // background's continuation loop keys off that single turn-completion.
+  if (activeHandoffRun) {
+    executeHandoffBatch(actions);
+    return;
+  }
   const navigateActions = actions.filter((a) => a.type === 'navigate');
   const domActions = actions.filter((a) => a.type !== 'navigate' && a.type !== 'done');
   const doneResponse = actions.find((a) => a.type === 'done')?.response;
@@ -4277,6 +4315,85 @@ function handleStreamActions(actions, reasoning) {
   }
 
   // No actions or already handled — input state is managed by STREAM_DONE
+}
+
+// ── Handoff run UX (Lane E) ─────────────────────────────────────────────────
+
+/** The slim run-status line above the composer area (progress + stop). */
+function renderHandoffLine(run) {
+  if (!msgsEl) return;
+  let line = msgsEl.querySelector('.msg-handoff-line');
+  if (!line) {
+    line = document.createElement('div');
+    line.className = 'msg-system msg-handoff-line';
+    msgsEl.appendChild(line);
+  }
+  const stopBtn = document.createElement('button');
+  stopBtn.className = 'handoff-stop';
+  stopBtn.textContent = '✕ stop';
+  stopBtn.title = 'Abort this handoff run';
+  stopBtn.addEventListener('click', async () => {
+    stopBtn.disabled = true;
+    await chrome.runtime.sendMessage({ type: 'HANDOFF_STOP', runId: run.runId }).catch(() => {});
+  });
+  line.replaceChildren(
+    Object.assign(document.createElement('span'), { textContent: `🤖 Handoff — ${runProgress(run)} · ${safeText(run.goal).slice(0, 60)}` }),
+    stopBtn,
+  );
+  line.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function removeHandoffLine() {
+  msgsEl?.querySelector('.msg-handoff-line')?.remove();
+}
+
+/** Execute one handoff turn's actions as a single batch. Results render
+ * compactly; the run's own HANDOFF_UPDATE push reports loop state. */
+async function executeHandoffBatch(actions) {
+  const run = activeHandoffRun;
+  if (!run) return;
+  const card = addMessageDOM('assistant', '', {});
+  const body = card.querySelector('.msg-body');
+  const list = document.createElement('div');
+  list.className = 'handoff-batch';
+  body.appendChild(list);
+  for (const a of actions) {
+    if (a.type === 'done') continue; // rendered below from the results
+    const row = document.createElement('div');
+    row.className = 'handoff-batch-row';
+    row.textContent = a.type === 'navigate' ? `→ ${safeText(a.url)}` : `→ ${safeText(a.type)} ${safeText(a.selector || '')}`;
+    list.appendChild(row);
+  }
+  let res = null;
+  try {
+    res = await chrome.runtime.sendMessage({
+      type: 'EXECUTE_ACTIONS',
+      handoffRunId: run.runId,
+      boundaryMode: run.boundaryMode || 'readonly',
+      tabId: currentContext?.tabId,
+      actions,
+      url: currentContext?.url,
+    });
+  } catch { /* background gone — the orphan-pause sweep handles the run */ }
+  const results = Array.isArray(res?.results) ? res.results : [];
+  results.forEach((r, i) => {
+    const row = list.children[i];
+    if (!row) return;
+    if (r?.handoffParked) {
+      row.textContent += ' — ⛔ parked (boundary)';
+      row.title = safeText(r.error || 'parked for the user');
+    } else if (r && r.ok === false) {
+      row.textContent += ' — ⚠️ failed';
+    } else {
+      row.textContent += ' ✓';
+    }
+  });
+  // The done() deliverable renders as the assistant answer.
+  const doneResponse = safeText((actions.find((a) => a.type === 'done') || {}).response);
+  if (doneResponse) {
+    body.insertAdjacentHTML('beforeend', markdownToHtml(doneResponse));
+    enhanceCodeBlocks(body);
+  }
 }
 
 // Override sendQuery for streaming
@@ -4363,6 +4480,30 @@ sendQuery = async function() {
       sendBtn.disabled = false;
       input.focus();
       return;
+    }
+    if (bang.isHandoff) {
+      // Lane E: start the run, then send the first turn with handoffRunId so
+      // the background loop takes over after the actions execute. Read-only
+      // boundary; the action envelope (cobrowse) is what the loop consumes.
+      addMessage('user', query);
+      const start = await chrome.runtime.sendMessage({
+        type: 'HANDOFF_START',
+        chatId: activeId,
+        tabId: currentContext?.tabId,
+        goal: bang.query,
+        boundaryMode: 'readonly',
+      });
+      if (!start?.ok || !start.run) {
+        addMessage('error', start?.error || 'Could not start the handoff run.');
+        input.disabled = false;
+        sendBtn.disabled = false;
+        input.focus();
+        return;
+      }
+      activeHandoffRun = start.run;
+      effectiveQuery = `${bang.query}\n\n${handoffInstructions(start.run)}`;
+      tempMode = 'cobrowse';
+      renderHandoffLine(start.run);
     }
     if (bang.isDuckdb) {
       addMessage('user', query);
@@ -4595,6 +4736,7 @@ sendQuery = async function() {
         ...(sendTabContexts.length ? { tabContexts: sendTabContexts } : {}),
         ...(turnSkills.length ? { skills: turnSkills } : {}),
         ...(turnFiles.length ? { workspaceFiles: turnFiles } : {}),
+        ...(activeHandoffRun ? { handoffRunId: activeHandoffRun.runId } : {}),
       });
     } catch (e) {
       // Port disconnected between check and postMessage — fall through to non-streaming fallback

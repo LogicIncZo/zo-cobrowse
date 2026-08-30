@@ -7,6 +7,17 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — `!handoff`: delegate a goal to Zo as an unattended run (#102)
+- **`!handoff <goal>`** starts a read-only handoff run from the panel: Zo works the pages
+  unattended (navigate/extract/scroll), the panel executes each turn's actions as one batch,
+  and the background chains turns until Zo reports the digest via `done()` — budget-capped,
+  boundary-parked, stoppable via the ✕ on the live progress line.
+- **Chained-turn adoption**: the loop re-enters the stream with derived sessionIds
+  (`<base>-h<n>-…`); the panel adopts descendants of its own sent turn instead of dropping
+  them as stale, so the whole run renders live in the run's chat tab.
+- The run's state pushes (`HANDOFF_UPDATE`) render a compact progress line (pages · turns ·
+  parked · minutes) and an honest end card — ✅ done / ⏸️ paused (with reason) / 🛑 stopped.
+
 ### Added — handoff run loop: the background half of delegate-mode runs (#101)
 - **`HANDOFF_START` / `HANDOFF_STOP` / `HANDOFF_STATUS`** message types (message-contract test
   enforced) + a **`HANDOFF_UPDATE`** background→panel push (declared in a new
