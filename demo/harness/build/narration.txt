@@ -1,0 +1,6 @@
+s1|Zo Co-browse. Your browser just got a brain. This open-source Chrome extension lets Zo — your personal AI — see the page you're on, understand it, and actually act on it. Let me show you.
+s2|It works on any page. Here I'm asking Zo to pull every source link from the History section of a Wikipedia article on UPI. Zo reads the page, plans its actions, and executes them right in your browser tab.
+s3|Watch it live. The page context streams to Zo, the side panel shows its thinking, and every action — click, extract, scroll — runs visibly, right before your eyes.
+s4|Co-browse mode. Zo doesn't just chat about the page — it drives it.
+s5|The AI jumped to the History section, extracted the links, and reported back in plain markdown. And here's the privacy bit: context is tiered, and page content stays on your machine unless you send it.
+s6|Zo Co-browse is MIT licensed, fully open source, and works with any Zo Computer account. Clone it, load it unpacked, paste your access token — and give your browser a brain. Find it at github dot com slash Logic Inc Z O slash zo dash cobrowse.
