@@ -7,6 +7,15 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — Test Connection & Settings honor the configured API endpoint (#94)
+- **New "API Endpoint" field** in Settings → Connection: `zoApiUrl` existed in storage (and was
+  seeded by the e2e harness) but had no UI — self-hosted / overridden gateways were unconfigurable.
+- **Test Connection now tests what you configured**: it posted to a hardcoded
+  `https://api.zo.computer/zo/ask`, so a custom endpoint could never pass (QA finding B, P3).
+  It now posts to the field's value (default unchanged) and error messages quote the actual URL
+  tried. The model/persona dropdown loaders derive their `/models/available` +
+  `/personas/available` URLs from the same origin. Reset-to-defaults clears the field.
+
 ### Fixed — `@` tabs and chip strip show page titles (#72)
 - The `@` tab autocomplete and the tab-context chip strip rendered bare hostnames — with two
   `github.com` tabs open the entries were indistinguishable. Both now lead with the page title
