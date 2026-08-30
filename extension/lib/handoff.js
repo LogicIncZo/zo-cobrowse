@@ -111,7 +111,7 @@ export function transition(run, event, extra = {}) {
     return { ok: false, error: `cannot ${event} from ${run.status}`, run };
   }
   const next = { ...run, status: eventToStatus(event), updatedAt: extra.now ?? Date.now() };
-  if (event === 'block' && extra.reason) next.stopReason = extra.reason;
+  if (extra.reason && (event === 'block' || event === 'pause')) next.stopReason = extra.reason;
   if ((event === 'complete' || event === 'abort') && extra.reason && !next.stopReason) {
     next.stopReason = extra.reason;
   }

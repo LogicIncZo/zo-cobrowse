@@ -7,6 +7,20 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — handoff run loop: the background half of delegate-mode runs (#101)
+- **`HANDOFF_START` / `HANDOFF_STOP` / `HANDOFF_STATUS`** message types (message-contract test
+  enforced) + a **`HANDOFF_UPDATE`** background→panel push (declared in a new
+  `BACKGROUND_PUSH_TYPES` schema list — pushes get no router case by design).
+- **The loop is event-driven, never SW-resident**: each turn's `EXECUTE_ACTIONS` completion
+  re-enters `askZoStream` with a continuation turn (progress report + budget line from
+  `lib/handoff.js`) and a fresh capture of the driven tab. Run state persists in
+  `storage.session` (`cobrowse_handoff_runs`); an MV3 service-worker restart pauses the run
+  ("extension restarted — resume to continue") instead of stranding it. `done()` completes;
+  budget exhaustion and mid-run failures pause honestly.
+- **Boundary enforcement in the executor**: under a run's boundary mode, interactive actions
+  (click/fill) are refused *before execution* and parked into the run's park log
+  (`handoffParked` results) — parking never stops sibling actions. 0.2.7 runs are `readonly`.
+
 ### Changed — version/docs hygiene (#96)
 - **`package.json` version mirrors the extension manifest** (was `0.1.0` while the manifest said
   `0.2.5`); `bun run lint` now **fails on drift** between the two files, so the release-prep rule
