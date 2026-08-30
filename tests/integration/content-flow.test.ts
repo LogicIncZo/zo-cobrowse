@@ -326,6 +326,46 @@ describe("content.js — write-assist widget", () => {
     expect(icon.style.display).toBe("flex");
   });
 
+  it("applies the dark theme class when cobrowse_theme is dark (#65)", async () => {
+    const win = makeWindow();
+    const { chromeObj } = makeWidgetChrome();
+    chromeObj.storage.sync.get = (keys: any, cb?: Function) => {
+      const result: Record<string, any> = {};
+      if (keys && typeof keys === "object" && !Array.isArray(keys)) {
+        for (const [k, def] of Object.entries(keys)) result[k] = k === "cobrowse_theme" ? "dark" : def;
+      }
+      if (cb) cb(result);
+      return Promise.resolve(result);
+    };
+    loadContentScript(win, chromeObj);
+    await tick();
+    const ta = win.document.querySelector("#proj");
+    ta.focus();
+    await tick();
+    const host = win.document.getElementById("zo-write-assist-host");
+    expect(host).toBeTruthy();
+    expect(host.classList.contains("zo-wa-dark")).toBe(true);
+  });
+
+  it("stays light for explicit light-palette themes (#65)", async () => {
+    const win = makeWindow();
+    const { chromeObj } = makeWidgetChrome();
+    chromeObj.storage.sync.get = (keys: any, cb?: Function) => {
+      const result: Record<string, any> = {};
+      if (keys && typeof keys === "object" && !Array.isArray(keys)) {
+        for (const [k, def] of Object.entries(keys)) result[k] = k === "cobrowse_theme" ? "forest" : def;
+      }
+      if (cb) cb(result);
+      return Promise.resolve(result);
+    };
+    loadContentScript(win, chromeObj);
+    await tick();
+    win.document.querySelector("#proj").focus();
+    await tick();
+    const host = win.document.getElementById("zo-write-assist-host");
+    expect(host.classList.contains("zo-wa-dark")).toBe(false);
+  });
+
   it("sends ENHANCE_TEXT with field + page context and previews the result", async () => {
     const win = makeWindow();
     const { chromeObj, sent } = makeWidgetChrome();

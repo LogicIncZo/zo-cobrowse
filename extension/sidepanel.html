@@ -113,6 +113,10 @@
              auto-clears after that send, like the picker chips. -->
         <button id="shot-toggle" class="shot-toggle" type="button" aria-pressed="false"
                 title="Attach a screenshot of this tab to the NEXT message (one turn only — switches Mode to Visual while armed)">📷 Image</button>
+        <!-- #69: sticky DOM cap — OFF = no page DOM ever attaches (URL/title
+             pointer only), whatever the Mode or context policy decides. -->
+        <button id="dom-toggle" class="shot-toggle" type="button" aria-pressed="true"
+                title="Page DOM attached to messages — OFF sends the URL/title pointer only (privacy / token cap)">🧩 DOM ✓</button>
       </div>
       <div id="tab-autocomplete" class="tab-autocomplete hidden"></div>
 

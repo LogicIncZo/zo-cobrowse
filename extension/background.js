@@ -47,7 +47,7 @@ import {
 import {
   shouldCaptureScreenshot,
   findModelEntry,
-  catalogIsStale,
+  CATALOG_TTL_MS,
 } from './lib/vision.js';
 import {
   mcpRequest,
@@ -67,6 +67,7 @@ import {
   parseSkillsBundle,
   parseLsEntries,
 } from './lib/pickers.js';
+import { createSessionCache } from './lib/sw-cache.js';
 
 function safePost(port, msg) {
   if (!port || port._dead) return false;
@@ -222,8 +223,14 @@ const DEFAULTS = {
 
 let config = { ...DEFAULTS };
 // Vision catalog cache (#25): /models/catalog is no-auth + cheap, but we
-// don't want to block every tier-3 turn on a fetch. Cached for CATALOG_TTL_MS.
-let catalogCache = { models: null, fetchedAt: 0, inFlight: null };
+// don't want to block every tier-3 turn on a fetch. Backed by
+// chrome.storage.session so it survives MV3 SW restarts (same #73 fix as the
+// skills list). A failed fetch returns null = MISS = retried, never cached.
+const catalogCacheStore = createSessionCache({
+  storage: chrome.storage.session,
+  key: 'cobrowse_catalog_cache',
+  ttlMs: CATALOG_TTL_MS,
+});
 
 // Track Zo API conversation ID for multi-turn context. This global is the
 // AMBIENT thread (context menu / omnibox callers); the sidepanel's chat tabs
@@ -300,7 +307,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
     }
     case 'ASK_ZO': {
-      askZo(request.pageContext, request.userQuery, request.modelName, request.personaId, request.modeId, request.customModes, request.effectiveTier, request.modeOverrides, request.conversationId, request.skills, request.workspaceFiles).then(sendResponse);
+      askZo(request.pageContext, request.userQuery, request.modelName, request.personaId, request.modeId, request.customModes, request.effectiveTier, request.modeOverrides, request.conversationId, request.skills, request.workspaceFiles, !!request.shotOnly).then(sendResponse);
       return true;
     }
     case 'RECREATE_CONTEXT_MENUS':
@@ -337,8 +344,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     case 'LIST_SKILLS': {
       // #28 `/` picker: enumerate the user's Zo skills (workspace Skills
-      // folder) over the MCP server's bash tool. Cached ~5 min per worker.
-      listSkills(!!request.force).then((skills) => sendResponse({ ok: true, skills }))
+      // folder) over the MCP server's bash tool. Cached ~5 min, session-backed
+      // (survives SW restarts, #73). `total` = total skill folders seen, so
+      // the picker can say "+N more" when folders were skipped.
+      listSkills(!!request.force).then((r) => sendResponse({ ok: true, skills: r.skills, total: r.totalFolders ?? undefined }))
         .catch((err) => sendResponse({ ok: false, error: err?.message || String(err) }));
       return true;
     }
@@ -1072,7 +1081,9 @@ async function _askZoStreamImpl(port, msg) {
   // effectiveTier is resolved by the side-panel context policy (opt-in DOM +
   // send-once) and passed on the ASK_ZO payload. When absent (legacy callers),
   // buildPrompt falls back to the Mode's configured tier.
-  const prompt = msg._followUpInput || buildPrompt(mode, pageContext, userQuery, { effectiveTier, tabContexts: loop.tabContexts, skills: msg.skills, workspaceFiles: msg.workspaceFiles });
+  // #69: msg.shotOnly (DOM toggle off + 📷 armed) renders the ## Screenshot
+  // section at tier 0 — pixels ride even though the DOM is capped out.
+  const prompt = msg._followUpInput || buildPrompt(mode, pageContext, userQuery, { effectiveTier, ...(msg.shotOnly ? { screenshotOnly: true } : {}), tabContexts: loop.tabContexts, skills: msg.skills, workspaceFiles: msg.workspaceFiles });
 
   try {
     const response = await fetch(config.zoApiUrl, {
@@ -1569,7 +1580,7 @@ function emitPullTrace(port, sid, req, target, fu) {
   });
 }
 
-async function askZo(pageContext, userQuery, modelName, personaId, modeId, customModes, effectiveTier, modeOverrides, conversationId, skills, workspaceFiles) {
+async function askZo(pageContext, userQuery, modelName, personaId, modeId, customModes, effectiveTier, modeOverrides, conversationId, skills, workspaceFiles, shotOnly) {
   if (!config.zoAccessToken) {
     return { error: '❌ Zo access token not configured. Open extension settings to set it up.' };
   }
@@ -1578,7 +1589,7 @@ async function askZo(pageContext, userQuery, modelName, personaId, modeId, custo
   const mode = resolveMode(modeId || config.zoActiveMode || DEFAULT_MODE_ID, customModes || {}, modeOverrides || {});
   const resolvedPersonaId = personaId || config.zoPersonaId || '';
 
-  const prompt = buildPrompt(mode, pageContext, userQuery, { effectiveTier, skills, workspaceFiles });
+  const prompt = buildPrompt(mode, pageContext, userQuery, { effectiveTier, ...(shotOnly ? { screenshotOnly: true } : {}), skills, workspaceFiles });
   // Per-chat threading: the sidepanel sends the chat's stored thread id; the
   // global stays as the fallback for ambient callers (context menu, omnibox).
   const threadId = msgThreadId(conversationId);
@@ -1644,33 +1655,24 @@ async function listModels() {
 /**
  * Fetch the no-auth model catalog (/models/catalog) and cache it for the
  * vision gate (#25). The catalog carries `supports_images` per model.
- * Deduplicates concurrent callers via an in-flight promise. Returns the
- * models array (possibly stale-but-usable) or null on hard failure.
+ * The session-backed cache (#73) deduplicates concurrent callers and
+ * survives SW restarts. Returns the models array or null on hard failure
+ * (null is a cache MISS — the next call retries; the gate falls back to
+ * 'unknown' → captures anyway).
  */
 async function fetchModelCatalog(force = false) {
-  const now = Date.now();
-  if (!force && !catalogIsStale(catalogCache.fetchedAt, now) && catalogCache.models) {
-    return catalogCache.models;
-  }
-  if (catalogCache.inFlight) return catalogCache.inFlight;
-  catalogCache.inFlight = (async () => {
+  return catalogCacheStore.get(async () => {
     try {
       const catalogUrl = `${apiOrigin()}/models/catalog`;
       const r = await fetch(catalogUrl);
       if (!r.ok) return null;
       const data = await r.json();
-      const models = Array.isArray(data.models) ? data.models : [];
-      catalogCache.models = models;
-      catalogCache.fetchedAt = Date.now();
-      return models;
+      return Array.isArray(data.models) ? data.models : [];
     } catch (err) {
       console.debug('fetchModelCatalog:', err.message);
-      return null; // gate falls back to 'unknown' → captures anyway
-    } finally {
-      catalogCache.inFlight = null;
+      return null;
     }
-  })();
-  return catalogCache.inFlight;
+  }, force);
 }
 
 // ---- MCP client (#28 pickers) ----
@@ -1731,30 +1733,27 @@ async function mcpToolCall(name, args) {
 /**
  * #28 `/` picker source: the user's Zo skills, one bash round-trip that dumps
  * every SKILL.md head (name + description frontmatter). 5-min cache with
- * in-flight dedup — the skills list rarely changes mid-session.
+ * in-flight dedup, backed by chrome.storage.session so it SURVIVES MV3
+ * service-worker restarts (#73 — the in-memory cache was wiped ~every open).
  */
-const skillsListCache = { list: null, fetchedAt: 0, inFlight: null };
-const SKILLS_TTL_MS = 5 * 60 * 1000;
+const skillsCacheStore = createSessionCache({
+  storage: chrome.storage.session,
+  key: 'cobrowse_skills_list',
+  ttlMs: 5 * 60 * 1000,
+});
 
 async function listSkills(force = false) {
-  const now = Date.now();
-  if (!force && skillsListCache.list && now - skillsListCache.fetchedAt < SKILLS_TTL_MS) {
-    return skillsListCache.list;
-  }
-  if (skillsListCache.inFlight) return skillsListCache.inFlight;
-  skillsListCache.inFlight = (async () => {
+  return skillsCacheStore.get(async () => {
     if (!config.zoAccessToken) throw new Error('Zo access token not configured.');
     const result = await mcpToolCall('bash', { cmd: skillsListCommand() });
-    const skills = parseSkillsBundle(toolText(result));
-    skillsListCache.list = skills;
-    skillsListCache.fetchedAt = Date.now();
-    return skills;
-  })();
-  try {
-    return await skillsListCache.inFlight;
-  } finally {
-    skillsListCache.inFlight = null;
-  }
+    const raw = toolText(result);
+    // A server-side output cap cuts the END marker off → extractMarkedStdout
+    // nulls. Surface that honestly instead of caching a silent empty list (#73).
+    if (extractMarkedStdout(raw) == null) {
+      throw new Error('Skills listing came back truncated or unparseable — refresh to retry.');
+    }
+    return parseSkillsBundle(raw);
+  }, force);
 }
 
 /**

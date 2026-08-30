@@ -352,12 +352,24 @@
   const WA_GRACE_MS = 150;     // blur grace before hiding the icon
 
   const WA_CSS = `
-    :host { all: initial; }
+    :host {
+      all: initial;
+      /* Theme vars (#65): light defaults, dark overrides via :host(.zo-wa-dark).
+         dark/'' (system, via prefers-color-scheme) → dark; light/sepia/forest/ocean → light. */
+      --wa-bg: #fff; --wa-text: #101828; --wa-border: #d0d5dd; --wa-border-soft: #eaecf0;
+      --wa-head-bg: #f8fafc; --wa-muted: #475467; --wa-hover: #f2f4f7; --wa-icon-bg: #fff;
+      --wa-btn-text: #344054; --wa-error: #b42318;
+    }
+    :host(.zo-wa-dark) {
+      --wa-bg: #1c212b; --wa-text: #e6e8ee; --wa-border: #3a4150; --wa-border-soft: #2a3140;
+      --wa-head-bg: #232936; --wa-muted: #98a2b3; --wa-hover: #2a3140; --wa-icon-bg: #1c212b;
+      --wa-btn-text: #cbd2dc; --wa-error: #f97066;
+    }
     [hidden] { display: none !important; }
     .zo-wa-icon {
       position: fixed; display: none; width: ${WA_ICON_BOX}px; height: ${WA_ICON_BOX}px;
       padding: 2px; box-sizing: border-box; align-items: center; justify-content: center;
-      background: #fff; border: 1px solid #d0d5dd; border-radius: 6px;
+      background: var(--wa-icon-bg); border: 1px solid var(--wa-border); border-radius: 6px;
       box-shadow: 0 1px 4px rgba(16,24,40,.25); cursor: pointer;
       pointer-events: auto; z-index: 2147483647;
     }
@@ -365,41 +377,43 @@
     .zo-wa-icon img { width: 16px; height: 16px; display: block; }
     .zo-wa-pop {
       position: fixed; width: 340px; max-width: calc(100vw - 16px);
-      background: #fff; color: #101828; border: 1px solid #d0d5dd; border-radius: 10px;
+      background: var(--wa-bg); color: var(--wa-text); border: 1px solid var(--wa-border); border-radius: 10px;
       box-shadow: 0 8px 24px rgba(16,24,40,.2); pointer-events: auto; z-index: 2147483647;
       font: 13px/1.45 -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
       display: flex; flex-direction: column; overflow: hidden;
     }
     .zo-wa-head { display: flex; align-items: center; justify-content: space-between;
-      padding: 8px 10px; border-bottom: 1px solid #eaecf0; background: #f8fafc; }
+      padding: 8px 10px; border-bottom: 1px solid var(--wa-border-soft); background: var(--wa-head-bg); }
     .zo-wa-title { display: flex; align-items: center; gap: 6px; font-weight: 600; }
     .zo-wa-title-img { width: 16px; height: 16px; }
-    .zo-wa-x { border: 0; background: transparent; cursor: pointer; color: #667085;
+    .zo-wa-x { border: 0; background: transparent; cursor: pointer; color: var(--wa-muted);
       font-size: 13px; line-height: 1; padding: 2px 4px; border-radius: 4px; }
-    .zo-wa-x:hover { background: #eaecf0; color: #101828; }
-    .zo-wa-lead { padding: 8px 10px 0; color: #475467; font-style: italic;
+    .zo-wa-x:hover { background: var(--wa-hover); color: var(--wa-text); }
+    .zo-wa-lead { padding: 8px 10px 0; color: var(--wa-muted); font-style: italic;
       max-height: 54px; overflow: hidden; }
-    .zo-wa-instr { margin: 8px 10px 0; padding: 6px 8px; border: 1px solid #d0d5dd;
-      border-radius: 6px; font: inherit; width: calc(100% - 20px); box-sizing: border-box; }
+    .zo-wa-instr { margin: 8px 10px 0; padding: 6px 8px; border: 1px solid var(--wa-border);
+      border-radius: 6px; font: inherit; width: calc(100% - 20px); box-sizing: border-box;
+      background: var(--wa-bg); color: var(--wa-text); }
     .zo-wa-instr:focus { outline: 2px solid #2962b8; border-color: #2962b8; }
     .zo-wa-body { padding: 10px; overflow-y: auto; max-height: 180px; white-space: pre-wrap; }
-    .zo-wa-loading { display: flex; align-items: center; color: #475467; max-height: none; }
-    .zo-wa-spin { width: 14px; height: 14px; border: 2px solid #d0d5dd;
+    .zo-wa-loading { display: flex; align-items: center; color: var(--wa-muted); max-height: none; }
+    .zo-wa-spin { width: 14px; height: 14px; border: 2px solid var(--wa-border);
       border-top-color: #2962b8; border-radius: 50%; animation: zo-wa-rot .8s linear infinite; }
     @keyframes zo-wa-rot { to { transform: rotate(360deg); } }
-    .zo-wa-error { color: #b42318; }
+    .zo-wa-error { color: var(--wa-error); }
     .zo-wa-note { padding: 0 10px 6px; color: #b54708; font-size: 12px; }
     .zo-wa-foot { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
-      border-top: 1px solid #eaecf0; }
+      border-top: 1px solid var(--wa-border-soft); }
     .zo-wa-spacer { flex: 1; }
-    .zo-wa-btn { padding: 6px 12px; border: 1px solid #d0d5dd; border-radius: 6px;
-      background: #fff; cursor: pointer; font: inherit; color: #344054; }
-    .zo-wa-btn:hover { background: #f2f4f7; }
+    .zo-wa-btn { padding: 6px 12px; border: 1px solid var(--wa-border); border-radius: 6px;
+      background: var(--wa-bg); cursor: pointer; font: inherit; color: var(--wa-btn-text); }
+    .zo-wa-btn:hover { background: var(--wa-hover); }
     .zo-wa-primary { background: #2962b8; border-color: #2962b8; color: #fff; }
     .zo-wa-primary:hover { background: #1f4f96; }
   `;
 
   let waEnabled = true;      // enableWriteAssist setting (default on)
+  let waTheme = '';          // cobrowse_theme mirror ('' = follow system, #65)
   let waReady = false;       // widget DOM built
   let waHost = null, waRoot = null, waIcon = null, waPop = null;
   let waActiveEl = null;     // textarea the icon/popover is anchored to
@@ -462,6 +476,7 @@
     const style = document.createElement('style');
     style.textContent = WA_CSS;
     waRoot.appendChild(style);
+    waHost.classList.toggle('zo-wa-dark', waDarkEffective());
 
     waIcon = document.createElement('button');
     waIcon.type = 'button';
@@ -753,16 +768,40 @@
     }, WA_GRACE_MS);
   }
 
+  /** Effective dark decision for the widget (#65): explicit dark theme, or a
+   *  system mirror ('' = follow prefers-color-scheme). All four light palettes
+   *  (light/sepia/forest/ocean) map to the light widget. */
+  function waDarkEffective() {
+    if (waTheme === 'dark') return true;
+    if (waTheme) return false;
+    try {
+      return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    } catch { return false; }
+  }
+
+  function waApplyTheme() {
+    if (waHost) waHost.classList.toggle('zo-wa-dark', waDarkEffective());
+  }
+
   function waLoadSetting() {
     try {
       chrome.storage.sync.get({ enableWriteAssist: true }, (res) => {
         waEnabled = !(res && res.enableWriteAssist === false);
         if (!waEnabled) { waHideIcon(); if (waPop) waPop.hidden = true; }
       });
+      chrome.storage.sync.get({ cobrowse_theme: '' }, (res) => {
+        waTheme = (res && res.cobrowse_theme) || '';
+        waApplyTheme();
+      });
       chrome.storage.onChanged.addListener((changes, area) => {
         if (area === 'sync' && changes.enableWriteAssist) {
           waEnabled = changes.enableWriteAssist.newValue !== false;
           if (!waEnabled) { waHideIcon(); if (waPop) waPop.hidden = true; }
+        }
+        // #65: follow theme changes live while the widget is on the page.
+        if (area === 'sync' && changes.cobrowse_theme) {
+          waTheme = changes.cobrowse_theme.newValue || '';
+          waApplyTheme();
         }
       });
     } catch { /* storage unavailable */ }
@@ -771,6 +810,12 @@
   function initWriteAssist() {
     if (!waAvailable()) return;
     waLoadSetting();
+    // System-theme flips (no explicit theme chosen) re-resolve live (#65).
+    try {
+      if (window.matchMedia) {
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', waApplyTheme);
+      }
+    } catch { /* matchMedia unavailable */ }
     document.addEventListener('focusin', waOnFocusIn, true);
     document.addEventListener('focusout', waOnFocusOut, true);
     window.addEventListener('scroll', () => {

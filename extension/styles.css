@@ -711,6 +711,67 @@ input, textarea, select {
   height: 24px;
 }
 
+/* ── Select shim (#62): panel-safe dropdowns. Native select popups don't
+   open on mouse click in the side-panel shell; the shim hides the native
+   select (still the data store — change listeners untouched) and renders a
+   trigger + popup with the same patterns as the @//% pickers. ── */
+.select-shim {
+  position: relative;
+  display: inline-flex;
+  flex: 1;
+  min-width: 0;
+}
+.select-shim-native {
+  display: none;
+}
+.select-shim-btn {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: var(--bg-input);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 3px 6px;
+  font-size: 11px;
+  color: var(--text);
+  cursor: pointer;
+}
+.select-shim-btn:focus-visible {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 2px var(--amber-glow);
+  outline: none;
+}
+.select-shim-pop {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--bg-card, #161a22);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.4));
+}
+.select-shim-item {
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text, #fff);
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.select-shim-item.select-shim-active {
+  background: var(--amber-glow, rgba(240, 168, 50, 0.15));
+}
+
 /* ── Action chips ── */
 .chips-wrap {
   display: flex;
@@ -2444,6 +2505,35 @@ body.options-page {
   text-overflow: ellipsis;
 }
 .tab-ac-item:hover, .tab-ac-item.tab-ac-active {
+  background: var(--amber-glow, rgba(240,168,50,0.15));
+}
+/* #72: title primary + dimmed host secondary inside @ autocomplete rows. */
+.tab-ac-item .tab-ac-host {
+  opacity: 0.55;
+  margin-left: 6px;
+  font-size: 11px;
+}
+/* #74: folder rows in the % popup get a ＋ affordance (arm as context)
+   beside the row's click-to-navigate. */
+#file-autocomplete .picker-item {
+  position: relative;
+}
+#file-autocomplete .picker-item.has-add {
+  padding-right: 44px;
+}
+#file-autocomplete .picker-item-add {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 2px 8px;
+  border: 1px solid var(--border, #3a4150);
+  border-radius: 6px;
+  color: var(--amber, #f0a832);
+  font-size: 13px;
+  line-height: 1.2;
+}
+#file-autocomplete .picker-item-add:hover {
   background: var(--amber-glow, rgba(240,168,50,0.15));
 }
 /* Non-selectable note rows inside picker popups (loading / errors / header). */
