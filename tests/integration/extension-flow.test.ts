@@ -1066,3 +1066,34 @@ describe("DOM toggle (#69)", () => {
     await waitUntil(() => bus.storage.sync._store.domContextEnabled === true, 5000);
   });
 });
+
+describe("select shim (#62) — panel-safe dropdowns", () => {
+  it("wraps the mode select: trigger mirrors the value, choosing fires change and applyMode", async () => {
+    const modeSel = panelWin.document.querySelector("#mode-select") as any;
+    // Native select hidden but still the data store.
+    expect(modeSel.classList.contains("select-shim-native")).toBe(true);
+    const btn = modeSel.closest(".select-shim").querySelector(".select-shim-btn") as any;
+    expect(btn.textContent).toContain("Co-browse");
+
+    // Open the popup via the trigger (the panel-only broken path, now shimmed).
+    btn.dispatchEvent(new panelWin.MouseEvent("mousedown", { bubbles: true }));
+    const pop = panelWin.document.querySelector(".select-shim-pop:not(.hidden)");
+    expect(pop).toBeTruthy();
+    const items = [...pop.querySelectorAll(".select-shim-item")] as any[];
+    expect(items.length).toBeGreaterThanOrEqual(5);
+
+    // Choose Ask → change dispatched on the native select → applyMode runs.
+    const ask = items.find((el) => (el.textContent || "").includes("Ask"));
+    ask.dispatchEvent(new panelWin.MouseEvent("mousedown", { bubbles: true }));
+    await waitUntil(() => modeSel.value === "ask", 5000);
+    expect(btn.textContent).toContain("Ask");
+
+    // Restore cobrowse for the other describes.
+    const reopen = modeSel.closest(".select-shim").querySelector(".select-shim-btn") as any;
+    reopen.dispatchEvent(new panelWin.MouseEvent("mousedown", { bubbles: true }));
+    const pop2 = panelWin.document.querySelector(".select-shim-pop:not(.hidden)") as any;
+    const cobrowse = [...pop2.querySelectorAll(".select-shim-item")].find((el: any) => (el.textContent || "").includes("Co-browse"));
+    cobrowse.dispatchEvent(new panelWin.MouseEvent("mousedown", { bubbles: true }));
+    await waitUntil(() => modeSel.value === "cobrowse", 5000);
+  });
+});

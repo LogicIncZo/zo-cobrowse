@@ -104,6 +104,13 @@ and this project uses [Semantic Versioning](https://semver.org/).
   in the prompt (~120 tokens of pure duplication every tier-0 turn). The generic tail is now
   suppressed when Lean's contract instructions or the read-downgrade short variant already
   disclaimed. `lean-pointer` eval cache refreshed live.
+### Fixed — Model/Persona/Mode dropdowns open on mouse click in the side panel (#62)
+- Native `<select>` popups don't open on mouse click inside the side-panel shell (a Chromium
+  quirk invisible to our tab-based e2e — keyboard still worked). The three controls-bar dropdowns
+  now render through a **select shim**: the native select stays in the DOM as the data source
+  (every existing `change` listener, including Settings-override merging, untouched) while a
+  custom trigger + popup — the same pattern as the `@`/`/`/`%` pickers — handles the interaction,
+  with full keyboard support (↑/↓/Enter/Esc).
 
 ### Fixed — 📷 screenshots never reached Zo on real Chrome
 - **`<all_urls>` host permission**: `chrome.tabs.captureVisibleTab` requires the literal
