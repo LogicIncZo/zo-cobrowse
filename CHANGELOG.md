@@ -98,6 +98,12 @@ and this project uses [Semantic Versioning](https://semver.org/).
   `opts.screenshotOnly`). The tier-0 auto-active-tab reference (T1 excerpt) is also capped — OFF
   means URL/title pointer only. While capped, the policy state doesn't record the capture hash, so
   re-enabling re-attaches normally instead of trusting a "context already sent" that never went out.
+### Fixed — tier-0 prompt bloat (#70)
+- **Exactly ONE content-not-attached disclaimer per tier-0 turn**: Lean turns and
+  read-downgraded turns stacked the generic honesty tail on top of a disclaimer already present
+  in the prompt (~120 tokens of pure duplication every tier-0 turn). The generic tail is now
+  suppressed when Lean's contract instructions or the read-downgrade short variant already
+  disclaimed. `lean-pointer` eval cache refreshed live.
 
 ### Fixed — 📷 screenshots never reached Zo on real Chrome
 - **`<all_urls>` host permission**: `chrome.tabs.captureVisibleTab` requires the literal
