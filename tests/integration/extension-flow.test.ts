@@ -1064,6 +1064,9 @@ describe("DOM toggle (#69)", () => {
     // Restore for the other describes.
     (panelWin.document.querySelector("#dom-toggle") as any).click();
     await waitUntil(() => bus.storage.sync._store.domContextEnabled === true, 5000);
+  });
+});
+
 describe("select shim (#62) — panel-safe dropdowns", () => {
   it("wraps the mode select: trigger mirrors the value, choosing fires change and applyMode", async () => {
     const modeSel = panelWin.document.querySelector("#mode-select") as any;
