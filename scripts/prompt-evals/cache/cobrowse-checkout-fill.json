@@ -1,6 +1,6 @@
 {
   "id": "cobrowse-checkout-fill",
-  "promptHash": "88d5f5474b14908688b3a4ebca73f4998216487a3a29f8ca7c85c523ec75d118",
-  "fetchedAt": "2026-08-28T23:55:20.257Z",
-  "output": "{\"actions\":[{\"fill_form\":{\"values\":[{\"target\":\"Email address\",\"value\":\"buyer@example.com\"},{\"target\":\"Full name\",\"value\":\"Ada Lovelace\"}]}},{\"done\":{\"response\":\"Filled email and full name. Password and card fields left empty for you; review and click Complete order when ready.\"}}]}"
+  "promptHash": "9fa47e1593a6e574ce55d5f8368dc4b6d402f215397819196ec30766ce129d9e",
+  "fetchedAt": "2026-08-31T00:23:36.210Z",
+  "output": "{\"actions\":[{\"fill_form\":{\"values\":[{\"target\":\"Email address\",\"value\":\"buyer@example.com\"},{\"target\":\"Full name\",\"value\":\"Ada Lovelace\"}]}},{\"done\":{\"response\":\"Filled Email address (buyer@example.com) and Full name (Ada Lovelace). Password and card number left blank for you to enter — not touching those. Not clicking Complete order; review and submit when ready.\"}}]}"
 }

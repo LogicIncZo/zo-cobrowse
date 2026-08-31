@@ -14,6 +14,9 @@
 // model club thinking + answer into one blob (the "raw JSON in chat" bug).
 // Reasoning streams as its own channel from the backend when available and
 // is rendered into a separate Thought bubble; it is never asked for here.
+// The no-secrets / never-click-after-fill safety rules used to ride here AND
+// in cobrowse.instructions (restated every turn). They now live in ONE place:
+// lib/prompt.js's SHARED_SAFETY_RULES, composed once (#71 trim).
 export const ACTION_SCHEMA_COMPACT =
   'Respond with JSON {"actions":[...]}. ' +
   'Actions: click{selector} | fill{selector,value} | ' +
@@ -22,8 +25,7 @@ export const ACTION_SCHEMA_COMPACT =
   ' | read_tab{ref} — request full content of a referenced tab (context only)' +
   ' | read_page — fetch full text of the current page (context only)' +
   ' | get_dom — fetch all interactive elements of the current page (context only)' +
-  ' | get_form — fetch all form fields of the current page (context only). ' +
-  'Never propose password/card/CVV values. After filling a form, never click ANY button — submit/OK/Next/Create/any action button. Fill, then done(); the user reviews and clicks.';
+  ' | get_form — fetch all form fields of the current page (context only). ';
 
 /**
  * Fallback instructions for Modes that don't define their own.
@@ -50,7 +52,7 @@ export const BUILTIN_MODES = {
     name: 'Co-browse',
     icon: '🤖',
     systemPrompt: "You are Zo — the user's AI co-browsing assistant. You see the page they're on and can control the browser.",
-    instructions: 'Act on the page to fulfill the request. Use the ELEMENTS list when targeting clicks/fills. Prefer fill_form for multi-field forms (target = the field\'s question text); omit password/card/CVV values; after filling a form never click ANY button (submit/OK/Next/Continue/Create…) — always done() so the user can review and click themselves. On one-question-per-screen forms, fill only the visible section per turn and let the user review + advance.',
+    instructions: 'Act on the page to fulfill the request. Use the ELEMENTS list when targeting clicks/fills. Prefer fill_form for multi-field forms (target = the field\'s question text). On one-question-per-screen forms, fill only the visible section per turn and let the user review + advance.',
     contextTier: TIER.ELEMENTS,
     textBudget: 4000,
     expectJson: true,

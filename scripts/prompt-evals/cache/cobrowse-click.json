@@ -1,6 +1,6 @@
 {
   "id": "cobrowse-click",
-  "promptHash": "55652e36b52fa7041e11626d5330ab4a86230cfb20451f1cbba9a13a3dcb235b",
-  "fetchedAt": "2026-08-28T23:43:45.661Z",
-  "output": "{\"reasoning\":\"First link in DOM order is the 'Pricing' nav link.\",\"actions\":[{\"type\":\"click\",\"selector\":\"#pricing\"},{\"type\":\"done\",\"response\":\"Clicked the first link: Pricing (#pricing).\"}]}"
+  "promptHash": "a5c3ffe144a117d04869def0d7dad663ac3c80822ef511d7bd423603339c3cab",
+  "fetchedAt": "2026-08-31T00:29:20.625Z",
+  "output": "```json\n{\n  \"actions\": [\n    {\n      \"type\": \"click\",\n      \"selector\": \"#pricing\"\n    }\n  ]\n}\n```"
 }

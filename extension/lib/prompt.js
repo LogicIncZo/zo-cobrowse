@@ -20,6 +20,15 @@ import { buildTabManifest, isBlankPage } from './tab-contexts.js';
 import { buildSkillLines, buildFileLines } from './pickers.js';
 
 /**
+ * The #26 safety rules, stated EXACTLY ONCE per action turn (0.2.7 Lane A,
+ * per the #71 prompt-bloat audit: persona/schema/instructions used to restate
+ * them every turn). Composed into the tail only when the action envelope is
+ * expected; modes and the schema must not restate them.
+ */
+export const SHARED_SAFETY_RULES =
+  'Never propose password/card/CVV values. After filling a form, never click ANY button — submit/OK/Next/Create/any action button. Fill, then done(); the user reviews and clicks.';
+
+/**
  * Section ids used to tag each assembled part. Stable ids so the inspector
  * and the Settings editor can refer to sections without matching labels.
  */
@@ -206,7 +215,7 @@ function _compose(mode, pageContext, userQuery, opts) {
     push('tail', PLAIN_RESPONSE_HINT);
   } else {
     push('tail', mode.instructions);
-    push('tail', wantJson ? ACTION_SCHEMA_COMPACT : PLAIN_RESPONSE_HINT);
+    push('tail', wantJson ? `${ACTION_SCHEMA_COMPACT}${SHARED_SAFETY_RULES}` : PLAIN_RESPONSE_HINT);
   }
   // Tier-0 honesty: when no page content rides, say so — exactly ONCE (#70).
   // Suppressed when an earlier part already disclaimed (Lean's instructions
