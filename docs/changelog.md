@@ -6,6 +6,15 @@ This page mirrors everything **unreleased** on `dev`.
 
 ## [Unreleased]
 
+### Changed — Lane B: cold-start lazy-import trim measured and rejected (2b)
+- **Micro-bench verdict: no-op by the evidence rule.** The whole SW module graph
+  (background.js + all lib/, ~260KB) evaluates in **~10–18ms** (fresh-subprocess samples,
+  `scripts/bench-cold-start.ts`) — real cold-start cost is worker-spawn + first-connection
+  overhead, which lazy imports can't touch. Lazy-loading surgery would save single-digit ms
+  at best, so 2b closes as a documented no-op (numbers in `perf-baseline.md`).
+- **2a/2c remain evidence-gated** on the owner's on-device diagnostics export (recipe in
+  `perf-baseline.md`), now analyzable thanks to the 2-0 trace correlation.
+
 ### Added — observability: per-turn trace correlation in diagnostics (Lane B 2-0)
 - **Every diagnostics entry is now trace-tagged**: the background stamps a `traceId`
   (`turn-<sessionId>[:<chatId>]` for streams, `exec:<target>` for action batches) onto
