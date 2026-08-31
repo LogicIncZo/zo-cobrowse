@@ -48,3 +48,24 @@ The dominant costs are environmental, not compute:
 Any optimization PR must quote before/after numbers from this instrument (or `bun /tmp`-style
 micro-benches for pure functions, committed into the PR description). No intuition-driven
 "optimizations" — per the 0.2.6 slate's evidence rule.
+
+---
+
+## 2026-08-31 — Lane B follow-up (0.2.7)
+
+**2-0 landed:** diagnostics entries carry a per-turn `traceId` (turn/exec scopes) and exports
+are versioned (`version: 2`) — exports are now analyzable as per-turn timelines. SW script-eval
+duration is stamped (`startup · worker-eval`) once debug mode resolves.
+
+**2b (SW cold-start lazy-import trim): closed as a documented no-op.** Committed micro-bench
+(`scripts/bench-cold-start.ts`, fresh-subprocess samples): the ENTIRE module graph
+(background.js + all lib/ modules, ~260KB) evaluates in **median ~17.6ms** (7 samples,
+17.0–18.9ms, warm FS). The cold-start cost the recipe names is therefore worker-spawn +
+first-connection overhead — environmental, not module eval — so lazy dynamic imports would
+save single-digit milliseconds at best while adding per-call latency and regression surface.
+Per the discipline rule, no intuition-driven surgery. Instrument for future re-measurement on
+device: `startup · worker-eval` entries in the diagnostics export.
+
+**2a + 2c: blocked on evidence.** 2a needs the owner's on-device diagnostics export (recipe
+above); 2c (chunk-render batching) runs only if that export shows long chunk-arrival→paint
+gaps.
