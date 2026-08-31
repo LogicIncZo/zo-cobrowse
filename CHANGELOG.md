@@ -7,6 +7,19 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed — prompt trim: #26 safety rules stated once, not twice (Lane A)
+- **One shared rule block**: the no-secrets / never-click-after-fill rules used to ride TWICE on
+  every action turn — once at the end of the action schema and again inside cobrowse's
+  instructions. They now live once in `lib/prompt.js#SHARED_SAFETY_RULES` and compose a single
+  time. Measured (audit fixture, pre-trim worktree vs post-trim): **−42 to −43 tokens on every
+  cobrowse action turn** (~10% of a tier-0 action tail); read turns and all other modes
+  byte-identical.
+- **Evals refreshed live** (19/19 green; cobrowse action cases re-fetched). New `EVALS_MODEL`
+  env pins a live-catalog model for refreshes when Zo's server-default model is disabled
+  upstream (which it was — `qwen3.8-max-free` 503 `model_not_found` at refresh time).
+- Guard tests now assert the schema/instructions do NOT restate the rules and that
+  `buildPrompt` composes them exactly once per action turn (zero times on read turns).
+
 ### Added — streaming-reasoning probe: incremental thinking live-verified (#110)
 - **`tests/test-prompts/probe-streaming-reasoning.ts`** — live SSE probe (event-shape timeline +
   reasoning-key classification, per-model verdict) answering the open question: reasoning

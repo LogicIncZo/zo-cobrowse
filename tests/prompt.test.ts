@@ -11,6 +11,7 @@ import {
   SECTION_LABELS,
 } from "../extension/lib/prompt.js";
 import { BUILTIN_MODES, TIER, ACTION_SCHEMA_COMPACT, PLAIN_RESPONSE_HINT } from "../extension/lib/modes.js";
+import { SHARED_SAFETY_RULES } from "../extension/lib/prompt.js";
 import { DescribedPromptSchema } from "./schemas/prompt.js";
 
 const promptLibCode = readFileSync(
@@ -166,6 +167,17 @@ describe("buildPrompt — intent-aware JSON/markdown downgrade", () => {
   it("cobrowse action query → appends ACTION_SCHEMA_COMPACT", () => {
     const p = buildPrompt(BUILTIN_MODES.cobrowse, makeCtx(), "Click the login button");
     expect(p).toContain(ACTION_SCHEMA_COMPACT);
+  });
+
+  it("composes the #26 safety rules EXACTLY ONCE per action turn (#71 trim)", () => {
+    const p = buildPrompt(BUILTIN_MODES.cobrowse, makeCtx(), "Click the login button");
+    // Once — not restated by the schema tail or the mode instructions.
+    expect(p).toContain(SHARED_SAFETY_RULES);
+    expect((p.match(/password\/card\/CVV/g) || []).length).toBe(1);
+    expect((p.match(/never click ANY button/gi) || []).length).toBe(1);
+    // Downgraded read turns carry the envelope, so they carry the rules ZERO times.
+    const read = buildPrompt(BUILTIN_MODES.cobrowse, makeCtx(), "Summarize this page");
+    expect((read.match(/password\/card\/CVV/g) || []).length).toBe(0);
   });
 
   it("cobrowse read query → downgrades to plain markdown (no action envelope)", () => {

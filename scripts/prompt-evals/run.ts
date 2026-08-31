@@ -89,7 +89,14 @@ async function fetchLive(input: string): Promise<string> {
       "Content-Type": "application/json",
       Accept: "application/json",
     },
-    body: JSON.stringify({ input: input }),
+    body: JSON.stringify({
+      input: input,
+      // Optional model pin (EVALS_MODEL): when Zo's server-default model is
+      // disabled/rotated upstream, evals pin a live-catalog model so the
+      // refresh can run. Cache stays keyed by prompt hash; checkers grade
+      // structure, not model voice.
+      ...(process.env.EVALS_MODEL ? { model_name: process.env.EVALS_MODEL } : {}),
+    }),
   });
   if (!resp.ok) {
     const body = await resp.text().catch(() => "");
