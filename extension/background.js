@@ -286,8 +286,16 @@ function perfNow() {
   return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
 }
 
+// Lane B 2-0 (observability): script-eval completion, measured from worker
+// start — the compute half of the SW cold start the #67 baseline names as the
+// dominant cost. Stamped into the ring as soon as debug mode resolves.
+const SW_EVAL_DONE = perfNow();
+
 try {
-  chrome.storage.sync.get({ debugMode: false }, (res) => debugLog.setEnabled(!!(res && res.debugMode)));
+  chrome.storage.sync.get({ debugMode: false }, (res) => {
+    debugLog.setEnabled(!!(res && res.debugMode));
+    debugLog.push('startup', 'worker-eval', SW_EVAL_DONE);
+  });
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'sync' && changes.debugMode) debugLog.setEnabled(!!changes.debugMode.newValue);
   });
@@ -412,8 +420,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // here so a degenerate Zo response that still asks after the budget
       // note no-ops safely.
       const domActions = (request.actions || []).filter((a) => a && !isContextAction(a));
+      debugLog.setTrace(`exec:${request.handoffRunId || request.tabId || 'ambient'}`);
       runExecuteActions(domActions, request.tabId || senderTabId(sender), { confirmed: request.confirmed, boundaryMode: request.boundaryMode }).then((res) => {
         sendResponse(res);
+        debugLog.setTrace(null);
         // Lane E: the completing turn of a handoff run continues the loop here
         // (execute → continuation turn → repeat until done()/budget).
         if (request.handoffRunId) handoffAfterExecute(request.handoffRunId, request, res);
@@ -904,6 +914,9 @@ chrome.runtime.onConnect.addListener((port) => {
     switch (msg.type) {
       case 'ASK_ZO': {
         const __t0 = perfNow(); // #67 stream-duration telemetry
+        // Lane B 2-0: tag every diagnostics entry of this turn so an export
+        // groups into per-turn timelines.
+        debugLog.setTrace(`turn-${msg.sessionId}${msg.chatId ? `:${msg.chatId}` : ''}`);
         // Lane E: a handoff turn registers its loop context (memory-only —
         // an SW restart loses it and the orphan pause marks the run paused),
         // and the first turn flips the run priming → running.
@@ -925,6 +938,7 @@ chrome.runtime.onConnect.addListener((port) => {
           // to surface it if the port is still alive.
           safePost(port, { sessionId: msg.sessionId, type: 'STREAM_ERROR', error: `Failed: ${err.message}` });
         }
+        debugLog.setTrace(null);
         break;
       }
       case 'NEW_CONVERSATION': {
