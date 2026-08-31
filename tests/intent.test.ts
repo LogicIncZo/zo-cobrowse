@@ -147,6 +147,16 @@ describe("shouldDowngradeToJsonDisabled — mode gating", () => {
     expect(shouldDowngradeToJsonDisabled(undefined, "Summarize")).toBe(false);
     expect(shouldDowngradeToJsonDisabled({}, "Summarize")).toBe(false);
   });
+
+  it("a handoff turn never downgrades — the goal may read like a request (Lane E)", () => {
+    // The handoff instructions embedded in the query exempt it: the unattended
+    // loop needs the action envelope even for read-shaped goals.
+    const handoffQuery = "compare the pricing across these pages\n\n## Handoff Run\n\nYou are operating UNATTENDED (handoff-run marker).";
+    expect(detectIntent(handoffQuery)).toBe("read"); // the goal alone reads as read-only…
+    expect(shouldDowngradeToJsonDisabled(actionMode, handoffQuery)).toBe(false); // …but the marker keeps the envelope
+    // The instructions alone don't exempt an ordinary query.
+    expect(shouldDowngradeToJsonDisabled(actionMode, "Summarize — see ## Handoff Run for rules")).toBe(false);
+  });
 });
 
 describe("looksLikeActionJson — suppress raw action-JSON during streaming", () => {
