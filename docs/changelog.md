@@ -6,6 +6,14 @@ This page mirrors everything **unreleased** on `dev`.
 
 ## [Unreleased]
 
+### Added — streaming-reasoning probe: incremental thinking live-verified (#110)
+- **`tests/test-prompts/probe-streaming-reasoning.ts`** — live SSE probe (event-shape timeline +
+  reasoning-key classification, per-model verdict) answering the open question: reasoning
+  **does stream incrementally** (GLM53F: 894 thinking-delta events long before the terminal),
+  and the panel's existing `STREAM_REASONING` path consumes it. No new implementation was
+  needed — the item closes as verified-by-probe (findings in `QA_REPORT.md`). Bonus finding:
+  `zo:openai/gpt-5.6-sol` is disabled upstream.
+
 ### Fixed — stale-build guard: extension updates refresh open tabs (#109)
 - **Kills the "still broken after reload" loop**: after an extension update, open tabs kept
   running the OLD content script until they navigated. The background now re-injects the fresh
