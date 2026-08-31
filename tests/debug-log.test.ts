@@ -84,4 +84,35 @@ describe("createDebugLog", () => {
     expect(entries).toHaveLength(0);
     expect(dropped).toBe(0);
   });
+
+  // ---- Lane B 2-0: trace correlation ----
+
+  it("setTrace stamps subsequent entries; null clears the context", () => {
+    const log = createDebugLog();
+    log.setEnabled(true);
+    log.push("msg", "untagged");
+    log.setTrace("turn-7:chat-3");
+    log.push("stream", "askZoStream:done", 1234);
+    log.setTrace(null);
+    log.push("msg", "after");
+    const { entries } = log.entries();
+    expect(entries[0].traceId).toBeUndefined();
+    expect(entries[1].traceId).toBe("turn-7:chat-3");
+    expect(entries[2].traceId).toBeUndefined();
+  });
+
+  it("trace ids are metadata: capped at 64 chars", () => {
+    const log = createDebugLog();
+    log.setEnabled(true);
+    log.setTrace("t".repeat(200));
+    log.push("msg", "x");
+    expect(log.entries().entries[0].traceId).toHaveLength(64);
+  });
+
+  it("exports are versioned (version: 2) so analysis tools can rely on the shape", () => {
+    const log = createDebugLog();
+    log.setEnabled(true);
+    log.push("msg", "x");
+    expect(log.entries().version).toBe(2);
+  });
 });

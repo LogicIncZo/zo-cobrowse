@@ -7,6 +7,17 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — observability: per-turn trace correlation in diagnostics (Lane B 2-0)
+- **Every diagnostics entry is now trace-tagged**: the background stamps a `traceId`
+  (`turn-<sessionId>[:<chatId>]` for streams, `exec:<target>` for action batches) onto
+  `lib/debug-log.js` entries, so a "Copy diagnostics" export groups into per-turn timelines
+  instead of a flat hop list — the instrument the Lane B perf measurements run on.
+- **SW startup is measured**: the worker's script-eval duration (`startup · worker-eval`) is
+  recorded once debug mode resolves — the cold-start compute the #67 baseline names as the
+  dominant cost.
+- Exports are versioned (`version: 2`); the metadata-only privacy contract is unchanged.
+  Panel chunk-paint spans land with item 2c, only on evidence.
+
 ### Changed — prompt trim: #26 safety rules stated once, not twice (Lane A)
 - **One shared rule block**: the no-secrets / never-click-after-fill rules used to ride TWICE on
   every action turn — once at the end of the action schema and again inside cobrowse's

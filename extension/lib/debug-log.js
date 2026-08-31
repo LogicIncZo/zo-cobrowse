@@ -21,6 +21,10 @@ export function createDebugLog({ max = 500, now = Date.now } = {}) {
   let enabled = false;
   let buf = [];
   let dropped = 0;
+  // Lane B 2-0 (observability): the current trace context. The background
+  // sets it per turn (sessionId/chatId tag); every entry pushed while set is
+  // stamped, so an export groups into per-turn timelines. Metadata only.
+  let currentTrace = null;
 
   const cleanExtra = (extra) => {
     if (!extra || typeof extra !== 'object') return undefined;
@@ -42,6 +46,11 @@ export function createDebugLog({ max = 500, now = Date.now } = {}) {
     isEnabled() {
       return enabled;
     },
+    /** Set/clear the current trace tag (e.g. `turn-42:chat-7`). Entries pushed
+     * while set carry `traceId`; null/undefined clears the context. */
+    setTrace(traceId) {
+      currentTrace = traceId ? String(traceId).slice(0, 64) : null;
+    },
     push(kind, label, durMs, extra) {
       if (!enabled) return;
       if (buf.length >= max) {
@@ -49,13 +58,14 @@ export function createDebugLog({ max = 500, now = Date.now } = {}) {
         dropped++;
       }
       const entry = { ts: now(), kind: String(kind).slice(0, 40), label: String(label).slice(0, 120) };
+      if (currentTrace) entry.traceId = currentTrace;
       if (typeof durMs === 'number' && Number.isFinite(durMs)) entry.durMs = Math.round(durMs * 100) / 100;
       const ex = cleanExtra(extra);
       if (ex) entry.extra = ex;
       buf.push(entry);
     },
     entries() {
-      return { entries: [...buf], dropped, enabled };
+      return { version: 2, entries: [...buf], dropped, enabled };
     },
     clear() {
       buf = [];
