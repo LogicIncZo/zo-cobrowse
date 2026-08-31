@@ -2200,7 +2200,13 @@ async function handoffChainNextTurn(runId) {
   const turnMsg = {
     ...msg,
     sessionId: `${msg.sessionId}-h${run.usage.turns + 1}-${Date.now() % 100000}`,
-    userQuery: buildContinuationTurn(run) + (msg.conversationId ? '' : `\n\n${handoffInstructions(run)}`),
+    // Thread continuity: turn 1's conversation_id echo (the ambient global,
+    // just updated by the previous turn's header) — without this every
+    // continuation opens a FRESH Zo thread that never saw the goal.
+    conversationId: msg.conversationId || zoConversationId || undefined,
+    // Continuation prompt only — the instructions rode turn 1 and live in the
+    // thread; re-sending them (marker included) confuses marker routing.
+    userQuery: buildContinuationTurn(run),
     pageContext,
     handoffRunId: runId,
   };

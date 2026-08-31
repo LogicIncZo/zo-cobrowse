@@ -289,8 +289,10 @@ async function finishInit() {
       if (msg.type === 'HANDOFF_UPDATE' && msg.run) {
         const run = msg.run;
         if (activeHandoffRun && activeHandoffRun.runId !== run.runId) return; // another chat's run
-        if (run.status === 'running') {
-          renderHandoffLine(run);
+        if (run.status === 'running' || run.status === 'priming') {
+          // Live states — refresh the progress line (the priming push often
+          // lands before the panel has registered the run; then it's a no-op).
+          if (activeHandoffRun) renderHandoffLine(run);
         } else {
           // done / paused / aborted / blocked — the loop has left the chat.
           activeHandoffRun = null;
@@ -3863,11 +3865,13 @@ function connectStreamingPort() {
 function handleStreamMessage(msg) {
   // Ignore stale messages from previous sessions — UNLESS this is a chained
   // handoff turn (Lane E): the background re-enters the stream with a fresh
-  // derived sessionId (`<base>-h<n>-<ts>`) for a run this panel started, and
+  // derived sessionId (`<base>-h<n>-…`) for a run this panel started, and
   // the panel adopts it as the live session so the loop keeps rendering.
+  // handoffBaseId stays pinned to the panel-SENT session so chain 3+ (which
+  // derive from the same base) keep matching after an adoption.
   if (msg.sessionId && msg.sessionId !== streamSession.sessionId) {
-    const chainedHandoff = activeHandoffRun
-      && String(msg.sessionId).startsWith(`${streamSession.sessionId}-h`);
+    const base = String(streamSession.handoffBaseId ?? streamSession.sessionId);
+    const chainedHandoff = activeHandoffRun && String(msg.sessionId).startsWith(`${base}-h`);
     if (!chainedHandoff) return;
     streamSession.sessionId = msg.sessionId;
     streamSession.active = true;
@@ -4441,12 +4445,8 @@ async function executeHandoffBatch(actions) {
       row.textContent += ' ✓';
     }
   });
-  // The done() deliverable renders as the assistant answer.
-  const doneResponse = safeText((actions.find((a) => a.type === 'done') || {}).response);
-  if (doneResponse) {
-    body.insertAdjacentHTML('beforeend', markdownToHtml(doneResponse));
-    enhanceCodeBlocks(body);
-  }
+  // The done() deliverable renders via the normal STREAM_DONE path (as the
+  // turn's answer bubble) — rendering it here too would duplicate it.
 }
 
 // Override sendQuery for streaming
@@ -4538,7 +4538,7 @@ sendQuery = async function() {
       // Lane E: start the run, then send the first turn with handoffRunId so
       // the background loop takes over after the actions execute. Read-only
       // boundary; the action envelope (cobrowse) is what the loop consumes.
-      addMessage('user', query);
+      // (No user bubble here — the standard send path below renders it.)
       const start = await chrome.runtime.sendMessage({
         type: 'HANDOFF_START',
         chatId: activeId,
@@ -4547,6 +4547,7 @@ sendQuery = async function() {
         boundaryMode: 'readonly',
       });
       if (!start?.ok || !start.run) {
+        addMessage('user', query);
         addMessage('error', start?.error || 'Could not start the handoff run.');
         input.disabled = false;
         sendBtn.disabled = false;
@@ -4556,7 +4557,6 @@ sendQuery = async function() {
       activeHandoffRun = start.run;
       effectiveQuery = `${bang.query}\n\n${handoffInstructions(start.run)}`;
       tempMode = 'cobrowse';
-      renderHandoffLine(start.run);
     }
     if (bang.isDuckdb) {
       addMessage('user', query);
@@ -4577,8 +4577,14 @@ sendQuery = async function() {
       input.focus();
       return;
     }
-    effectiveQuery = bang.query;
-    tempMode = bang.mode;
+    if (bang.kind === 'command' || bang.kind === 'context') {
+      // Canned bangs (!summarize/!extract/…) replace the query + mode; !context
+      // replaces the query with its question (decideTurn forces the attach via
+      // bangResult). Other kinds (handoff, …) already set their own
+      // effectiveQuery/tempMode above — don't clobber them here.
+      effectiveQuery = bang.query;
+      tempMode = bang.mode;
+    }
   }
 
   // ---- Tab contexts: referenced tabs ride along as manifest + excerpt ----
@@ -4764,6 +4770,7 @@ sendQuery = async function() {
   if (streamPort) {
     streamSession.sessionId++;
     const thisSessionId = streamSession.sessionId;
+    if (activeHandoffRun) streamSession.handoffBaseId = thisSessionId; // Lane E: pinned adoption base
     streamSession.active = true;
     streamSession.chatId = activeId; // routes background-stream persistence
     streamSession.msgEl = null;
