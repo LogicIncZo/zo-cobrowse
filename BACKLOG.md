@@ -1,6 +1,6 @@
 # Zo Co-browse — Backlog
 
-> Updated 2026-09-02 — **v0.2.6 + v0.2.7 TAGGED & RELEASED** (v0.2.6 on 2026-08-30; v0.2.7 on 2026-09-02 — slate PRs #93, #97–#99, #104–#107, #111–#114, #116–#117, see 🎯 0.2.7 below). Release prep bumped manifest+package.json to 0.2.7 and re-synced `dev` with main's 0.2.6 release commit (fixed the dev↔main divergence). The Tier-1 carry-over slate (#19 model picker, #10 cross-tab actions, #29 watch-tasks) stays **deferred to 0.3.0 planning**; #46–#54 unchanged; #11 store listing its own milestone.
+> Updated 2026-09-03 — **0.2.8 = STABILIZATION BASH** (owner decision: verify everything shipped in 0.2.0–0.2.7, ship each verified fix as its own `0.2.8.N` point release; versioning is now 4-segment `MAJOR.MINOR.PATCH.STAB` — see 🎯 0.2.8 below, spec PR #132). **v0.2.6 + v0.2.7 TAGGED & RELEASED** (v0.2.6 on 2026-08-30; v0.2.7 on 2026-09-02 — slate PRs #93, #97–#99, #104–#107, #111–#114, #116–#117, see 🎯 0.2.7 below). Release prep bumped manifest+package.json to 0.2.7 and re-synced `dev` with main's 0.2.6 release commit (fixed the dev↔main divergence). The Tier-1 carry-over slate (#19 model picker, #10 cross-tab actions, #29 watch-tasks) stays **deferred to 0.9.0 planning**; #46–#54 unchanged; #11 store listing its own milestone.
 
 ## Current state
 
@@ -10,7 +10,7 @@
 - **CI/CD:** CI runs on every branch push + PR to `main` (tests + transpile + release checks + zip artifact); `.github/workflows/release.yml` publishes `v*` tag releases (used for v0.0.2)
 - **Streaming:** hardened end-to-end (sessionId isolation, port-disconnect safety, retry correctness — QA finding D fixed: the Reconnecting banner now actually shows; 60s liveness timeout). **Streaming reasoning live-verified 2026-08-31** (incremental; probe committed)
 - **P0/P1/P2/P3 QA findings:** all closed (P2-31 deferred by design — see below)
-- **Release:** ✅ **v0.2.6** tagged + released (2026-08-30). ✅ **v0.2.7** tagged + released (2026-09-02) — versions at 0.2.7, dev↔main divergence fixed via the release/v0.2.7 re-sync. The deferred 0.2.x carry-overs (#19 → #10 → #29) re-slot into **v0.3.0** (#46–#54); Chrome Web Store submission (#11) stays its own milestone after 0.3.0 features land
+- **Release:** ✅ **v0.2.6** tagged + released (2026-08-30). ✅ **v0.2.7** tagged + released (2026-09-02) — versions at 0.2.7, dev↔main divergence fixed via the release/v0.2.7 re-sync. The deferred 0.2.x carry-overs (#19 → #10 → #29) re-slot into **v0.9.0** (#46–#54); Chrome Web Store submission (#11) stays its own milestone after 0.9.0 features land
 
 ## 🎯 0.2.7 — built & merged 2026-08-31 (polish & daily-use round + 🤖 handoff flagship)
 
@@ -24,7 +24,7 @@ Slate chosen in-session: owner picked "polish & hardening + daily-use ideas" ove
 | **A — prompt trim** | #26 safety rules stated ONCE per action turn (`lib/prompt.js#SHARED_SAFETY_RULES`): **−42/−43 tokens per cobrowse action turn** (measured vs pre-trim worktree); evals 19/19 after live refresh (`EVALS_MODEL` pin added — server-default model disabled upstream) | #114 |
 | **B — perf** | 2-0 trace correlation (`traceId` on all diagnostics entries, exports v2, SW startup mark); 2b cold-start lazy-import trim **closed as measured no-op** (whole module graph evals in ~10–18ms — cost is worker-spawn, not eval; `scripts/bench-cold-start.ts`); 2a/2c blocked on owner diagnostics export | #116–#117 |
 
-**Deferred (rationale):** #19/#10/#29 carry-overs and all of 0.3.0 (#46–#54) — unchanged; form-touching handoff scenarios (data-entry with parked submits, booking prep) = 0.3.0's second handoff scenario, after the read-only bones are proven; i18n round 2 (#68 migration + second locale); `sidepanel.js` module split; remote telemetry out by design.
+**Deferred (rationale):** #19/#10/#29 carry-overs and all of 0.9.0 (#46–#54) — unchanged; form-touching handoff scenarios (data-entry with parked submits, booking prep) = 0.9.0's second handoff scenario, after the read-only bones are proven; i18n round 2 (#68 migration + second locale); `sidepanel.js` module split; remote telemetry out by design.
 
 ## 🎯 0.2.6 — planned 2026-08-30 (bug-fix & polish round)
 
@@ -36,7 +36,7 @@ Slate chosen in-session from the owner's daily-use observations; each item diagn
 
 **Lane C — audit-first tracks** (parallel): [#66](https://github.com/LogicIncZo/zo-cobrowse/issues/66) test safety net (coverage measurement + report in CI, real-panel manual QA checklist) · [#67](https://github.com/LogicIncZo/zo-cobrowse/issues/67) debug mode then profile-first perf (before/after numbers required) · [#68](https://github.com/LogicIncZo/zo-cobrowse/issues/68) i18n scaffolding (`chrome.i18n`, UI strings only — prompts stay English) · [#71](https://github.com/LogicIncZo/zo-cobrowse/issues/71) prompt-bloat audit (`describePrompt()`-driven token-cost table; trims need evals re-run).
 
-**Deferred (rationale):** #19/#10/#29 carry-overs and all of 0.3.0 (#46–#54) — unchanged; #11 store listing stays its own milestone.
+**Deferred (rationale):** #19/#10/#29 carry-overs and all of 0.9.0 (#46–#54) — unchanged; #11 store listing stays its own milestone.
 
 ## ✅ Completed this round
 
@@ -91,9 +91,13 @@ Scope chosen in-session ("Everything" option) against a full competitive scan of
 
 **Status 2026-08-28 (v0.2.0 shipped):** #26 **DONE** (batch `fill_form` + review card + submit backstop + no-action-click-after-fill rule; e2e 11–15 + demo). **#19, #10, #29 carry into 0.2.x** — build order unchanged, #19 first.
 
-## 🎯 0.3.0 — planned 2026-08-29 (competitive round 2: "Memory, Audit & Control")
+## 🎯 0.2.8 — stabilization bash (decided 2026-09-03)
 
-Slate filed as detailed GitHub issues (**#46–#54**, all in the `0.3.0` milestone, each with competitive evidence + verification criteria) against a refresh of the Aug-2026 competitive scan: **`docs/superpowers/specs/2026-08-29-0.3.0-competitive-analysis.md`**. What moved since the 0.2.0 scan: ChatGPT desktop became a cross-browser agent layer (WebMCP consumption, event-triggered tasks, Computer-History→memories); memory shipped everywhere and hardened with privacy exclusions (Dia excludes banking/incognito); Perplexity shipped "Always ask" per-connector approvals; Opera Neon pivoted to a free agent runtime via MCP. The market converged on pause-and-confirm — our #26 gate is now the validated norm, and the remaining trust surface (user-facing autonomy dial, undo) is open ground.
+Owner pivot: **0.2.8 is not a feature release** — it verifies everything shipped in 0.2.0–0.2.7 and fixes what's broken, shipping **one verified fix per point release** (`0.2.8.1`, `0.2.8.2`, … no cap). **Versioning is now 4-segment** `MAJOR.MINOR.PATCH.STAB` — the `.STAB` segment carries stabilization fixes only, never features (features bump MINOR); manifest `version`/`version_name`, `package.json`, and git tags all carry four segments (policy in AGENTS.md + CONTRIBUTING.md). The **0.2.8.0 enabler** ships first: conversation-id debug tooling (`lib/zo-links.js`, Zo-web-origin setting, `#con_…` copy chip + ↗ Open-in-Zo deep link on assistant footers + history cards) — the triage tool for the rest of the bash. Verification matrix, per-bug loop (issue → `fix/*` → PR → chore(release) → dev→main → tag `v0.2.8.N`), and exit criteria: **`docs/superpowers/specs/2026-09-03-0.2.8-stabilization-slate-design.md`**. Bug findings file as issues on the `0.2.8` GitHub milestone. (This slot previously chartered "autonomy foundation" — those 8 issues, #124–#131, moved to milestone **0.9.0** on 2026-09-03.)
+
+## 🎯 0.9.0 — planned 2026-08-29 (competitive round 2: "Memory, Audit & Control"); renamed from 0.3.0 on 2026-09-02, autonomy foundation merged in 2026-09-03
+
+Slate filed as detailed GitHub issues (**#46–#54**, all in the `0.9.0` milestone, each with competitive evidence + verification criteria) against a refresh of the Aug-2026 competitive scan: **`docs/superpowers/specs/2026-08-29-0.3.0-competitive-analysis.md`**. What moved since the 0.2.0 scan: ChatGPT desktop became a cross-browser agent layer (WebMCP consumption, event-triggered tasks, Computer-History→memories); memory shipped everywhere and hardened with privacy exclusions (Dia excludes banking/incognito); Perplexity shipped "Always ask" per-connector approvals; Opera Neon pivoted to a free agent runtime via MCP. The market converged on pause-and-confirm — our #26 gate is now the validated norm, and the remaining trust surface (user-facing autonomy dial, undo) is open ground. **2026-09-02/03 additions:** owner renamed the milestone to 0.9.0 and moved the 8 autonomy-foundation issues (**#124–#131** — multi-step plan schema + planner hook, mid-run checkpoint/resume, failure/retry policy layer, progress-event stream + sidepanel timeline, post-run deliverable summary, autonomous-mode `!handoff` toggle, per-run cost cap + observability, handoff local/remote split) in as prereqs for #46/#47/#48.
 
 | Issue | Feature | Priority | Depends on |
 |-------|---------|----------|------------|
@@ -109,7 +113,7 @@ Slate filed as detailed GitHub issues (**#46–#54**, all in the `0.3.0` milesto
 
 **Build order:** memory (#46) → permissions (#47) → undo (#48) in the big lane; `read_file` (#52) + chat tabs r2 (#54) as parallel quick wins; compare (#50) right after the 0.2.1 #10 actions half; export (#51) + write-assist r3 (#53) fill the tail; WebMCP (#49) timeboxed anytime.
 
-**Out of 0.3.0 (rationale unchanged):** shared sessions #15/#18 (0.4), background/cloud execution (waits on a Zo-side scheduler; #29's serializable specs keep it additive), agentic payments (watch-only), voice (gap closed — we ship STT + TTS; TTS output live-verified 2026-08-29 via `e2e/probe-tts.ts`), #11 store listing (own milestone after 0.3.0), #34 Mode revisit (needs a spec; 0.3.x candidate).
+**Out of 0.9.0 (rationale unchanged):** shared sessions #15/#18 (0.4), background/cloud execution (waits on a Zo-side scheduler; #29's serializable specs keep it additive), agentic payments (watch-only), voice (gap closed — we ship STT + TTS; TTS output live-verified 2026-08-29 via `e2e/probe-tts.ts`), #11 store listing (own milestone after 0.9.0), #34 Mode revisit (needs a spec; 0.9.x candidate).
 
 ## 🧪 Proposed 2026-08-15 — brainstormed, pending triage
 

@@ -21,7 +21,7 @@ Git-flow model — see `CONTRIBUTING.md` for the full rules. Short version:
   git tag all carry all four segments (e.g. `0.2.8.1` / `v0.2.8.1`).
 - **0.2.8 is a stabilization bash** (owner decision 2026-09-03): verify everything shipped in
   0.2.0–0.2.7 and ship each verified fix as its own `0.2.8.N` point release — one fix = one
-  release, no cap on N; feature work waits for 0.3.0. Spec + verification matrix:
+  release, no cap on N; feature work waits for 0.9.0. Spec + verification matrix:
   `docs/superpowers/specs/2026-09-03-0.2.8-stabilization-slate-design.md`.
 
 ## To understand quickly
