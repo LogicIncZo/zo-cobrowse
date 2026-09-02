@@ -4,8 +4,9 @@ All notable changes to Zo Co-browse are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
-
 ## [Unreleased]
+
+## [0.2.7] — 2026-09-02
 
 ### Changed — Lane B: cold-start lazy-import trim measured and rejected (2b)
 - **Micro-bench verdict: no-op by the evidence rule.** The whole SW module graph
@@ -15,7 +16,6 @@ and this project uses [Semantic Versioning](https://semver.org/).
   at best, so 2b closes as a documented no-op (numbers in `perf-baseline.md`).
 - **2a/2c remain evidence-gated** on the owner's on-device diagnostics export (recipe in
   `perf-baseline.md`), now analyzable thanks to the 2-0 trace correlation.
-
 ### Added — observability: per-turn trace correlation in diagnostics (Lane B 2-0)
 - **Every diagnostics entry is now trace-tagged**: the background stamps a `traceId`
   (`turn-<sessionId>[:<chatId>]` for streams, `exec:<target>` for action batches) onto
@@ -26,7 +26,6 @@ and this project uses [Semantic Versioning](https://semver.org/).
   dominant cost.
 - Exports are versioned (`version: 2`); the metadata-only privacy contract is unchanged.
   Panel chunk-paint spans land with item 2c, only on evidence.
-
 ### Changed — prompt trim: #26 safety rules stated once, not twice (Lane A)
 - **One shared rule block**: the no-secrets / never-click-after-fill rules used to ride TWICE on
   every action turn — once at the end of the action schema and again inside cobrowse's
@@ -39,7 +38,6 @@ and this project uses [Semantic Versioning](https://semver.org/).
   upstream (which it was — `qwen3.8-max-free` 503 `model_not_found` at refresh time).
 - Guard tests now assert the schema/instructions do NOT restate the rules and that
   `buildPrompt` composes them exactly once per action turn (zero times on read turns).
-
 ### Added — streaming-reasoning probe: incremental thinking live-verified (#110)
 - **`tests/test-prompts/probe-streaming-reasoning.ts`** — live SSE probe (event-shape timeline +
   reasoning-key classification, per-model verdict) answering the open question: reasoning
@@ -47,7 +45,6 @@ and this project uses [Semantic Versioning](https://semver.org/).
   and the panel's existing `STREAM_REASONING` path consumes it. No new implementation was
   needed — the item closes as verified-by-probe (findings in `QA_REPORT.md`). Bonus finding:
   `zo:openai/gpt-5.6-sol` is disabled upstream.
-
 ### Fixed — stale-build guard: extension updates refresh open tabs (#109)
 - **Kills the "still broken after reload" loop**: after an extension update, open tabs kept
   running the OLD content script until they navigated. The background now re-injects the fresh
@@ -55,7 +52,6 @@ and this project uses [Semantic Versioning](https://semver.org/).
   dismissible "Extension updated" banner.
 - **`content.js` is injection-idempotent**: a window-level guard flag makes re-injection a no-op
   (no double-bound listeners, no duplicate write-assist widget) — verified by test.
-
 ### Added — chat export: download a conversation as Markdown (#108)
 - **⬇ Export on every history card**: serializes the conversation to a clean Markdown
   transcript — title header, role-labeled turns with timestamps, the 💭 reasoning as a
@@ -64,7 +60,6 @@ and this project uses [Semantic Versioning](https://semver.org/).
   wants, not a debug log.
 - Pure serializer in `lib/export.js` (schema + unit tests); the panel only triggers the Blob
   download — no new message types.
-
 ### Added — handoff polish: badge marker, finish notifications, changelog-drift gate (#103)
 - **▶ extension badge while a handoff run is live** — visible even with the panel closed;
   cleared when no run is active.
@@ -74,7 +69,6 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - **`bun run lint` now fails on docs-changelog drift**: `scripts/sync-changelog.ts --check`
   verifies the docs-site `[Unreleased]` mirror matches root `CHANGELOG.md` (the mirror had
   silently gone empty once); `bun scripts/sync-changelog.ts` re-syncs it.
-
 ### Added — `!handoff`: delegate a goal to Zo as an unattended run (#102)
 - **`!handoff <goal>`** starts a read-only handoff run from the panel: Zo works the pages
   unattended (navigate/extract/scroll), the panel executes each turn's actions as one batch,
@@ -85,7 +79,6 @@ and this project uses [Semantic Versioning](https://semver.org/).
   them as stale, so the whole run renders live in the run's chat tab.
 - The run's state pushes (`HANDOFF_UPDATE`) render a compact progress line (pages · turns ·
   parked · minutes) and an honest end card — ✅ done / ⏸️ paused (with reason) / 🛑 stopped.
-
 ### Added — handoff run loop: the background half of delegate-mode runs (#101)
 - **`HANDOFF_START` / `HANDOFF_STOP` / `HANDOFF_STATUS`** message types (message-contract test
   enforced) + a **`HANDOFF_UPDATE`** background→panel push (declared in a new
@@ -99,7 +92,6 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - **Boundary enforcement in the executor**: under a run's boundary mode, interactive actions
   (click/fill) are refused *before execution* and parked into the run's park log
   (`handoffParked` results) — parking never stops sibling actions. 0.2.7 runs are `readonly`.
-
 ### Changed — version/docs hygiene (#96)
 - **`package.json` version mirrors the extension manifest** (was `0.1.0` while the manifest said
   `0.2.5`); `bun run lint` now **fails on drift** between the two files, so the release-prep rule
@@ -110,7 +102,6 @@ and this project uses [Semantic Versioning](https://semver.org/).
   while root `CHANGELOG.md` accumulated the 0.2.6 slate.
 - **`STREAM_RECONNECT_DONE` is live**: the sidepanel's handler case existed but nothing posted it;
   the background now sends it after a successful retried attempt (completes the #95 dead-code sweep).
-
 ### Fixed — `Reconnecting…` banner actually shows on transient stream failures (#95)
 - **The banner was dead code on the exact path it was built for (QA finding D, P4)**: on a
   retriable network error the background posted a `STREAM_ERROR` *before* retrying, which the
@@ -119,7 +110,6 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - The streaming impl no longer posts premature errors: retriable failures stay silent during
   backoff (the banner shows via `STREAM_RECONNECT`), and the one terminal `STREAM_ERROR` arrives
   only after all retries are exhausted. 4xx/in-stream Zo errors keep their specific messages.
-
 ### Fixed — Test Connection & Settings honor the configured API endpoint (#94)
 - **New "API Endpoint" field** in Settings → Connection: `zoApiUrl` existed in storage (and was
   seeded by the e2e harness) but had no UI — self-hosted / overridden gateways were unconfigurable.
@@ -128,6 +118,8 @@ and this project uses [Semantic Versioning](https://semver.org/).
   It now posts to the field's value (default unchanged) and error messages quote the actual URL
   tried. The model/persona dropdown loaders derive their `/models/available` +
   `/personas/available` URLs from the same origin. Reset-to-defaults clears the field.
+
+## [0.2.6] — 2026-08-30
 
 ### Fixed — `@` tabs and chip strip show page titles (#72)
 - The `@` tab autocomplete and the tab-context chip strip rendered bare hostnames — with two

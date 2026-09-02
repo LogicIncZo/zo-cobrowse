@@ -1,6 +1,6 @@
 # Zo Co-browse — Backlog
 
-> Updated 2026-08-31 — **0.2.7 SLATE BUILT & MERGED to `dev`** (all actionable lanes, PRs #93, #97–#99, #104–#107, #111–#114, #116–#117 — see 🎯 0.2.7 below). **v0.2.6 is code-complete but UNRELEASED** (merged #76–#90; tag pending owner testing). The Tier-1 carry-over slate (#19 model picker, #10 cross-tab actions, #29 watch-tasks) stays **deferred to 0.3.0 planning**; #46–#54 unchanged; #11 store listing its own milestone.
+> Updated 2026-09-02 — **v0.2.6 + v0.2.7 TAGGED & RELEASED** (v0.2.6 on 2026-08-30; v0.2.7 on 2026-09-02 — slate PRs #93, #97–#99, #104–#107, #111–#114, #116–#117, see 🎯 0.2.7 below). Release prep bumped manifest+package.json to 0.2.7 and re-synced `dev` with main's 0.2.6 release commit (fixed the dev↔main divergence). The Tier-1 carry-over slate (#19 model picker, #10 cross-tab actions, #29 watch-tasks) stays **deferred to 0.3.0 planning**; #46–#54 unchanged; #11 store listing its own milestone.
 
 ## Current state
 
@@ -10,7 +10,7 @@
 - **CI/CD:** CI runs on every branch push + PR to `main` (tests + transpile + release checks + zip artifact); `.github/workflows/release.yml` publishes `v*` tag releases (used for v0.0.2)
 - **Streaming:** hardened end-to-end (sessionId isolation, port-disconnect safety, retry correctness — QA finding D fixed: the Reconnecting banner now actually shows; 60s liveness timeout). **Streaming reasoning live-verified 2026-08-31** (incremental; probe committed)
 - **P0/P1/P2/P3 QA findings:** all closed (P2-31 deferred by design — see below)
-- **Release:** ✅ **v0.2.5** tagged + released (2026-08-29). **v0.2.6 merged, tag pending owner testing**; **v0.2.7 slate merged on top** (milestone `0.2.7`) — tag order: v0.2.6 first, then release prep bumps manifest+package.json to 0.2.7. Then the deferred 0.2.x carry-overs (#19 → #10 → #29) re-slot into **v0.3.0** (#46–#54); Chrome Web Store submission (#11) stays its own milestone after 0.3.0 features land
+- **Release:** ✅ **v0.2.6** tagged + released (2026-08-30). ✅ **v0.2.7** tagged + released (2026-09-02) — versions at 0.2.7, dev↔main divergence fixed via the release/v0.2.7 re-sync. The deferred 0.2.x carry-overs (#19 → #10 → #29) re-slot into **v0.3.0** (#46–#54); Chrome Web Store submission (#11) stays its own milestone after 0.3.0 features land
 
 ## 🎯 0.2.7 — built & merged 2026-08-31 (polish & daily-use round + 🤖 handoff flagship)
 
