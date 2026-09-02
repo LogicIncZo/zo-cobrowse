@@ -17,6 +17,8 @@ import { visionModelSuggestion, modelVisionSupport, findModelEntry } from './lib
 import { extractUrls, MAX_LINK_CHIPS } from './lib/links.js';
 import { WORKSPACE_ROOT, filterPickerEntries } from './lib/pickers.js';
 import { applyI18nDom } from './lib/i18n.js';
+import { handoffInstructions, runProgress } from './lib/handoff.js';
+import { conversationToMarkdown, exportFileName } from './lib/export.js';
 import {
   openChatTab,
   closeChatTab,
@@ -161,6 +163,9 @@ let tabsState = { openIds: [], activeId: null }; // chat tab bar (lib/chat-tabs.
 const chatTabRefs = new Map(); // chatId → Set<tabId> — per-chat tab-context toggles
 let pendingActions = null;
 let pendingActionsReasoning = '';   // reasoning to attach to the done-answer bubble
+// Lane E: the live handoff run started from THIS panel (null when none).
+// Cleared by HANDOFF_UPDATE on done/paused/aborted, or on HANDOFF_STOP.
+let activeHandoffRun = null;
 let currentContext = null;
 let actionRunning = false;
 let isHistoryView = false;
@@ -280,6 +285,23 @@ async function finishInit() {
         input.value = msg.text;
         sendQuery();
       }
+      // Lane E: run-state pushes from the background handoff loop.
+      if (msg.type === 'HANDOFF_UPDATE' && msg.run) {
+        const run = msg.run;
+        if (activeHandoffRun && activeHandoffRun.runId !== run.runId) return; // another chat's run
+        if (run.status === 'running' || run.status === 'priming') {
+          // Live states — refresh the progress line (the priming push often
+          // lands before the panel has registered the run; then it's a no-op).
+          if (activeHandoffRun) renderHandoffLine(run);
+        } else {
+          // done / paused / aborted / blocked — the loop has left the chat.
+          activeHandoffRun = null;
+          removeHandoffLine();
+          const icon = { done: '✅', paused: '⏸️', aborted: '🛑', blocked: '⛔' }[run.status] || 'ℹ️';
+          const reason = run.stopReason ? ` — ${safeText(run.stopReason)}` : '';
+          addMessage('system', `${icon} Handoff ${run.status}${reason}`);
+        }
+      }
       // Ctrl+Shift+N shortcut: the background broadcasts NEW_CONVERSATION; the
       // panel starts a fresh chat locally (its startNewConversation also tells
       // the background to reset the ambient Zo thread).
@@ -287,6 +309,7 @@ async function finishInit() {
         startNewConversation();
       }
     });
+    initUpdateBanner();
     renderPromptInspector(); // first paint once modes + context are loaded
   } catch (e) {
     console.error('finishInit error:', e);
@@ -1129,6 +1152,46 @@ function updateHistoryBadge() {
 
 // ---- History view ----
 
+// Lane D stale-build guard: the background leaves `cobrowse_updated_at` in
+// storage.session when the extension updates (and re-injects content scripts).
+// Show the one-time banner, then clear the flag — it never shows again for
+// that update.
+async function initUpdateBanner() {
+  try {
+    const o = await chrome.storage.session.get('cobrowse_updated_at');
+    if (!o || !o.cobrowse_updated_at) return;
+    await chrome.storage.session.remove('cobrowse_updated_at');
+    const el = addMessageDOM('system', '', {});
+    const body = el.querySelector('.msg-body');
+    if (!body) return;
+    body.textContent = '🔄 Extension updated — open tabs were refreshed with the new content script. Reload a page if anything still looks stale.';
+    const dismiss = document.createElement('button');
+    dismiss.textContent = 'OK';
+    dismiss.className = 'update-banner-dismiss';
+    dismiss.addEventListener('click', () => el.remove());
+    body.appendChild(document.createElement('br'));
+    body.appendChild(dismiss);
+  } catch { /* storage unavailable — banner is best-effort */ }
+}
+
+// Chat export (Lane D): serialize the conversation to Markdown and trigger a
+// Blob download — pure half lives in lib/export.js (unit-tested + schema'd).
+function exportConversation(convId) {
+  const conv = conversations[convId];
+  if (!conv || !Array.isArray(conv.messages)) return;
+  const exportedAt = Date.now();
+  const markdown = conversationToMarkdown({ title: conv.title || 'Zo conversation', messages: conv.messages, exportedAt });
+  const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = exportFileName(conv.title, exportedAt);
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
 function renderHistoryView() {
   historyViewEl.classList.remove('hidden');
   chatView.classList.add('hidden');
@@ -1189,6 +1252,16 @@ function renderHistoryView() {
         startCardRename(card, item);
       });
 
+      // Chat export (Lane D): download the conversation as Markdown.
+      const exportBtn = document.createElement('button');
+      exportBtn.className = 'history-card-rename';
+      exportBtn.textContent = '⬇';
+      exportBtn.title = 'Export as Markdown';
+      exportBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        exportConversation(item.id);
+      });
+
       const deleteBtn = document.createElement('button');
       deleteBtn.className = 'history-card-delete';
       deleteBtn.textContent = '✕';
@@ -1203,6 +1276,7 @@ function renderHistoryView() {
       card.appendChild(mainEl);
       card.appendChild(metaEl);
       card.appendChild(renameBtn);
+      card.appendChild(exportBtn);
       card.appendChild(deleteBtn);
 
       card.addEventListener('click', () => switchToConversation(item.id));
@@ -3789,8 +3863,23 @@ function connectStreamingPort() {
 }
 
 function handleStreamMessage(msg) {
-  // Ignore stale messages from previous sessions
-  if (msg.sessionId && msg.sessionId !== streamSession.sessionId) return;
+  // Ignore stale messages from previous sessions — UNLESS this is a chained
+  // handoff turn (Lane E): the background re-enters the stream with a fresh
+  // derived sessionId (`<base>-h<n>-…`) for a run this panel started, and
+  // the panel adopts it as the live session so the loop keeps rendering.
+  // handoffBaseId stays pinned to the panel-SENT session so chain 3+ (which
+  // derive from the same base) keep matching after an adoption.
+  if (msg.sessionId && msg.sessionId !== streamSession.sessionId) {
+    const base = String(streamSession.handoffBaseId ?? streamSession.sessionId);
+    const chainedHandoff = activeHandoffRun && String(msg.sessionId).startsWith(`${base}-h`);
+    if (!chainedHandoff) return;
+    streamSession.sessionId = msg.sessionId;
+    streamSession.active = true;
+    streamSession.chatId = activeHandoffRun.chatId ?? streamSession.chatId;
+    streamSession.msgEl = null; // fresh bubble for the new turn
+    streamSession.fullText = '';
+    streamSession.reasoningText = '';
+  }
   // True when this stream belongs to a chat the user has switched away from —
   // keep accumulating into streamSession, never touch the visible chat DOM.
   const streamIsBackground = () =>
@@ -4248,6 +4337,12 @@ function handleStreamMessage(msg) {
 }
 
 function handleStreamActions(actions, reasoning) {
+  // Lane E: handoff turns execute as ONE batch carrying handoffRunId — the
+  // background's continuation loop keys off that single turn-completion.
+  if (activeHandoffRun) {
+    executeHandoffBatch(actions);
+    return;
+  }
   const navigateActions = actions.filter((a) => a.type === 'navigate');
   const domActions = actions.filter((a) => a.type !== 'navigate' && a.type !== 'done');
   const doneResponse = actions.find((a) => a.type === 'done')?.response;
@@ -4277,6 +4372,81 @@ function handleStreamActions(actions, reasoning) {
   }
 
   // No actions or already handled — input state is managed by STREAM_DONE
+}
+
+// ── Handoff run UX (Lane E) ─────────────────────────────────────────────────
+
+/** The slim run-status line above the composer area (progress + stop). */
+function renderHandoffLine(run) {
+  if (!msgsEl) return;
+  let line = msgsEl.querySelector('.msg-handoff-line');
+  if (!line) {
+    line = document.createElement('div');
+    line.className = 'msg-system msg-handoff-line';
+    msgsEl.appendChild(line);
+  }
+  const stopBtn = document.createElement('button');
+  stopBtn.className = 'handoff-stop';
+  stopBtn.textContent = '✕ stop';
+  stopBtn.title = 'Abort this handoff run';
+  stopBtn.addEventListener('click', async () => {
+    stopBtn.disabled = true;
+    await chrome.runtime.sendMessage({ type: 'HANDOFF_STOP', runId: run.runId }).catch(() => {});
+  });
+  line.replaceChildren(
+    Object.assign(document.createElement('span'), { textContent: `🤖 Handoff — ${runProgress(run)} · ${safeText(run.goal).slice(0, 60)}` }),
+    stopBtn,
+  );
+  line.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function removeHandoffLine() {
+  msgsEl?.querySelector('.msg-handoff-line')?.remove();
+}
+
+/** Execute one handoff turn's actions as a single batch. Results render
+ * compactly; the run's own HANDOFF_UPDATE push reports loop state. */
+async function executeHandoffBatch(actions) {
+  const run = activeHandoffRun;
+  if (!run) return;
+  const card = addMessageDOM('assistant', '', {});
+  const body = card.querySelector('.msg-body');
+  const list = document.createElement('div');
+  list.className = 'handoff-batch';
+  body.appendChild(list);
+  for (const a of actions) {
+    if (a.type === 'done') continue; // rendered below from the results
+    const row = document.createElement('div');
+    row.className = 'handoff-batch-row';
+    row.textContent = a.type === 'navigate' ? `→ ${safeText(a.url)}` : `→ ${safeText(a.type)} ${safeText(a.selector || '')}`;
+    list.appendChild(row);
+  }
+  let res = null;
+  try {
+    res = await chrome.runtime.sendMessage({
+      type: 'EXECUTE_ACTIONS',
+      handoffRunId: run.runId,
+      boundaryMode: run.boundaryMode || 'readonly',
+      tabId: currentContext?.tabId,
+      actions,
+      url: currentContext?.url,
+    });
+  } catch { /* background gone — the orphan-pause sweep handles the run */ }
+  const results = Array.isArray(res?.results) ? res.results : [];
+  results.forEach((r, i) => {
+    const row = list.children[i];
+    if (!row) return;
+    if (r?.handoffParked) {
+      row.textContent += ' — ⛔ parked (boundary)';
+      row.title = safeText(r.error || 'parked for the user');
+    } else if (r && r.ok === false) {
+      row.textContent += ' — ⚠️ failed';
+    } else {
+      row.textContent += ' ✓';
+    }
+  });
+  // The done() deliverable renders via the normal STREAM_DONE path (as the
+  // turn's answer bubble) — rendering it here too would duplicate it.
 }
 
 // Override sendQuery for streaming
@@ -4364,6 +4534,30 @@ sendQuery = async function() {
       input.focus();
       return;
     }
+    if (bang.isHandoff) {
+      // Lane E: start the run, then send the first turn with handoffRunId so
+      // the background loop takes over after the actions execute. Read-only
+      // boundary; the action envelope (cobrowse) is what the loop consumes.
+      // (No user bubble here — the standard send path below renders it.)
+      const start = await chrome.runtime.sendMessage({
+        type: 'HANDOFF_START',
+        chatId: activeId,
+        tabId: currentContext?.tabId,
+        goal: bang.query,
+        boundaryMode: 'readonly',
+      });
+      if (!start?.ok || !start.run) {
+        addMessage('user', query);
+        addMessage('error', start?.error || 'Could not start the handoff run.');
+        input.disabled = false;
+        sendBtn.disabled = false;
+        input.focus();
+        return;
+      }
+      activeHandoffRun = start.run;
+      effectiveQuery = `${bang.query}\n\n${handoffInstructions(start.run)}`;
+      tempMode = 'cobrowse';
+    }
     if (bang.isDuckdb) {
       addMessage('user', query);
       addMessage('thinking', 'Querying datasets...');
@@ -4383,8 +4577,14 @@ sendQuery = async function() {
       input.focus();
       return;
     }
-    effectiveQuery = bang.query;
-    tempMode = bang.mode;
+    if (bang.kind === 'command' || bang.kind === 'context') {
+      // Canned bangs (!summarize/!extract/…) replace the query + mode; !context
+      // replaces the query with its question (decideTurn forces the attach via
+      // bangResult). Other kinds (handoff, …) already set their own
+      // effectiveQuery/tempMode above — don't clobber them here.
+      effectiveQuery = bang.query;
+      tempMode = bang.mode;
+    }
   }
 
   // ---- Tab contexts: referenced tabs ride along as manifest + excerpt ----
@@ -4570,6 +4770,7 @@ sendQuery = async function() {
   if (streamPort) {
     streamSession.sessionId++;
     const thisSessionId = streamSession.sessionId;
+    if (activeHandoffRun) streamSession.handoffBaseId = thisSessionId; // Lane E: pinned adoption base
     streamSession.active = true;
     streamSession.chatId = activeId; // routes background-stream persistence
     streamSession.msgEl = null;
@@ -4595,6 +4796,7 @@ sendQuery = async function() {
         ...(sendTabContexts.length ? { tabContexts: sendTabContexts } : {}),
         ...(turnSkills.length ? { skills: turnSkills } : {}),
         ...(turnFiles.length ? { workspaceFiles: turnFiles } : {}),
+        ...(activeHandoffRun ? { handoffRunId: activeHandoffRun.runId } : {}),
       });
     } catch (e) {
       // Port disconnected between check and postMessage — fall through to non-streaming fallback

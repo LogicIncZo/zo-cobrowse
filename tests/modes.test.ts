@@ -121,19 +121,18 @@ describe("ACTION_SCHEMA_COMPACT", () => {
     }
   });
 
-  it("documents fill_form + the never-click-any-button rule", () => {
+  it("carries the action grammar but NOT the safety rules (#71 trim: they compose once in prompt.js)", () => {
     expect(ACTION_SCHEMA_COMPACT).toContain("fill_form{values:[{target,value}]}");
     expect(ACTION_SCHEMA_COMPACT).toMatch(/question\/label\/placeholder text/);
-    expect(ACTION_SCHEMA_COMPACT).toMatch(/never click ANY button/i);
-    expect(ACTION_SCHEMA_COMPACT).toMatch(/done\(\)/);
-    expect(ACTION_SCHEMA_COMPACT).toMatch(/password/i);
+    expect(ACTION_SCHEMA_COMPACT).not.toMatch(/never click ANY button/i);
+    expect(ACTION_SCHEMA_COMPACT).not.toMatch(/password/i);
   });
 
-  it("cobrowse instructions carry the never-click + pacing rules", () => {
+  it("cobrowse instructions carry pacing rules but NOT the restated safety rules (#71 trim)", () => {
     expect(BUILTIN_MODES.cobrowse.instructions).toMatch(/fill_form/);
     expect(BUILTIN_MODES.cobrowse.instructions).toMatch(/visible section/);
-    expect(BUILTIN_MODES.cobrowse.instructions).toMatch(/never click ANY button/i);
-    expect(BUILTIN_MODES.cobrowse.instructions).toMatch(/done\(\)/);
+    expect(BUILTIN_MODES.cobrowse.instructions).not.toMatch(/never click ANY button/i);
+    expect(BUILTIN_MODES.cobrowse.instructions).not.toMatch(/password/i);
   });
 
   it("teaches the context-only pull actions (never cross-tab DOM actions)", () => {

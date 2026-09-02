@@ -111,6 +111,22 @@ describe("parseBangCommand — schema conformance", () => {
     if ("inlineReply" in r) expect(r.inlineReply).toContain("Usage:");
   });
 
+  it("!handoff carries the goal; no args → inline usage hint (Lane E)", () => {
+    const r = parse("!handoff read these 5 tabs and build a comparison table");
+    expect(r).toEqual({
+      handled: true, kind: "handoff", isHandoff: true, query: "read these 5 tabs and build a comparison table",
+    });
+    const empty = parse("!handoff");
+    expect(empty.handled).toBe(true);
+    expect(empty.kind).toBe("inline");
+    if ("inlineReply" in empty) expect(empty.inlineReply).toContain("Usage:");
+  });
+
+  it("!help lists the !handoff command", () => {
+    const r = parse("!help");
+    if ("inlineReply" in r) expect(r.inlineReply).toContain("!handoff");
+  });
+
   it("!help lists the !context command", () => {
     const r = parse("!help");
     if ("inlineReply" in r) expect(r.inlineReply).toContain("!context");

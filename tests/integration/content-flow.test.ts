@@ -45,8 +45,7 @@ function loadContentScript(win: any, chromeObj: any) {
     win.MutationObserver, setTimeout, clearTimeout, console);
 }
 
-describe("content.js — full-script message flow", () => {
-  let win: any;
+describe("content.js — full-script message flow", () => {  let win: any;
   let target: ReturnType<typeof createTabTarget>;
   let events: string[];
 
@@ -545,5 +544,28 @@ describe("content.js — write-assist widget", () => {
     await tick();
     pop = root.querySelector(".zo-wa-pop");
     expect(parseFloat(pop.style.top)).toBe(32 + 8); // rect.bottom + 8
+  });
+});
+
+describe("content.js — injection idempotency (#109)", () => {
+  it("a second full script run into the same window binds nothing", async () => {
+    const win2: any = new Window({ url: "https://example.test/article" });
+    win2.document.write("<!DOCTYPE html><html><head><title>T</title></head><body><main><p>hi</p></main></body></html>");
+    stubNonZeroRects(win2);
+    const target1 = createTabTarget();
+    setPageGlobals(win2, target1.chrome);
+    await import("../../extension/content.js?file=content-flow-idem-1");
+    const ctx = await target1.dispatch({ type: "CAPTURE_CONTEXT", tier: 0 });
+    expect(String(ctx.url)).toContain("example.test");
+
+    // Second run — same window, fresh script instance + fresh message target:
+    // the guard flag must block every listener registration.
+    const target2 = createTabTarget();
+    loadContentScript(win2, target2.chrome);
+    expect((win2 as any).__zoCobrowseContentLoaded).toBe(true);
+    expect(target2.onMessage.listeners.size).toBe(0);
+    // …while the first injection remains the live handler.
+    const ctx2 = await target1.dispatch({ type: "CAPTURE_CONTEXT", tier: 0 });
+    expect(String(ctx2.url)).toContain("example.test");
   });
 });

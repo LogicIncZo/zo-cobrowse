@@ -133,6 +133,12 @@ export function detectIntent(query) {
  */
 export function shouldDowngradeToJsonDisabled(mode, query) {
   if (!mode || !mode.expectJson) return false;
+  // Lane E: a handoff turn is an ACTION turn by design — the goal may read
+  // like a request ("compare the pricing across these pages"), but the
+  // unattended loop needs the action envelope, so the instructions block
+  // embedded in the query exempts it from the read-downgrade (context-policy
+  // and buildPrompt both route through here).
+  if (typeof query === 'string' && query.includes('## Handoff Run')) return false;
   return detectIntent(query) === 'read';
 }
 

@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>Zo Co-browse — Live Demo</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:1280px;height:720px;overflow:hidden;background:#f4f1ea;
+    font-family:-apple-system,'Segoe UI',Roboto,sans-serif;color:#262115}
+
+  /* ── top bar ── */
+  .topbar{height:46px;background:#141225;display:flex;align-items:center;gap:14px;padding:0 14px;color:#f4f1ea}
+  .topbar .brand{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:700}
+  .topbar .peg{color:#e8b04b;font-size:18px;letter-spacing:1px}
+  .topbar .brand span.zo{color:#e8b04b}
+  .urlpill{flex:1;display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.08);
+    border:1px solid rgba(255,255,255,.12);border-radius:8px;height:30px;padding:0 12px;
+    font-size:12.5px;color:#d8d2c2;font-family:ui-monospace,Menlo,monospace;overflow:hidden;white-space:nowrap}
+  .urlpill .lock{color:#7fc98a;font-size:11px}
+  .conn{display:flex;align-items:center;gap:7px;font-size:12px;color:#b9b3a5}
+  .dot{width:8px;height:8px;border-radius:50%;background:#34a853;box-shadow:0 0 6px rgba(52,168,83,.7)}
+
+  .main{display:flex;height:674px}
+  .pagewrap{width:780px;background:#fff;border-right:1px solid #e0d8c6;position:relative}
+  #page{width:100%;height:100%;border:0}
+
+  /* ── side panel (mirrors extension sidepanel) ── */
+  .panel{width:500px;background:#fcfaf7;display:flex;flex-direction:column}
+  .phead{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;
+    border-bottom:1px solid #eee6d4;background:#faf8f5}
+  .phead .l{display:flex;align-items:center;gap:8px;font-weight:700;font-size:14.5px}
+  .phead .l .peg{color:#c47f20;font-size:16px}
+  .phead .r{display:flex;align-items:center;gap:10px;font-size:12px;color:#8a8273}
+  .pagebar{display:flex;align-items:center;gap:7px;padding:7px 14px;background:#f4f1ea;
+    border-bottom:1px solid #eee6d4;font-size:11.5px;color:#8a8273;font-family:ui-monospace,Menlo,monospace}
+  .pagebar .pi{color:#c47f20}
+  .controls{display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid #eee6d4;font-size:12px}
+  .controls label{color:#8a8273}
+  .controls select{border:1px solid #ddd3bd;border-radius:8px;background:#fff;padding:4px 8px;font-size:12px;color:#262115;outline:none;transition:box-shadow .3s}
+  .controls select.flash{box-shadow:0 0 0 3px rgba(196,127,32,.35)}
+
+  #messages{flex:1;overflow-y:auto;padding:14px 14px 8px;display:flex;flex-direction:column;gap:10px}
+  .msg{display:flex}
+  .msg-body{padding:10px 14px;border-radius:10px;font-size:13.5px;line-height:1.6;max-width:100%;word-wrap:break-word}
+  .msg-body p{margin:0 0 8px} .msg-body p:last-child{margin:0}
+  .msg-body ul{margin:4px 0 0 18px} .msg-body li{margin:3px 0}
+  .msg-body a{color:#9a5b12;text-decoration:underline;text-underline-offset:2px}
+  .msg-body code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:#f0ece4;border:1px solid #e6dfd0;border-radius:4px;padding:0 4px}
+  .msg-body strong{font-weight:650}
+
+  .msg-user{justify-content:flex-end}
+  .msg-user .msg-body{background:#f0ece4;border:1px solid #d9b97c;border-bottom-right-radius:4px;font-weight:500;
+    max-width:min(100%,88%);box-shadow:rgba(255,255,255,.1) 0 1px 0 inset,rgba(0,0,0,.06) 0 1px 2px}
+  .msg-assistant{justify-content:flex-start;flex-wrap:wrap}
+  .msg-assistant .msg-body{background:transparent;border:0;padding:0;max-width:100%}
+  .msg-system{justify-content:center}
+  .msg-system .msg-body{background:#faf8f5;border:1px solid #eee6d4;border-radius:10px;text-align:center;font-size:12px;color:#8a8273;padding:6px 16px;max-width:90%}
+
+  .msg-footer{width:100%;display:flex;gap:10px;align-items:center;margin-top:5px;font-size:10.5px;color:#a39b88}
+  .msg-footer .chip{background:#f4f1ea;border:1px solid #eee6d4;border-radius:6px;padding:1px 7px}
+
+  .caret{display:inline-block;width:7px;height:14px;background:#c47f20;vertical-align:-2px;margin-left:2px;animation:blink 1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+  .thinking-dots{display:inline-flex;gap:5px;padding:4px 2px}
+  .thinking-dots i{width:7px;height:7px;border-radius:50%;background:#c9bfa6;animation:pulse 1.2s ease-in-out infinite}
+  .thinking-dots i:nth-child(2){animation-delay:.18s}.thinking-dots i:nth-child(3){animation-delay:.36s}
+  @keyframes pulse{0%,100%{opacity:.35;transform:translateY(0)}50%{opacity:1;transform:translateY(-3px)}}
+
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+  .achip{font-family:ui-monospace,Menlo,monospace;font-size:11px;border:1px solid #dcb87a;background:#fbf4e4;
+    color:#7a5a1e;border-radius:7px;padding:3px 9px;opacity:0;transform:translateY(4px);transition:all .25s}
+  .achip.show{opacity:1;transform:translateY(0)}
+  .achip.run{border-color:#c47f20;background:#f7e8c8}
+  .achip.ok{border-color:#8fbc8f;background:#eef6ec;color:#3d6b3d}
+  .atrace{width:100%;font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#8a8273;margin-top:4px}
+  .atrace div{padding:1px 0;opacity:0;animation:msgIn .3s forwards}
+  @keyframes msgIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+  .msg{animation:msgIn .28s ease}
+
+  .input-area{display:flex;align-items:flex-end;gap:8px;padding:10px 12px;border-top:1px solid #eee6d4;background:#faf8f5}
+  .input-wrap{flex:1}
+  #query-input{width:100%;resize:none;border:1px solid #ddd3bd;border-radius:10px;background:#fff;
+    padding:9px 12px;font-size:13px;font-family:inherit;outline:none;color:#262115;height:38px}
+  #query-input:focus{border-color:#c47f20;box-shadow:0 0 0 3px rgba(196,127,32,.15)}
+  #send-btn{width:38px;height:38px;border:0;border-radius:10px;background:#c47f20;color:#fff;font-size:16px;cursor:default}
+  .mic{width:34px;height:34px;border:1px solid #ddd3bd;border-radius:9px;background:#fff;color:#8a8273;font-size:14px;text-align:center;line-height:32px}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand"><span class="peg">⢕⣿</span><span><span class="zo">Zo</span> co-browse</span></div>
+    <div class="urlpill"><span class="lock">⬤</span>en.wikipedia.org/wiki/Unified_Payments_Interface</div>
+    <div class="conn"><span class="dot"></span>Connected to Zo</div>
+  </div>
+  <div class="main">
+    <div class="pagewrap"><iframe id="page" src="article.html"></iframe></div>
+    <div class="panel">
+      <div class="phead">
+        <div class="l"><span class="peg">⢕⣿</span><span><span style="color:#c47f20">Zo</span> co-browse</span></div>
+        <div class="r"><span class="dot"></span><span>✚</span></div>
+      </div>
+      <div class="pagebar"><span class="pi">◈</span><span>en.wikipedia.org/wiki/Unified_Payments_Interface</span></div>
+      <div class="controls">
+        <label>Model</label><select><option>Default model</option></select>
+        <label>Mode</label><select id="mode-select"><option>💬 Ask</option></select>
+      </div>
+      <div id="messages"></div>
+      <div class="input-area">
+        <div class="mic">🎤</div>
+        <div class="input-wrap"><textarea id="query-input" rows="1" placeholder="Ask Zo about this page…"></textarea></div>
+        <button id="send-btn">→</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+const $ = s => document.querySelector(s);
+const msgs = $('#messages'), input = $('#query-input');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function md(t){
+  let h = esc(t);
+  h = h.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
+  h = h.replace(/`([^`]+)`/g,'<code>$1</code>');
+  h = h.replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a target="_blank">$1</a>');
+  h = h.replace(/^- (.*)$/gm,'<li>$1</li>').replace(/(<li>[\s\S]*?<\/li>)/g,'<ul>$1</ul>');
+  return h.split(/\n{2,}/).map(b=>/^<ul|^(<li)/.test(b.trim())?b:`<p>${b.replace(/\n/g,'<br>')}</p>`).join('');
+}
+function addMsg(role, html){
+  const d=document.createElement('div'); d.className=`msg msg-${role}`;
+  const b=document.createElement('div'); b.className='msg-body'; b.innerHTML=html;
+  d.appendChild(b); msgs.appendChild(d); msgs.scrollTop=msgs.scrollHeight; return d;
+}
+function footer(d, mode, dur){
+  const f=document.createElement('div'); f.className='msg-footer';
+  f.innerHTML=`<span>🔊</span><span class="chip">${mode}</span><span class="chip">Default model</span><span>${dur}</span>`;
+  d.appendChild(f); msgs.scrollTop=msgs.scrollHeight;
+}
+async function typeText(text){
+  for(const ch of text){ input.value+=ch; await sleep(24+Math.random()*22); }
+  await sleep(350);
+}
+async function streamInto(body, text, ms){
+  const n=text.length, step=Math.max(1,Math.floor(n/(ms/16)));
+  let i=0; const caret='<span class="caret"></span>';
+  while(i<n){ i=Math.min(n,i+step); body.innerHTML=md(text.slice(0,i))+caret; msgs.scrollTop=msgs.scrollHeight; await sleep(16); }
+  body.innerHTML=md(text);
+}
+
+/* ── co-browse executor: real DOM ops against the iframe ── */
+const page=()=>$('#page').contentDocument;
+function runClick(sel){ const el=page().querySelector(sel); if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); }
+function runExtract(){
+  const doc=page(), out=[], seen=new Set();
+  const h=doc.querySelector('#History'); if(!h) return out;
+  const stop=(doc.querySelector('#Transaction_Fees')||{}).closest ? doc.querySelector('#Transaction_Fees').closest('.mw-heading')||doc.querySelector('#Transaction_Fees') : null;
+  let n=h.closest('.mw-heading')||h;
+  while(n && n!==stop){ for(const a of n.querySelectorAll('a[href]')){ if(!a.closest('.mw-editsection')){
+    const href=a.getAttribute('href'), txt=(a.textContent||'').trim();
+    if(!txt||href.startsWith('#')||href.includes('cite_note')||/^\[\d+\]$/.test(txt)||seen.has(href)) continue; seen.add(href);
+    out.push({txt, url: href.startsWith('./')?'https://en.wikipedia.org/wiki/'+href.slice(2):href});
+  }} n=n.nextElementSibling; }
+  return out;
+}
+
+/* ── choreography ── */
+const SUM = SUMMARIZE_TEXT;
+const DONE = "Jumped to the **History** section and extracted all anchors inside it — the selector bounds the range to History plus its `UPI 2.0` / `UPI 3.0` / Technical-controls subsections, stopping before **Transaction Fees**.";
+let started=false;
+const T0 = () => __t0;
+/* absolute-time helpers */
+function at(ms, fn){ const go=()=>{ if(__t0===0){ setTimeout(go,20); return; } const d=ms-(Date.now()-__t0); setTimeout(fn, Math.max(0,d)); }; go(); }
+function typeAt(startMs, text){ at(startMs, ()=>{ input.value=''; let i=0; const step=()=>{ if(i<text.length){ input.value+=text[i++]; input.scrollTop=input.scrollHeight; setTimeout(step,55);} }; step(); }); }
+function escHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function mdToHtml(md){
+  const lines=escHtml(md).split('\n'); const out=[]; let inList=false;
+  for(let ln of lines){
+    ln=ln.replace(/`([^`]+)`/g,'<code>$1</code>')
+         .replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>')
+         .replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2" target="_blank">$1</a>');
+    if(/^- /.test(ln)){ if(!inList){out.push('<ul>');inList=true;} out.push('<li>'+ln.slice(2)+'</li>'); }
+    else { if(inList){out.push('</ul>');inList=false;} if(ln.trim()) out.push('<p>'+ln+'</p>'); }
+  }
+  if(inList) out.push('</ul>');
+  return out.join('');
+}
+function streamAt(startMs, durMs, el, md){ at(startMs, ()=>{ const p=(Date.now()-__t0-startMs)/durMs; const n=Math.min(md.length, Math.floor(md.length*Math.min(1,p))); el.innerHTML=mdToHtml(md.slice(0,n))+'<span class="cursor"></span>'; if(p<1) requestAnimationFrame(()=>streamAt(startMs,durMs,el,md)); else el.innerHTML=mdToHtml(md); msgs.scrollTop=msgs.scrollHeight; }); }
+function choreo(){
+  addMsg('system','Connected to Zo. Ask me about this page, or tell me what to do.');
+  /* S4 summarize */
+  at(9700, ()=>{ $('#mode-select').innerHTML='<option>\u{1F4AC} Ask</option>'; });
+  typeAt(9800,'Summarize this page in 3 bullet points');
+  at(12800, ()=>{ addMsg('user', esc(input.value)); input.value=''; const th=addMsg('assistant','<span class="thinking-dots"><i></i><i></i><i></i></span>'); th.classList.add('msg-thinking'); });
+  at(15300, ()=>{ const th=msgs.querySelector('.msg-thinking') || msgs.querySelectorAll('.msg')[msgs.querySelectorAll('.msg').length-1]; th.remove(); const b=addMsg('assistant',''); streamAt(15300, 8200, b.querySelector('.msg-body'), SUM); });
+  at(23500, ()=>{ const bs=msgs.querySelectorAll('.msg'); footer(bs[bs.length-1], '\u{1F4DD} Summarize', '8.4s'); });
+  /* S5 co-browse */
+  at(28500, ()=>{ const sel=$('#mode-select'); sel.classList.add('flash'); sel.innerHTML='<option>\u{1F916} Co-browse</option>'; setTimeout(()=>sel.classList.remove('flash'),1200); });
+  typeAt(29400,'Jump to the History section and extract the links inside it');
+  at(32800, ()=>{ addMsg('user', esc(input.value)); input.value=''; const th=addMsg('assistant','<span class="thinking-dots"><i></i><i></i><i></i></span>'); th.classList.add('msg-thinking'); });
+  at(35600, ()=>{ const th=msgs.querySelector('.msg-thinking'); if(th) th.remove();
+    const act=addMsg('assistant','<div style="font-size:11.5px;color:#8a8273;margin-bottom:2px">Running 3 actions\u2026</div><div class="chips"></div>');
+    const chips=act.querySelectorAll('.chips')[0];
+    const defs=['click \u2192 #History','extract \u2192 a[href]','done \u2192 response'];
+    defs.forEach((def,i)=> at(35600+i*280, ()=>{ const c=document.createElement('span'); c.className='achip'; c.textContent=def; chips.appendChild(c); requestAnimationFrame(()=>c.classList.add('show')); }));
+    /* 1: click */
+    at(36800, ()=>{ chips.children[0].classList.add('run'); runClick('#History'); });
+    at(39100, ()=>{ chips.children[0].classList.remove('run'); chips.children[0].classList.add('ok');
+      chips.children[1].classList.add('run'); });
+    /* 2: extract (real DOM) */
+    at(40000, ()=>{ const links=runExtract();
+      chips.children[1].classList.remove('run'); chips.children[1].classList.add('ok');
+      const list=links.slice(0,8).map(l=>`- [${l.txt}](${l.url})`).join('\n');
+      const trace=document.createElement('div'); trace.className='atrace';
+      trace.innerHTML=`<div>\u25B8 click \u2192 #History \u2026 scrolled into view</div><div>\u25B8 extract \u2192 ${links.length} anchors</div>`;
+      act.appendChild(trace); msgs.scrollTop=msgs.scrollHeight;
+      const rb=addMsg('assistant',''); streamAt(40000, 2200, rb.querySelector('.msg-body'), `**Extracted ${Math.min(links.length,8)} links from History:**\n\n${list}`); });
+    /* 3: done */
+    at(42900, ()=>{ chips.children[2].classList.add('run'); });
+    at(43600, ()=>{ chips.children[2].classList.remove('run'); chips.children[2].classList.add('ok');
+      const db=addMsg('assistant',''); streamAt(43600, 2600, db.querySelector('.msg-body'), DONE); });
+    at(46200, ()=>{ const bs=msgs.querySelectorAll('.msg'); footer(bs[bs.length-1], '\u{1F916} Co-browse', '16.2s'); });
+  });
+}
+window.boom = () => { if(!started){ started=true; __t0=Date.now(); choreo(); } return 'choreo started'; };
+</script>
+<div id="keepalive" style="position:fixed;bottom:0;right:0;width:2px;height:2px;z-index:9999;animation:ka 0.016s steps(1) infinite"></div><style>@keyframes ka{0%{opacity:0.02}50%{opacity:0.07}100%{opacity:0.02}}</style></body>
+</html>

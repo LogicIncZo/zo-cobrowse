@@ -6,6 +6,8 @@ This page mirrors everything **unreleased** on `dev`.
 
 ## [Unreleased]
 
+
+
 ## [0.2.5] — 2026-08-30
 
 ### Changed — mode surface rationalized (5 modes, leaner prompts)

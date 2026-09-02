@@ -2778,3 +2778,34 @@ body.options-page {
   border-radius: 2px;
   padding: 0 1px;
 }
+
+/* ── Handoff runs (Lane E) ─────────────────────────────────────────────── */
+.msg-handoff-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+  font-size: 12px;
+  opacity: 0.85;
+}
+.msg-handoff-line .handoff-stop {
+  border: 1px solid var(--border, #ccc);
+  background: transparent;
+  color: inherit;
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.msg-handoff-line .handoff-stop:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
+.handoff-batch { display: flex; flex-direction: column; gap: 2px; font-size: 12px; opacity: 0.9; }
+.update-banner-dismiss {
+  margin-top: 4px;
+  border: 1px solid var(--border, #ccc);
+  background: transparent;
+  color: inherit;
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 2px 10px;
+  cursor: pointer;
+}

@@ -1,17 +1,30 @@
 # Zo Co-browse — Backlog
 
-> Updated 2026-08-30 — **v0.2.5 RELEASED** (tag `v0.2.5`, 2026-08-29: Lean Mode + mode-surface rationalization #59, full Zod schema coverage #60, `<all_urls>` vision-capture fix #58).
-> The 0.2.x carry-over feature slate (#19 model picker, #10 cross-tab actions, #29 watch-tasks) is **deferred** — v0.2.6 is an owner-driven bug-fix & polish round (#62–#74, see the 🎯 0.2.6 section); the 0.3.0 round (#46–#54) is unchanged.
+> Updated 2026-09-02 — **v0.2.6 + v0.2.7 TAGGED & RELEASED** (v0.2.6 on 2026-08-30; v0.2.7 on 2026-09-02 — slate PRs #93, #97–#99, #104–#107, #111–#114, #116–#117, see 🎯 0.2.7 below). Release prep bumped manifest+package.json to 0.2.7 and re-synced `dev` with main's 0.2.6 release commit (fixed the dev↔main divergence). The Tier-1 carry-over slate (#19 model picker, #10 cross-tab actions, #29 watch-tasks) stays **deferred to 0.3.0 planning**; #46–#54 unchanged; #11 store listing its own milestone.
 
 ## Current state
 
 - **Branches:** git-flow (`dev` integration, `main` releases); local branch tree pruned 2026-08-28 after v0.2.0 (15 merged/stale branches deleted)
-- **Tests:** ✅ **998 pass / 0 fail** (42 files, 2706 expect() calls) + 33 Playwright e2e across 17 numbered specs (+2 demo specs)
-- **Loop engineering:** `bun run verify` gate + committed hard-gate pre-commit hook (`bun run setup-hooks` to install)
+- **Tests:** ✅ **1096 pass / 0 fail** (49 files, 3119 expect() calls) + 34 Playwright e2e across 17 numbered specs (+2 demo specs)
+- **Loop engineering:** `bun run verify` gate + committed hard-gate pre-commit hook (`bun run setup-hooks` to install); lint now also gates version-sync (package.json ↔ manifest) and the docs-changelog mirror
 - **CI/CD:** CI runs on every branch push + PR to `main` (tests + transpile + release checks + zip artifact); `.github/workflows/release.yml` publishes `v*` tag releases (used for v0.0.2)
-- **Streaming:** hardened end-to-end (sessionId isolation, port-disconnect safety, retry correctness, 60s liveness timeout)
+- **Streaming:** hardened end-to-end (sessionId isolation, port-disconnect safety, retry correctness — QA finding D fixed: the Reconnecting banner now actually shows; 60s liveness timeout). **Streaming reasoning live-verified 2026-08-31** (incremental; probe committed)
 - **P0/P1/P2/P3 QA findings:** all closed (P2-31 deferred by design — see below)
-- **Release:** ✅ **v0.2.5** tagged + released (2026-08-29). Next milestone: **v0.2.6** — bug-fix & polish round, owner-observed issues **#62–#74** (see 🎯 0.2.6 below); then the deferred 0.2.x carry-overs (#19 → #10 → #29) re-slot before/into **v0.3.0** (#46–#54); Chrome Web Store submission (#11) stays its own milestone after 0.3.0 features land
+- **Release:** ✅ **v0.2.6** tagged + released (2026-08-30). ✅ **v0.2.7** tagged + released (2026-09-02) — versions at 0.2.7, dev↔main divergence fixed via the release/v0.2.7 re-sync. The deferred 0.2.x carry-overs (#19 → #10 → #29) re-slot into **v0.3.0** (#46–#54); Chrome Web Store submission (#11) stays its own milestone after 0.3.0 features land
+
+## 🎯 0.2.7 — built & merged 2026-08-31 (polish & daily-use round + 🤖 handoff flagship)
+
+Slate chosen in-session: owner picked "polish & hardening + daily-use ideas" over the Tier-1 carry-over, then added the **Zo handoff lane** (delegate-mode background runs) as the flagship. Spec + cross-cutting safety rule 4 (unattended execution only ever starts from an explicit `!handoff`; ships read-only-first): **`docs/superpowers/specs/2026-08-30-0.2.7-slate-design.md`**. All items one-PR-per-item, CI + e2e green.
+
+| Lane | What shipped | PRs |
+|---|---|---|
+| **E — Zo handoff (flagship)** | `lib/handoff.js` pure state machine + boundary checker (generalizes #26 no-submit); background `HANDOFF_START/STOP/STATUS` loop — event-driven, SW-restart pauses instead of stranding, run state in `storage.session`; panel `!handoff <goal>` + chained-turn adoption + batch execution + progress/stop UX; ▶ badge + one-shot notifications on done/blocked. Acceptance scenario (read-only digest live run) = manual checklist | #104–#107 |
+| **C — fixes & hygiene** | Test Connection + Settings honor the configured API endpoint (+ new API Endpoint field, QA finding B); Reconnecting banner resurrected (QA finding D — impl no longer posts premature STREAM_ERROR); version-sync lint gate; roadmap.md → pointer; docs-changelog mirror + drift gate (`scripts/sync-changelog.ts`); `STREAM_RECONNECT_DONE` revived | #97–#99 |
+| **D — daily-use** | Chat → Markdown export (`lib/export.js`, ⬇ on history cards); stale-build guard (content.js injection-idempotent + onInstalled re-injection + one-time banner); streaming-reasoning probe → verdict INCREMENTAL, already wired, closed as live-verified | #111–#113 |
+| **A — prompt trim** | #26 safety rules stated ONCE per action turn (`lib/prompt.js#SHARED_SAFETY_RULES`): **−42/−43 tokens per cobrowse action turn** (measured vs pre-trim worktree); evals 19/19 after live refresh (`EVALS_MODEL` pin added — server-default model disabled upstream) | #114 |
+| **B — perf** | 2-0 trace correlation (`traceId` on all diagnostics entries, exports v2, SW startup mark); 2b cold-start lazy-import trim **closed as measured no-op** (whole module graph evals in ~10–18ms — cost is worker-spawn, not eval; `scripts/bench-cold-start.ts`); 2a/2c blocked on owner diagnostics export | #116–#117 |
+
+**Deferred (rationale):** #19/#10/#29 carry-overs and all of 0.3.0 (#46–#54) — unchanged; form-touching handoff scenarios (data-entry with parked submits, booking prep) = 0.3.0's second handoff scenario, after the read-only bones are proven; i18n round 2 (#68 migration + second locale); `sidepanel.js` module split; remote telemetry out by design.
 
 ## 🎯 0.2.6 — planned 2026-08-30 (bug-fix & polish round)
 

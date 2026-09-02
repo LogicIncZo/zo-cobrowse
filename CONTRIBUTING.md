@@ -118,6 +118,20 @@ for the full picture.
 4. Open a PR against `dev` (not `main`) — CI runs the same `verify` gate.
    Promotion from `dev` → `main` is a separate, deliberate PR.
 
+## Release demos
+
+Every tagged release ships a narrated feature-demo video in `demo/`:
+
+- **Artifact:** `demo/zo-cobrowse-demo-<YYYY-MM-DD>.mp4` (2–3 min, 1280×720, en-IN narration)
+- **Regenerate:** `bash demo/harness/build/make_demo.sh` (see `demo/harness/README.md`)
+- **New feature in the release → new scene:** add a narration segment to
+  `demo/harness/build/narration.txt` and matching beats to the harness
+  choreography in `demo/harness/site/harness.html`, then regenerate and commit
+  the new MP4 alongside the release.
+- The pipeline is generalized as the Zo skill `Skills/feature-demo-video/`
+  (agent-side, not part of this repo); the harness in this repo is its
+  reference implementation.
+
 ## Adding a New Action Type
 
 1. Add the action kind to `ACTION_KINDS` in `tests/schemas/actions.ts`

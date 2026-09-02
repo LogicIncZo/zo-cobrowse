@@ -29,6 +29,17 @@ import {
 } from './lib/pull.js';
 import { isSensitiveForm } from './lib/formfill.js';
 import {
+  createRun as handoffCreateRunPure,
+  transition as handoffTransition,
+  tally as handoffTally,
+  recordVisit as handoffRecordVisit,
+  park as handoffPark,
+  withinBudget as handoffWithinBudget,
+  checkBoundary as handoffCheckBoundary,
+  buildContinuationTurn,
+  handoffInstructions,
+} from './lib/handoff.js';
+import {
   buildEnhancePrompt,
   parseEnhanceResponse,
 } from './lib/write-assist.js';
@@ -112,7 +123,12 @@ async function askZoStream(port, msg) {
           throw new Error('Port disconnected');
         }
       }
-      return await _askZoStreamImpl(port, msg);
+      // Success after a retry — tell the panel explicitly that the banner can
+      // drop (the sidepanel's STREAM_RECONNECT_DONE case was dead code until
+      // this post existed; the first chunk also clears it, this is the honest contract).
+      const result = await _askZoStreamImpl(port, msg);
+      if (attempt > 1) safePost(port, { sessionId: msg.sessionId, type: 'STREAM_RECONNECT_DONE' });
+      return result;
     } catch (err) {
       lastError = err;
       // Don't retry if the port is gone or the error is non-transient.
@@ -270,8 +286,16 @@ function perfNow() {
   return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
 }
 
+// Lane B 2-0 (observability): script-eval completion, measured from worker
+// start — the compute half of the SW cold start the #67 baseline names as the
+// dominant cost. Stamped into the ring as soon as debug mode resolves.
+const SW_EVAL_DONE = perfNow();
+
 try {
-  chrome.storage.sync.get({ debugMode: false }, (res) => debugLog.setEnabled(!!(res && res.debugMode)));
+  chrome.storage.sync.get({ debugMode: false }, (res) => {
+    debugLog.setEnabled(!!(res && res.debugMode));
+    debugLog.push('startup', 'worker-eval', SW_EVAL_DONE);
+  });
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'sync' && changes.debugMode) debugLog.setEnabled(!!changes.debugMode.newValue);
   });
@@ -396,7 +420,42 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // here so a degenerate Zo response that still asks after the budget
       // note no-ops safely.
       const domActions = (request.actions || []).filter((a) => a && !isContextAction(a));
-      runExecuteActions(domActions, request.tabId || senderTabId(sender), { confirmed: request.confirmed }).then(sendResponse);
+      debugLog.setTrace(`exec:${request.handoffRunId || request.tabId || 'ambient'}`);
+      runExecuteActions(domActions, request.tabId || senderTabId(sender), { confirmed: request.confirmed, boundaryMode: request.boundaryMode }).then((res) => {
+        sendResponse(res);
+        debugLog.setTrace(null);
+        // Lane E: the completing turn of a handoff run continues the loop here
+        // (execute → continuation turn → repeat until done()/budget).
+        if (request.handoffRunId) handoffAfterExecute(request.handoffRunId, request, res);
+      });
+      return true;
+    }
+    case 'HANDOFF_START': {
+      // {chatId, tabId, goal, boundaryMode?, budget?} → {ok, run}. The run
+      // starts in 'priming'; the panel's first ASK_ZO (carrying handoffRunId)
+      // flips it to 'running' and registers the loop's turn context.
+      const run = handoffCreateRunPure({
+        chatId: request.chatId,
+        goal: request.goal,
+        boundaryMode: request.boundaryMode,
+        budget: request.budget,
+      });
+      run.tabId = request.tabId;
+      handoffPut(run).then((saved) => sendResponse({ ok: true, run: saved }));
+      return true;
+    }
+    case 'HANDOFF_STOP': {
+      handoffGet({ runId: request.runId }).then(async (run) => {
+        if (!run) return sendResponse({ ok: false, error: 'no such handoff run' });
+        handoffTurnCtx.delete(request.runId);
+        const res = handoffTransition(run, 'abort', { now: Date.now(), reason: safeText(request.reason) || 'stopped by user' });
+        const saved = await handoffPut(res.ok ? res.run : run);
+        sendResponse({ ok: res.ok, run: saved, error: res.ok ? undefined : res.error });
+      });
+      return true;
+    }
+    case 'HANDOFF_STATUS': {
+      handoffGet(request.runId ? { runId: request.runId } : { chatId: request.chatId }).then((run) => sendResponse({ ok: true, run }));
       return true;
     }
     case 'ENHANCE_TEXT': {
@@ -855,6 +914,21 @@ chrome.runtime.onConnect.addListener((port) => {
     switch (msg.type) {
       case 'ASK_ZO': {
         const __t0 = perfNow(); // #67 stream-duration telemetry
+        // Lane B 2-0: tag every diagnostics entry of this turn so an export
+        // groups into per-turn timelines.
+        debugLog.setTrace(`turn-${msg.sessionId}${msg.chatId ? `:${msg.chatId}` : ''}`);
+        // Lane E: a handoff turn registers its loop context (memory-only —
+        // an SW restart loses it and the orphan pause marks the run paused),
+        // and the first turn flips the run priming → running.
+        if (msg.handoffRunId) {
+          handoffTurnCtx.set(msg.handoffRunId, { port, msg });
+          handoffGet({ runId: msg.handoffRunId }).then((run) => {
+            if (run && run.status === 'priming') {
+              const res = handoffTransition(run, 'start', { now: Date.now() });
+              if (res.ok) handoffPut(res.run);
+            }
+          });
+        }
         try {
           await askZoStream(port, msg);
           debugLog.push('stream', 'askZoStream:done', perfNow() - __t0, { tier: msg.effectiveTier });
@@ -864,6 +938,7 @@ chrome.runtime.onConnect.addListener((port) => {
           // to surface it if the port is still alive.
           safePost(port, { sessionId: msg.sessionId, type: 'STREAM_ERROR', error: `Failed: ${err.message}` });
         }
+        debugLog.setTrace(null);
         break;
       }
       case 'NEW_CONVERSATION': {
@@ -962,9 +1037,35 @@ if (chrome.debugger) {
   });
 }
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
   recreateContextMenus();
+  // Lane D stale-build guard (#109): after an extension UPDATE, open tabs
+  // keep running the OLD content script until they navigate — the recurring
+  // "still broken after git pull + reload" trap. Re-inject the fresh
+  // content.js into eligible open tabs and leave a one-time banner flag for
+  // the panel.
+  if (details.reason === 'update') {
+    chrome.storage.session.set({ cobrowse_updated_at: Date.now() }).catch((e) => console.debug('session.set:', e));
+    reinjectContentScripts();
+  }
 });
+
+// Re-inject content.js into open http(s) tabs. Excluded by the query:
+// chrome:// pages, extension pages, about: — everything content.js itself
+// refuses to run on (its PAGE_DEAD guard). Tabs where injection fails
+// (discarded, restricted) are skipped silently.
+async function reinjectContentScripts() {
+  try {
+    const tabs = await chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] });
+    for (const tab of tabs) {
+      try {
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
+      } catch { /* tab ineligible — skip */ }
+    }
+  } catch (e) {
+    console.debug('reinjectContentScripts:', e);
+  }
+}
 chrome.runtime.onStartup.addListener(() => recreateContextMenus());
 
 // ── Keyboard Shortcuts (chrome.commands) ──
@@ -1432,8 +1533,12 @@ async function _askZoStreamImpl(port, msg) {
     // Stream ended (no End event received — graceful fallback)
     await finishStreamWithPullLoop(port, sid, fullText, { reasoning: reasoningText }, loop);
   } catch (err) {
-    safePost(port, { sessionId: sid, type: 'STREAM_ERROR', error: `Connection failed: ${err.message}` });
-    throw err; // let the retry wrapper decide
+    // No STREAM_ERROR post here (QA finding D): askZoStream may retry this
+    // error, and a transient error post kills the panel's session before the
+    // Reconnecting banner can show. Terminal surfacing belongs to the ASK_ZO
+    // handler's catch — after retries are exhausted — and to the specific
+    // branches above that post AND return/throw non-retriably.
+    throw err;
   }
 }
 
@@ -1937,19 +2042,198 @@ async function testConnection() {
  *  The verdict is re-derived on confirm too - a form that flipped sensitive
  *  since the review re-parks, and the submit backstop inside executeActions
  *  needs the flag either way (confirming a FILL never authorizes a SUBMIT). */
-async function runExecuteActions(domActions, target, { confirmed } = {}) {
+// ── Handoff runs (Lane E, #101) ─────────────────────────────────────────────
+// Delegate-mode loops: the user primes a goal (!handoff), Zo works unattended
+// up to a boundary (lib/handoff owns the pure state machine + boundary rules).
+// Event-driven, never SW-resident: each turn's EXECUTE_ACTIONS completion
+// triggers the continuation check. Run state persists to storage.session so
+// an MV3 worker restart PAUSES a run (never strands it); the memory-only turn
+// context is what dies with the worker.
+
+const handoffStore = {
+  key: 'cobrowse_handoff_runs',
+  async load() {
+    const o = await chrome.storage.session.get(this.key);
+    return (o && o[this.key]) || {};
+  },
+  async save(runs) {
+    await chrome.storage.session.set({ [this.key]: runs });
+  },
+};
+
+// runId → { port, msg } — the turn template the loop replays with a fresh
+// continuation prompt. Deliberately NOT persisted: when the worker restarts
+// the orphan-pause sweep below marks the run paused instead.
+const handoffTurnCtx = new Map();
+
+async function handoffNotify(run) {
+  try { await chrome.runtime.sendMessage({ type: 'HANDOFF_UPDATE', run }); } catch { /* no panel open */ }
+}
+
+async function handoffPut(run) {
+  const runs = await handoffStore.load();
+  runs[run.runId] = run;
+  await handoffStore.save(runs);
+  handoffUpdateBadge(runs);
+  handoffMaybeNotify(run);
+  await handoffNotify(run);
+  return run;
+}
+
+// Extension-badge marker while any handoff run is live (Lane E item 12) —
+// visible even with the panel closed. Defensive: the action API may be
+// unavailable in test/mock contexts.
+function handoffUpdateBadge(runs) {
+  const live = Object.values(runs).some((r) => r.status === 'running' || r.status === 'priming');
+  try {
+    if (live) {
+      chrome.action.setBadgeBackgroundColor({ color: '#5b8def' });
+      chrome.action.setBadgeText({ text: '▶' });
+    } else {
+      chrome.action.setBadgeText({ text: '' });
+    }
+  } catch { /* no action API here */ }
+}
+
+// One-shot notification when a run finishes or parks at the boundary — the
+// point of delegating is walking away. Paused/aborted stay panel-only (the
+// user either caused them or can resume from the panel).
+function handoffMaybeNotify(run) {
+  if (run.status !== 'done' && run.status !== 'blocked') return;
+  try {
+    chrome.notifications.create(`handoff-${run.runId}`, {
+      type: 'basic',
+      iconUrl: 'icons/icon128.png',
+      title: run.status === 'done' ? 'Zo handoff finished' : 'Zo handoff needs you',
+      message: `${safeText(run.goal).slice(0, 120)}${run.stopReason ? ' — ' + safeText(run.stopReason).slice(0, 120) : ''}`,
+    });
+  } catch { /* notifications unavailable */ }
+}
+
+async function handoffGet({ runId, chatId } = {}) {
+  const runs = await handoffStore.load();
+  if (runId) return runs[runId] || null;
+  if (chatId) {
+    return Object.values(runs).find((r) => r.chatId === chatId && !['done', 'aborted'].includes(r.status)) || null;
+  }
+  return null;
+}
+
+// SW restart: a running run lost its turn context — pause it honestly so the
+// panel can offer resume instead of the user waiting on a dead loop.
+(function handoffPauseOrphans() {
+  handoffStore.load().then(async (runs) => {
+    let dirty = false;
+    for (const run of Object.values(runs)) {
+      if (run.status === 'running') {
+        const res = handoffTransition(run, 'pause', { now: Date.now(), reason: 'extension restarted — resume to continue' });
+        if (res.ok) { runs[run.runId] = res.run; dirty = true; }
+      }
+    }
+    if (dirty) await handoffStore.save(runs);
+  }).catch(() => { /* storage unavailable — nothing to sweep */ });
+})();
+
+async function handoffAfterExecute(runId, request, res) {
+  try {
+    let run = await handoffGet({ runId });
+    if (!run || run.status !== 'running') return;
+    const actions = request.actions || [];
+    const results = (res && res.results) || [];
+
+    // Tally the completed turn; navigations from successful navigate actions.
+    const navOk = results.filter((r) => r && r.type === 'navigate' && r.ok).length;
+    run = handoffTally(run, { turns: 1, navigations: navOk });
+    if (navOk) {
+      try {
+        const tab = await chrome.tabs.get(request.tabId);
+        if (tab?.url) run = handoffRecordVisit(run, tab.url);
+      } catch { /* tab gone — visit tracking skips it */ }
+    }
+    // Park boundary refusals so the user can perform them from the review card.
+    for (const r of results) {
+      if (r && r.handoffParked) run = handoffPark(run, r.action || { type: r.type }, r.error, request.url);
+    }
+
+    // done() ends the run — its response is the deliverable.
+    const doneResult = results.find((r) => r && r.type === 'done') || actions.find((a) => a && a.type === 'done');
+    if (doneResult) {
+      const reason = safeText(doneResult.response || '').slice(0, 200) || 'goal reached';
+      const t = handoffTransition(run, 'complete', { now: Date.now(), reason });
+      handoffTurnCtx.delete(runId);
+      await handoffPut(t.ok ? t.run : run);
+      return;
+    }
+
+    // Budget exhausted → paused (the panel offers resume / wrap-up).
+    const budget = handoffWithinBudget(run);
+    if (!budget.ok) {
+      const t = handoffTransition(run, 'pause', { now: Date.now(), reason: budget.reason });
+      handoffTurnCtx.delete(runId);
+      await handoffPut(t.ok ? t.run : run);
+      return;
+    }
+
+    await handoffPut(run);
+    handoffChainNextTurn(runId);
+  } catch (e) {
+    console.debug('handoffAfterExecute:', e);
+  }
+}
+
+async function handoffChainNextTurn(runId) {
+  const ctx = handoffTurnCtx.get(runId);
+  const run = await handoffGet({ runId });
+  if (!ctx || !run || run.status !== 'running') return;
+  const { port, msg } = ctx;
+  if (port._dead) {
+    const t = handoffTransition(run, 'pause', { now: Date.now(), reason: 'panel closed mid-run' });
+    handoffTurnCtx.delete(runId);
+    await handoffPut(t.ok ? t.run : run);
+    return;
+  }
+  // Fresh page state for the driven tab — Zo navigated since the last capture.
+  let pageContext = null;
+  try {
+    pageContext = await getActiveTabContext(run.tabId, msg.effectiveTier || 1, msg.modeId);
+  } catch { /* capture failed — Zo can still pull (read_page) */ }
+  const turnMsg = {
+    ...msg,
+    sessionId: `${msg.sessionId}-h${run.usage.turns + 1}-${Date.now() % 100000}`,
+    // Thread continuity: turn 1's conversation_id echo (the ambient global,
+    // just updated by the previous turn's header) — without this every
+    // continuation opens a FRESH Zo thread that never saw the goal.
+    conversationId: msg.conversationId || zoConversationId || undefined,
+    // Continuation prompt only — the instructions rode turn 1 and live in the
+    // thread; re-sending them (marker included) confuses marker routing.
+    userQuery: buildContinuationTurn(run),
+    pageContext,
+    handoffRunId: runId,
+  };
+  askZoStream(port, turnMsg).catch(async () => {
+    // Stream failed mid-run — pause honestly; the panel can resume.
+    const r = await handoffGet({ runId });
+    if (r && r.status === 'running') {
+      const t = handoffTransition(r, 'pause', { now: Date.now(), reason: 'stream error mid-run' });
+      handoffTurnCtx.delete(runId);
+      await handoffPut(t.ok ? t.run : r);
+    }
+  });
+}
+
+async function runExecuteActions(domActions, target, { confirmed, boundaryMode } = {}) {
   const hasFill = domActions.some((a) => a.type === 'fill_form' || a.type === 'fill');
   // Click-only batches capture too: on sensitive pages the submit backstop
   // needs the verdict, and the per-action sidepanel loop sends clicks alone.
   const hasClick = domActions.some((a) => a.type === 'click');
-  if (!hasFill && !hasClick) return executeActions(domActions, target);
+  if (!hasFill && !hasClick) return executeActions(domActions, target, { boundaryMode });
   const pre = await captureFormFields(target);
   if (!pre) {
     // Unreadable page (no content script / capture failed): execute without a
     // review, stamped so the card can say "unverified form - no review". A
     // page we can't read is also a page whose fields we can't resolve - expect
     // per-field misses rather than silent wrong fills.
-    return { ...await executeActions(domActions, target), unverifiedForm: true };
+    return { ...await executeActions(domActions, target, { boundaryMode }), unverifiedForm: true };
   }
   const verdict = isSensitiveForm(pre.formFields, pre.url);
   if (verdict.sensitive && !confirmed) {
@@ -1957,9 +2241,9 @@ async function runExecuteActions(domActions, target, { confirmed } = {}) {
       return { needsConfirm: true, actions: domActions, fields: pre.formFields, url: pre.url, reasons: verdict.reasons };
     }
     // Click-only: nothing to review — execute with the backstop armed.
-    return executeActions(domActions, target, { sensitive: true });
+    return executeActions(domActions, target, { sensitive: true, boundaryMode });
   }
-  return executeActions(domActions, target, { sensitive: verdict.sensitive });
+  return executeActions(domActions, target, { sensitive: verdict.sensitive, boundaryMode });
 }
 
 /** Pre-flight form capture for the sensitivity gate: the #24 get_form pull
@@ -2073,6 +2357,17 @@ async function executeActions(actions, tabId, opts = {}) {
           results.push({ ok: false, type: 'click', blocked: true, error: 'blocked action-button click after a form fill - review the page and click it yourself' });
           continue;
         }
+      }
+    }
+
+    // Handoff boundary (Lane E): readonly/no-submit runs PARK interactive
+    // actions instead of executing them — the user performs them later from
+    // the review card. Push + continue: parking must not stop sibling actions.
+    if (opts.boundaryMode && (action.type === 'click' || action.type === 'fill')) {
+      const verdict = handoffCheckBoundary(action, opts.boundaryMode);
+      if (!verdict.allowed) {
+        results.push({ ok: false, type: action.type, blocked: true, handoffParked: true, action, error: verdict.reason });
+        continue;
       }
     }
 

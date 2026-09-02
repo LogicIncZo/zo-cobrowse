@@ -20,6 +20,17 @@ const PORT = Number(process.env.E2E_PORT || 3179);
 const SITE_DIR = resolve(new URL(".", import.meta.url).pathname, "../fixtures/site");
 const requests = []; // {ts, method, url, body}
 
+// ---- Lane E demo/coverage state ----
+// Handoff runs are stateful across turns: a turn-1 prompt carries the
+// "## Handoff Run" instructions (resets the counter); each continuation turn
+// carries "[handoff-run continuation]" and gets the next scripted envelope.
+let handoffTurn = 0;
+// The "flaky" scenario simulates transient network drops on the first N armed
+// calls (socket destroy → retriable → the panel's Reconnecting banner shows
+// "attempt 2 of 3", then "attempt 3 of 3"), then answers normally. Specs arm
+// it via GET /__flaky/arm (N = 2).
+let flakyArmed = 0;
+
 const MIME = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript",
@@ -76,6 +87,17 @@ function pickScenario(input) {
   // A pull follow-up is NOT a new user turn — route by its auto-fetched
   // header, not the (absent) ## User Request section.
   if (String(input || "").includes("## Auto-fetched:")) return "pull-followup";
+  // Lane E: handoff runs route on their markers, BEFORE user-keyword routing —
+  // a handoff goal may legitimately contain words like "extract" or "click".
+  if (String(input || "").includes("## Handoff Run")) {
+    handoffTurn = 1;
+    return "handoff-t1";
+  }
+  if (String(input || "").includes("[handoff-run continuation]")) {
+    handoffTurn += 1;
+    return `handoff-t${Math.min(handoffTurn, 3)}`;
+  }
+  if (String(input || "").includes("flaky")) return "flaky";
   const q = userRequest(input);
   if (q.includes("schema")) return "pull-form";
   if (q.includes("code sample")) return "code-sample";
@@ -121,6 +143,12 @@ const server = http.createServer(async (req, res) => {
     }
     res.writeHead(200, { "content-type": "application/json", ...cors });
     return res.end(JSON.stringify(requests));
+  }
+  // ---- flaky-network control (Lane D demo / reconnect-banner coverage) ----
+  if (url.pathname === "/__flaky/arm") {
+    flakyArmed = 2; // fail two attempts → the banner shows twice
+    res.writeHead(200, { "content-type": "text/plain", ...cors });
+    return res.end("armed");
   }
   if (url.pathname === "/__health") {
     res.writeHead(200, { "content-type": "application/json" });
@@ -238,6 +266,53 @@ const server = http.createServer(async (req, res) => {
     }
 
     const scenario = pickScenario(body.input);
+    if (scenario === "handoff-t1" || scenario === "handoff-t2") {
+      // Simulated thinking time — keeps the recorded run watchable.
+      await sleep(1100);
+    }
+    if (scenario === "handoff-t1") {
+      // Turn 1 tempts the boundary (a click — parked under the readonly
+      // boundary) and navigates the driven tab to the next fixture page.
+      const env = JSON.stringify({ actions: [
+        { type: "click", selector: "#buy-now" },
+        { type: "navigate", url: `http://127.0.0.1:${PORT}/form.html` },
+      ]});
+      return streamSse(res, [
+        thinkingStart("Scanning the page for pricing signals and planning the route…"),
+        textStart(env),
+        completed(),
+      ], { delayMs: 150 });
+    }
+    if (scenario === "handoff-t2") {
+      const env = JSON.stringify({ actions: [
+        { type: "navigate", url: `http://127.0.0.1:${PORT}/checkout.html` },
+      ]});
+      return streamSse(res, [
+        thinkingStart("Continuing: moving to the checkout page to read its plan rows…"),
+        textStart(env),
+        completed(),
+      ], { delayMs: 150 });
+    }
+    if (scenario === "handoff-t3") {
+      const env = JSON.stringify({ actions: [
+        { type: "done", response: "## Pricing digest\n\nCompared across the fixture pages (Pro $29/mo, Team $79/mo, Enterprise custom): **Pro** is the value pick for solo use; **Team** wins at 3+ seats. The click on **Buy now** was parked for you — checkout stays a human decision." },
+      ]});
+      return streamSse(res, [textStart(env), completed()], { delayMs: 120 });
+    }
+    if (scenario === "flaky") {
+      if (flakyArmed <= 0) {
+        // Hold briefly before answering so the Reconnecting banner (shown
+        // during the retry backoff) stays watchable.
+        await sleep(1800);
+        return streamSse(res, [textStart("Steady answer — the network behaved."), completed()], { delayMs: 50 });
+      }
+      flakyArmed -= 1;
+      // Simulate a mid-flight network drop: destroy the socket so the fetch
+      // throws (retriable) → the background backs off, shows the
+      // "➳ Reconnecting…" banner, and retries into this handler (now disarmed).
+      res.destroy();
+      return;
+    }
     if (scenario === "code-sample") {
       // UX-polish spec: a prose answer containing a fenced code block (the
       // sidepanel renders <pre><code> with a Copy button at STREAM_DONE).

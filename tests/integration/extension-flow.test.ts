@@ -303,13 +303,12 @@ describe("sidepanel render contract (real background pipeline)", () => {
     }, 8000);
   }, 15000);
 
-  it("transient network failure → background retries → recovery renders (observed contract)", async () => {
-    // OBSERVED CONTRACT (candidate follow-up): on a retriable network error
-    // the background surfaces a transient STREAM_ERROR before retrying, which
-    // the panel treats as terminal (active=false) — so the "Reconnecting…"
-    // banner (STREAM_RECONNECT) is ignored on this path, and the recovered
-    // stream renders through the inactive-DONE fallback. Assert what the user
-    // actually sees: error card, then the recovered answer.
+  it("transient network failure → Reconnecting banner → recovery renders, no error card (QA finding D fixed)", async () => {
+    // QA finding D, fixed: the old background posted a transient STREAM_ERROR
+    // before retrying, which the panel treated as terminal — the
+    // "Reconnecting…" banner was dead code and recovery only rendered through
+    // the inactive-DONE fallback. Now the user sees the banner during backoff,
+    // then the recovered answer — and never an error card.
     const d = deferredSse();
     let attempt = 0;
     fm.handle((url) => {
@@ -319,12 +318,15 @@ describe("sidepanel render contract (real background pipeline)", () => {
       if (attempt === 1) throw new Error("fetch failed");
       return d.response;
     });
+    const errCardsBefore = panelWin.document.querySelectorAll("#messages .msg-error").length;
     const box = armAskCapture();
     await typeAndSend("Show me the banner");
     await waitUntil(() => box.msg != null, 8000);
-    // transient error surfaced while the background backs off (1s) and retries
-    await waitUntil(() => panelWin.document.querySelector("#messages .msg-error .error-card-title"), 8000);
-    // release the recovered stream — the retried attempt completes
+    // the banner shows while the background backs off (1s) and retries —
+    // and no error card is added
+    await waitUntil(() => panelWin.document.querySelector("#messages .msg-reconnecting"), 8000);
+    expect(panelWin.document.querySelectorAll("#messages .msg-error").length).toBe(errCardsBefore);
+    // release the recovered stream — the retried attempt completes normally
     d.push(sseEvent("PartStartEvent", { index: 1, part: { part_kind: "text", content: "Back " } }));
     d.push(sseEvent("PartDeltaEvent", { delta: { part_delta_kind: "text", content_delta: "online." } }));
     d.push(sseEvent("completed", {}));
@@ -332,6 +334,8 @@ describe("sidepanel render contract (real background pipeline)", () => {
       const bodies = [...panelWin.document.querySelectorAll("#messages .msg-assistant .msg-body")];
       return bodies.some((el: any) => el.textContent.includes("Back online."));
     }, 8000);
+    expect(panelWin.document.querySelector("#messages .msg-reconnecting")).toBeFalsy(); // banner cleared
+    expect(panelWin.document.querySelectorAll("#messages .msg-error").length).toBe(errCardsBefore);
     expect(panelWin.document.querySelector("#query-input").disabled).toBe(false);
   }, 20000);
 });

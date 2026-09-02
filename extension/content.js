@@ -2,6 +2,13 @@
 // Captures page context and executes browser actions
 
 (function () {
+  // Injection idempotency (Lane D stale-build guard): re-injection (the
+  // update-refresh in background.js, manifest races) must not double-bind
+  // listeners or spawn a second write-assist widget. First injection wins;
+  // subsequent runs exit immediately.
+  if (window.__zoCobrowseContentLoaded) return;
+  window.__zoCobrowseContentLoaded = true;
+
   const PAGE_DEAD = /^(about:|chrome-extension:|file:)/;
 
   function isAlive() {

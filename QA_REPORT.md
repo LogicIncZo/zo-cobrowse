@@ -282,3 +282,29 @@ The extension is green-tested with a hardened streaming path. Remaining work is 
 
 - `bun run verify` green — 879 tests / 39 files (0 failures; +6: question join, compactForm cue, pacing rule, capture join, question resolution, viewport preference).
 - `bun run test:e2e` green — 22 passed + 2 skipped (both ZO_DEMO demo specs), incl. new `e2e/12-any-form.spec.ts`: builder-style fixture (no labels/names, shared placeholder, div titles, OK outside forms) — turn 1 fills the visible section by question text (prompt shown to carry `— First name*`), the user presses OK themselves, turn 2 "continue" fills the next section, section-1 values unchanged, nothing auto-submitted.
+
+---
+
+## 2026-08-31 — Streaming-reasoning probe (0.2.7 Lane D item 8, #110)
+
+**Question:** does the live `/zo/ask` SSE emit reasoning incrementally, or only in the final
+payload? The panel already renders incremental thinking (`STREAM_REASONING` ← PartDeltaEvent
+`part_delta_kind:"thinking"` deltas) — the item asked whether the wire actually feeds it.
+
+**Probe:** `tests/test-prompts/probe-streaming-reasoning.ts` (live SSE, event-shape timeline,
+reasoning-key classification, per-model verdict). Model list from the live catalog — the
+probe's `zo:openai/gpt-5.6-sol` default is **disabled upstream** (HTTP 403 "Model is disabled"),
+so catalog BYOK models were used.
+
+**Findings (2026-08-31):**
+
+| Model | Result |
+|---|---|
+| GLM53F (`byok:e4ad4825…`) | **INCREMENTAL** — 894 `data` events (PartStart/PartDelta shapes, `event_kind`/`index` keys) carrying thinking deltas well before the `succeeded` terminal. The existing `STREAM_REASONING` path is fed on the wire. |
+| DeepSeek v4 Pro (`byok:a62a5451…`) | Inconclusive — run `failed` upstream (runner error, no events). |
+| `zo:openai/gpt-5.6-sol` | Disabled upstream (403). |
+
+**Verdict:** reasoning streaming is REAL and already implemented end-to-end — no speculative
+work needed. Items closed: whether to implement incremental reasoning = already shipped;
+live verification = done above. Model-dependent (models without a thinking channel emit
+nothing incremental, which the panel already handles by no-op).

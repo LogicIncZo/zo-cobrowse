@@ -74,6 +74,7 @@ export function parseBangCommand(rawQuery) {
       lines.push(`• \`!${cmd}\` — ${def.desc}`);
     }
     lines.push('• `!context <question>` — Attach this page (text + elements) for one turn, then answer');
+    lines.push('• `!handoff <goal>` — Delegate a goal to Zo as an unattended read-only run');
     lines.push('• `!save [path]` — Save this page to your Zo workspace as markdown');
     lines.push('• `!auto <instruction>` — Create a scheduled Zo automation');
     lines.push('• `!query <question>` — Natural-language DuckDB query on your data');
@@ -124,6 +125,20 @@ export function parseBangCommand(rawQuery) {
       };
     }
     return { handled: true, kind: 'context', isContext: true, query: args };
+  }
+
+  // !handoff — delegate a goal to Zo as an UNATTENDED run (Lane E): Zo works
+  // the pages read-only (navigate/extract/scroll) up to a hard boundary and
+  // reports back a digest. Read-only by design in 0.2.7; form-touching
+  // handoffs are a 0.3.0 scenario (spec § Lane E, cross-cutting rule 4).
+  if (name === 'handoff') {
+    if (!args) {
+      return {
+        handled: true, kind: 'inline',
+        inlineReply: 'Usage: `!handoff <goal>` — e.g. `!handoff read these 5 product tabs and build a comparison table`. Zo works the pages unattended (read-only: navigate/extract/scroll) and reports back with a digest. Stop anytime with the ✕ on the progress line.',
+      };
+    }
+    return { handled: true, kind: 'handoff', isHandoff: true, query: args };
   }
 
   // Look up the command
