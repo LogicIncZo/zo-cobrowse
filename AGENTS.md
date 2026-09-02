@@ -13,8 +13,16 @@ Git-flow model — see `CONTRIBUTING.md` for the full rules. Short version:
 - `dev` (protected) — integration branch. Branch from it, PR back to it.
 - `main` (protected) — latest working release code. Promote via PR from `dev`.
 - `feature/*` / `fix/*` / `chore/*` — one branch per unit of work.
-- Releases are deliberate: `git tag vX.Y.Z && git push origin vX.Y.Z` triggers
-  `.github/workflows/release.yml`. Merging to `main` does **not** release.
+- Releases are deliberate: `git tag vX.Y.Z.W && git push origin vX.Y.Z.W` triggers
+  `.github/workflows/release.yml` (matches any `v*` tag). Merging to `main` does **not** release.
+- **Versioning is 4-segment** `MAJOR.MINOR.PATCH.STAB` — SemVer on the first three segments
+  plus a Chrome-native fourth that carries **stabilization fixes only, never features**
+  (features bump MINOR). `manifest.json` `version`/`version_name`, `package.json`, and the
+  git tag all carry all four segments (e.g. `0.2.8.1` / `v0.2.8.1`).
+- **0.2.8 is a stabilization bash** (owner decision 2026-09-03): verify everything shipped in
+  0.2.0–0.2.7 and ship each verified fix as its own `0.2.8.N` point release — one fix = one
+  release, no cap on N; feature work waits for 0.3.0. Spec + verification matrix:
+  `docs/superpowers/specs/2026-09-03-0.2.8-stabilization-slate-design.md`.
 
 ## To understand quickly
 
