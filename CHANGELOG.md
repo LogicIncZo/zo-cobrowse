@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.2.7.1] — 2026-09-05
+
+### Fixed — stabilization round (2026-09-05 end-to-end pass)
+- **Esc-to-stop works anywhere in the panel (#133).** The "Press Esc to stop"
+  gesture previously only fired while the composer was focused; focus leaves
+  the composer in common flows (clicking a message, a chat tab, a footer).
+  Esc now cancels the in-flight stream from the panel level; autocomplete
+  popups consume Esc first (closing the popup never cancels the stream).
+- **Chat-tab streaming dot is background-only (#135).** The pulsing dot now
+  marks only background chats that are still generating — it no longer
+  renders on the tab the user is already watching.
+- **Handoff done no longer repeats the digest (#138).** The run-completion
+  status line is compact (`✅ Handoff done`); the deliverable renders once,
+  as the turn's answer. Previously the full done() response (with raw
+  markdown headings) rendered a second time inside the status line.
+- **"Fill 1 fields" → "Fill 1 field" (#139).** Singular/plural fixed on the
+  form-review confirm button and the fill_form timeline card meta.
+
+### Added — regression coverage promoted from the stabilization pass (#137)
+- Four new e2e specs: `19-error-paths` (Esc cancel incl. focus-outside, 401
+  error card, failed-action UX, conversation threading), `20-chat-tabs-parking`
+  (streams survive switches; backgrounded actions park — page untouched until
+  Run All), `21-history-ops` (rename / export download / delete incl. the
+  active chat), `22-bang-commands` (`!summarize`, `!context`, `!handoff` stop,
+  digest-renders-once). Mock Zo server gained `unauthorized` (401) and
+  `fill-slow` (slow fill envelope) scenarios.
+- Drift: Zo pruned its MCP catalog 93→79 tools (removed `use_integration` et
+  al.); baselines re-pinned (#136) and the snapshot floor test loosened
+  accordingly (the required-tools loop is the real gate).
+
 ## [0.2.7] — 2026-09-02
 
 ### Changed — Lane B: cold-start lazy-import trim measured and rejected (2b)
