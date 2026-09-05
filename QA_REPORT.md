@@ -334,3 +334,22 @@ system lib, no passwordless sudo) — CI's e2e job is the operative gate.
 `docs/qa/manual-panel-checklist.md`), the live `!handoff` acceptance run, and the
 week of real usage — findings file as issues on the `0.2.8` milestone, one
 verified fix = one `0.2.8.N` point release.
+
+### 0.2.8 manual-checklist section — pass logged 2026-09-05 (tagged commit `83f9ed2` / `v0.2.8.0`)
+
+The four 0.2.8 checklist items were exercised against the promoted release commit.
+Automated evidence: CI e2e run `33969916152` (PR #146, merge-commit build) — `e2e/23-zo-links.spec.ts`
+3/3 green; integration suite (`tests/integration/extension-flow.test.ts` "conversation-id chip +
+Open in Zo") 4/4 green; `bun run verify` 1116/50 green.
+
+| Checklist item | Result | Evidence |
+|---|---|---|
+| **`#con_…` conversation-id chip** | ✅ pass | e2e/23: chip renders `#con_e2e-co…` on the assistant footer after a real send; tooltip carries the FULL id (`title` asserted); click copies the FULL id — real-clipboard read-back equals `con_e2e-conv-1`, label flips to `Copied ✓`. |
+| **↗ Open in Zo** | ✅ pass | e2e/23: with Zo Web Origin set via storage.sync (the same write a Settings save makes — the panel's `storage.onChanged` live-sync picked it up with no reload), ↗ renders and opens a real tab at `<origin>/?chat=con_e2e-conv-1&t=chats`; URL asserted. Gating integration-tested both ways: no thread id → no chip/↗; no origin → chip but no ↗. |
+| **History cards** | ✅ pass | e2e/23: card shows ⧉ (tooltip = full id) + ↗ beside ✎/⬇/🗑; ⧉ flips to ✓ on click with the clipboard holding the full id; ↗ opens the deep-link tab. |
+| **Origin validation** | ✅ pass | e2e/23: `ftp://example.com` (passes the type=url native check, fails the http(s) rule) → Save flags the "Zo Web Origin" error and persists nothing; a valid https origin saves (`✅ Saved!`) and round-trips through storage. |
+
+**Residual (owner's daily-use window):** hover/tooltip rendering and Settings-pane focus
+behavior in the real docked panel shell — the documented unautomatable surface
+(`docs/qa/manual-panel-checklist.md` header). Everything behind those two visual confirmations
+is verified above on the tagged commit.
