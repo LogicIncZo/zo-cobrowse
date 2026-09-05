@@ -176,7 +176,10 @@ describe('pinned baselines', () => {
 
   test('mcp-tools.json parses and contains every required tool', () => {
     const tools = parseToolSnapshot(mcpSnapshot);
-    expect(tools.length).toBeGreaterThanOrEqual(90);
+    // Floor guards against a truncated/garbage snapshot, not upstream's exact
+    // count — Zo pruned the catalog 93→79 in 2026-09 (#136), so it must track
+    // loosely. The REQUIRED_MCP_TOOLS loop below is the real gate.
+    expect(tools.length).toBeGreaterThanOrEqual(75);
     const names = tools.map((t) => t.name);
     for (const required of REQUIRED_MCP_TOOLS) expect(names).toContain(required);
     // neighbors we are likely to build against next (#28 read_file follow-up)

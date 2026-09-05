@@ -38,24 +38,33 @@
     <div id="chat-tabs" class="chat-tabs" role="tablist" aria-label="Open chats"></div>
 
     <!-- ── Controls bar ── -->
+    <!-- #140: label stacked over value; MODE gets the widest group (switched
+         per task), PERSONA the narrowest (set once). Values must stay legible
+         at the panel's real ~400px dock width. -->
     <div class="controls-bar">
-      <label>Model</label>
-      <select id="model-select" data-i18n-title="sidepanelModelLabel">
-        <option value="">Default</option>
-      </select>
-      <label>Persona</label>
-      <select id="persona-select" data-i18n-title="sidepanelPersonaLabel">
-        <option value="">Zo (default)</option>
-      </select>
-      <label>Mode</label>
-      <select id="mode-select" data-i18n-title="sidepanelModeLabel">
-        <option value="cobrowse">🤖 Co-browse</option>
-        <option value="ask">💬 Ask</option>
-        <option value="research">🔬 Research</option>
-        <option value="summarize">📝 Summarize</option>
-        <option value="extract">📥 Extract</option>
-        <option value="visual">🖼️ Visual</option>
-      </select>
+      <div class="sel-group sel-model">
+        <label>Model</label>
+        <select id="model-select" data-i18n-title="sidepanelModelLabel">
+          <option value="">Default</option>
+        </select>
+      </div>
+      <div class="sel-group sel-persona">
+        <label>Persona</label>
+        <select id="persona-select" data-i18n-title="sidepanelPersonaLabel">
+          <option value="">Zo (default)</option>
+        </select>
+      </div>
+      <div class="sel-group sel-mode">
+        <label>Mode</label>
+        <select id="mode-select" data-i18n-title="sidepanelModeLabel">
+          <option value="cobrowse">🤖 Co-browse</option>
+          <option value="ask">💬 Ask</option>
+          <option value="research">🔬 Research</option>
+          <option value="summarize">📝 Summarize</option>
+          <option value="extract">📥 Extract</option>
+          <option value="visual">🖼️ Visual</option>
+        </select>
+      </div>
       <button id="create-mode-btn" class="btn btn-ghost btn-sm create-mode-btn" data-i18n-title="sidepanelCreateMode">✦</button>
     </div>
 

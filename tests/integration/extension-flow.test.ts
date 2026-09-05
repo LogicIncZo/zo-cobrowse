@@ -29,7 +29,7 @@ import { describe, it, expect, beforeAll } from "bun:test";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 import { Window } from "happy-dom";
-import { createFakeChrome, createTabTarget, stubNonZeroRects, waitUntil, FakeEvent } from "../helpers/chrome-mock.ts";
+import { createFakeChrome, createTabTarget, stubNonZeroRects, waitUntil, FakeEvent, tabsCreateCalls } from "../helpers/chrome-mock.ts";
 import { ZoFetchMock, MOCK_ZO_TOKEN, sseResponse, sseEvent, deferredSse, zoSseText, jsonResponse } from "../helpers/zo-fetch-mock.ts";
 
 const PANEL_HTML = readFileSync(resolve(import.meta.dir, "../../extension/sidepanel.html"), "utf-8")
@@ -1033,6 +1033,113 @@ describe("ux — history (chat list) snippet + search highlight", () => {
     search.dispatchEvent(new panelWin.Event("input", { bubbles: true }));
     (panelWin.document.querySelector("#history-btn") as any).click();
   });
+});
+
+// ---- Conversation-id debug tooling (0.2.8.0): #con_… copy chip + ↗ Open in Zo
+
+function lastAssistantBubble(): any {
+  const bubbles = panelWin.document.querySelectorAll("#messages .msg-assistant");
+  return bubbles[bubbles.length - 1];
+}
+
+describe("ux — conversation-id chip + Open in Zo (0.2.8.0)", () => {
+  const CONV_ID = "con_ijM6neD936odlluG";
+
+  it("renders the #con_… chip from the STREAM_DONE echo, copies the full id, and opens Zo when zoWebOrigin is set", async () => {
+    await bus.storage.sync.set({ zoWebOrigin: "https://me.zo.computer/" });
+    newChat();
+    await waitUntil(() => panelWin.document.querySelector(".empty-state-chip"));
+    fm.handle((url: string) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      return sseResponse([
+        sseEvent("PartStartEvent", { index: 1, part: { part_kind: "text", content: "Plain answer." } }),
+        sseEvent("completed", {}),
+      ], { conversationId: CONV_ID });
+    });
+    await typeAndSend("hello there");
+    await waitTurnComplete();
+
+    const chip: any = lastAssistantBubble().querySelector(".msg-footer-convid");
+    expect(chip).toBeTruthy();
+    expect(chip.textContent).toBe("#con_ijM6ne…");        // truncateId display form
+    expect(chip.title).toContain(CONV_ID);                 // full id in the tooltip
+
+    // ↗ Open in Zo — gated on zoWebOrigin, URL built by lib/zo-links.js.
+    const openBtn = lastAssistantBubble().querySelector(".msg-footer-zolink");
+    expect(openBtn).toBeTruthy();
+    const baseline = tabsCreateCalls.length;
+    (openBtn as any).click();
+    await waitUntil(() => tabsCreateCalls.length > baseline, 3000);
+    expect(tabsCreateCalls[tabsCreateCalls.length - 1].url).toBe(
+      "https://me.zo.computer/?chat=con_ijM6neD936odlluG&t=chats"
+    );
+    // Cleanup: drop the mock-created tab so later tab-strip tests (GET_OPEN_TABS
+    // caps at STRIP_MAX_TABS, insertion-ordered) keep seeing the same strip.
+    const created = bus.tabs._tabs.find((t: any) => String(t.url || "").includes("me.zo.computer"));
+    if (created) bus.tabs._tabs.splice(bus.tabs._tabs.indexOf(created), 1);
+
+    // Click the chip → copies the FULL id (label flip = the Copy-path feedback).
+    chip.click();
+    await waitUntil(() => chip.textContent === "Copied ✓", 3000);
+    await waitUntil(() => chip.textContent === "#con_ijM6ne…", 3000);
+  }, 25000);
+
+  it("hides both affordances when the stream carries no conversation id", async () => {
+    await bus.storage.sync.set({ zoWebOrigin: "https://me.zo.computer/" });
+    newChat();
+    await waitUntil(() => panelWin.document.querySelector(".empty-state-chip"));
+    fm.handle((url: string) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      return sseResponse([
+        sseEvent("PartStartEvent", { index: 1, part: { part_kind: "text", content: "No id this time." } }),
+        sseEvent("completed", {}),
+      ]);
+    });
+    await typeAndSend("no id please");
+    await waitTurnComplete();
+    expect(lastAssistantBubble().querySelector(".msg-footer-convid")).toBeNull();
+    expect(lastAssistantBubble().querySelector(".msg-footer-zolink")).toBeNull();
+  }, 25000);
+
+  it("keeps the chip but drops ↗ when zoWebOrigin is unset", async () => {
+    await bus.storage.sync.set({ zoWebOrigin: "" });
+    newChat();
+    await waitUntil(() => panelWin.document.querySelector(".empty-state-chip"));
+    fm.handle((url: string) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      return sseResponse([
+        sseEvent("PartStartEvent", { index: 1, part: { part_kind: "text", content: "Id but no origin." } }),
+        sseEvent("completed", {}),
+      ], { conversationId: CONV_ID });
+    });
+    await typeAndSend("origin cleared");
+    await waitTurnComplete();
+    expect(lastAssistantBubble().querySelector(".msg-footer-convid")).toBeTruthy();
+    expect(lastAssistantBubble().querySelector(".msg-footer-zolink")).toBeNull();
+  }, 25000);
+
+  it("history cards expose copy-id + Open in Zo for chats with a thread id", async () => {
+    await bus.storage.sync.set({ zoWebOrigin: "https://me.zo.computer" });
+    (panelWin.document.querySelector("#history-btn") as any).click();
+    await waitUntil(() => panelWin.document.querySelector(".history-card"), 5000);
+    // The first card (most recent) is test 3's chat — its echo set zoThreadId.
+    const card: any = panelWin.document.querySelector(".history-card");
+    const copyIdBtn = [...card.querySelectorAll("button")].find((b: any) => b.textContent === "⧉");
+    expect(copyIdBtn).toBeTruthy();
+    expect(copyIdBtn.title).toContain(CONV_ID);
+    const openBtn = [...card.querySelectorAll("button")].find((b: any) => b.textContent === "↗");
+    expect(openBtn).toBeTruthy();
+    const baseline = tabsCreateCalls.length;
+    openBtn.click();
+    await waitUntil(() => tabsCreateCalls.length > baseline, 3000);
+    expect(tabsCreateCalls[tabsCreateCalls.length - 1].url).toBe(
+      "https://me.zo.computer/?chat=con_ijM6neD936odlluG&t=chats"
+    );
+    (panelWin.document.querySelector("#history-btn") as any).click();
+  }, 25000);
 });
 
 describe("theme live-sync (#65)", () => {

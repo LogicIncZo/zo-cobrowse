@@ -15,6 +15,7 @@ import { describePrompt } from './lib/prompt.js';
 import { assignRefs, ensureActiveTabRef, isBlankPage, thinTabExcerpts } from './lib/tab-contexts.js';
 import { visionModelSuggestion, modelVisionSupport, findModelEntry } from './lib/vision.js';
 import { extractUrls, MAX_LINK_CHIPS } from './lib/links.js';
+import { zoChatUrl, truncateId } from './lib/zo-links.js';
 import { WORKSPACE_ROOT, filterPickerEntries } from './lib/pickers.js';
 import { applyI18nDom } from './lib/i18n.js';
 import { handoffInstructions, runProgress } from './lib/handoff.js';
@@ -117,7 +118,10 @@ function showThemePopover() {
       const t = THEMES[key];
       const opt = document.createElement('button');
       opt.className = `theme-option${key === currentTheme ? ' selected' : ''}`;
-      opt.dataset.theme = key;
+      // No data-theme attribute here — [data-theme="…"] is the global
+      // variable-scope selector, so per-option attrs re-colored each label
+      // with its OWN theme's --text (dark themes = pale-on-light, invisible).
+      // The .theme-swatch <key> class already keys the swatch styling.
       opt.innerHTML = `<div class="theme-swatch ${key || 'system'}"></div><span class="theme-label">${t.icon} ${t.name}</span>`;
       opt.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -279,6 +283,11 @@ async function finishInit() {
         modeOverrides = changes[STORAGE_OVERRIDES_KEY].newValue || {};
         refreshPageContext().then(renderPromptInspector);
       }
+      // 0.2.8.0: follow Zo-web-origin changes live (drives ↗ Open in Zo on
+      // future footers; already-rendered chips keep their snapshot URL).
+      if (changes.zoWebOrigin) {
+        config.zoWebOrigin = changes.zoWebOrigin.newValue || '';
+      }
     });
     chrome.runtime.onMessage.addListener((msg) => {
       if (msg.type === 'PENDING_ZO_QUERY' && msg.text) {
@@ -298,7 +307,10 @@ async function finishInit() {
           activeHandoffRun = null;
           removeHandoffLine();
           const icon = { done: '✅', paused: '⏸️', aborted: '🛑', blocked: '⛔' }[run.status] || 'ℹ️';
-          const reason = run.stopReason ? ` — ${safeText(run.stopReason)}` : '';
+          // On done, the deliverable already rendered as the turn's answer —
+          // repeating run.stopReason here showed the digest twice, once with
+          // raw markdown (#138). Other statuses carry a real reason worth showing.
+          const reason = run.status !== 'done' && run.stopReason ? ` — ${safeText(run.stopReason)}` : '';
           addMessage('system', `${icon} Handoff ${run.status}${reason}`);
         }
       }
@@ -614,6 +626,12 @@ function bindEvents() {
     // Esc cancels an in-flight stream (Zo: "Press Esc to stop").
     if (e.key === 'Escape' && streamSession.active) { cancelStream(); e.preventDefault(); }
   });
+  // Esc works anywhere in the panel, not just with the composer focused
+  // (#133). Bubble phase: component Escape handlers (autocomplete popups,
+  // rename input, review card) run first — skip keys they consumed.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && streamSession.active && !e.defaultPrevented) cancelStream();
+  });
 
   // Mic button — STT
   if (micBtn) {
@@ -909,7 +927,7 @@ function renderCurrentConversation() {
   for (const msg of conv.messages) {
     const m = msg.role === 'assistant' ? healAssistantMessage(msg) : msg;
     const opts = m.role === 'assistant'
-      ? { timestamp: m.timestamp, durationMs: m.durationMs, contextTier: m.contextTier, contextReason: m.contextReason, screenshot: m.screenshot }
+      ? { timestamp: m.timestamp, durationMs: m.durationMs, contextTier: m.contextTier, contextReason: m.contextReason, screenshot: m.screenshot, conversationId: conv.zoThreadId || undefined }
       : {};
     const el = addMessageDOM(m.role, m.text, opts);
     if (m.role === 'assistant' && m.reasoning) addReasoningBubble(el, m.reasoning);
@@ -930,9 +948,11 @@ function renderCurrentConversation() {
 }
 
 async function startNewConversation() {
-  // The in-flight stream belongs to the OLD chat — cancel it (a new chat with
-  // a stale live bubble would be confusing).
-  cancelStream();
+  // The in-flight stream stays with the OLD chat and keeps accumulating in
+  // the background (#134, option A) — same contract as switching to another
+  // existing tab: pulsing dot on the old tab, chunks accumulate, actions
+  // park instead of auto-running. Killing it here would make the flagship
+  // "streams survive switches" behavior unreachable via the ＋ gesture.
   // Save current if it has messages
   const current = getActiveConversation();
   if (current && current.messages.length > 0) {
@@ -1097,7 +1117,9 @@ function renderChatTabs() {
     tab.setAttribute('role', 'tab');
     tab.setAttribute('aria-selected', String(id === activeId));
     tab.title = tabTitleFor(convo) + (id === streamingId ? ' — generating…' : '');
-    if (id === streamingId) {
+    if (id === streamingId && id !== activeId) {
+      // Pulsing dot marks BACKGROUND chats still generating (#135) — on the
+      // active tab the user is already watching the stream live.
       const dot = document.createElement('span');
       dot.className = 'chat-tab-stream-dot';
       tab.appendChild(dot);
@@ -1262,6 +1284,37 @@ function renderHistoryView() {
         exportConversation(item.id);
       });
 
+      // Conversation-id debug tooling (0.2.8.0): copy the chat's real Zo
+      // thread id + open it in Zo's web UI (only when zoWebOrigin is set).
+      // Same actions as the assistant footer; hidden without a thread id.
+      let copyIdBtn = null;
+      let openInZoBtn = null;
+      if (item.zoThreadId) {
+        copyIdBtn = document.createElement('button');
+        copyIdBtn.className = 'history-card-rename';
+        copyIdBtn.textContent = '⧉';
+        copyIdBtn.title = `${item.zoThreadId} — copy Zo conversation id`;
+        copyIdBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          try {
+            await navigator.clipboard.writeText(item.zoThreadId);
+            copyIdBtn.textContent = '✓';
+            setTimeout(() => { copyIdBtn.textContent = '⧉'; }, 1500);
+          } catch { /* clipboard unavailable */ }
+        });
+        const chatUrl = zoChatUrl(config.zoWebOrigin, item.zoThreadId);
+        if (chatUrl) {
+          openInZoBtn = document.createElement('button');
+          openInZoBtn.className = 'history-card-rename';
+          openInZoBtn.textContent = '↗';
+          openInZoBtn.title = 'Open in Zo';
+          openInZoBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            try { chrome.tabs.create({ url: chatUrl }); } catch { /* tabs unavailable */ }
+          });
+        }
+      }
+
       const deleteBtn = document.createElement('button');
       deleteBtn.className = 'history-card-delete';
       deleteBtn.textContent = '✕';
@@ -1277,6 +1330,8 @@ function renderHistoryView() {
       card.appendChild(metaEl);
       card.appendChild(renameBtn);
       card.appendChild(exportBtn);
+      if (copyIdBtn) card.appendChild(copyIdBtn);
+      if (openInZoBtn) card.appendChild(openInZoBtn);
       card.appendChild(deleteBtn);
 
       card.addEventListener('click', () => switchToConversation(item.id));
@@ -1610,7 +1665,10 @@ const ACTION_META = {
 
 function actionDetail(action) {
   if (action.response) return '';
-  if (action.type === 'fill_form') return action.values?.length ? `${action.values.length} fields` : '';
+  if (action.type === 'fill_form') {
+    const n = action.values?.length || 0;
+    return n ? `${n} ${n === 1 ? 'field' : 'fields'}` : '';
+  }
   return action.selector || action.url || action.value || action.ms || '';
 }
 
@@ -1694,7 +1752,7 @@ function relativeTime(ts, now = Date.now()) {
 // locally on the history entry (no backend).
 function addMessageFooter(parentMsgEl, opts = {}) {
   if (!parentMsgEl || parentMsgEl.querySelector('.msg-footer')) return null;
-  const { timestamp, modeName, modelName, durationMs, contextTier, contextReason, screenshot } = opts;
+  const { timestamp, modeName, modelName, durationMs, contextTier, contextReason, screenshot, conversationId } = opts;
   const footer = document.createElement('div');
   footer.className = 'msg-footer';
 
@@ -1749,6 +1807,40 @@ function addMessageFooter(parentMsgEl, opts = {}) {
     shotChip.textContent = '📷';
     shotChip.title = 'A page screenshot was attached to this turn';
     footer.appendChild(shotChip);
+  }
+
+  // Conversation-id debug chip (0.2.8.0): a muted `#con_…` chip that copies
+  // the chat's real Zo thread id (for bug reports) + ↗ Open in Zo when the
+  // user configured `zoWebOrigin`. Hidden entirely without an id — no dead
+  // affordances. Always the conversation's real Zo thread id, never a derived
+  // handoff run sessionId — that's the thread visible in Zo's web UI.
+  if (conversationId) {
+    const idChip = document.createElement('button');
+    idChip.type = 'button';
+    idChip.className = 'msg-footer-btn msg-footer-chip msg-footer-convid';
+    idChip.textContent = `#${truncateId(conversationId)}`;
+    idChip.title = `${conversationId} — click to copy`;
+    idChip.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(conversationId);
+        idChip.textContent = 'Copied ✓';
+        setTimeout(() => { idChip.textContent = `#${truncateId(conversationId)}`; }, 1500);
+      } catch { /* clipboard unavailable */ }
+    });
+    footer.appendChild(idChip);
+
+    const chatUrl = zoChatUrl(config.zoWebOrigin, conversationId);
+    if (chatUrl) {
+      const openBtn = document.createElement('button');
+      openBtn.type = 'button';
+      openBtn.className = 'msg-footer-btn msg-footer-zolink';
+      openBtn.textContent = '↗';
+      openBtn.title = 'Open in Zo';
+      openBtn.addEventListener('click', () => {
+        try { chrome.tabs.create({ url: chatUrl }); } catch { /* tabs unavailable */ }
+      });
+      footer.appendChild(openBtn);
+    }
   }
 
   if (timestamp) {
@@ -1900,6 +1992,14 @@ function renderFormReview(payload) {
     const fills = (payload.actions || []).filter((a) => a && (a.type === 'fill_form' || a.type === 'fill'));
     if (!fills.length) { resolve(null); return; }
     const rows = fillBatchRows(fills, payload.fields);
+    // One decision per turn: the Run All / Skip bar (for the same parked
+    // actions) must not compete with the review card's Fill / Cancel (#139).
+    const barWasHidden = actionsBar?.classList.contains('hidden');
+    actionsBar?.classList.add('hidden');
+    const settle = (value) => {
+      if (!barWasHidden && pendingActions) actionsBar?.classList.remove('hidden');
+      resolve(value);
+    };
     const host = document.createElement('div');
     host.className = 'msg form-review-card';
     let hostName = '';
@@ -1935,7 +2035,8 @@ function renderFormReview(payload) {
     confirm.className = 'btn btn-primary form-review-confirm';
     const cancel = document.createElement('button');
     cancel.className = 'btn btn-ghost form-review-cancel';
-    confirm.textContent = `Fill ${rows.filter((r) => !r.secret).length} fields`;
+    const fillCount = rows.filter((r) => !r.secret).length;
+    confirm.textContent = `Fill ${fillCount} ${fillCount === 1 ? 'field' : 'fields'}`;
     cancel.textContent = 'Cancel';
     confirm.addEventListener('click', () => {
       // Confirmed batch — same order/count as `fills`; edits mapped back via
@@ -1955,11 +2056,11 @@ function renderFormReview(payload) {
         else confirmed[row.ai] = { ...confirmed[row.ai], value: '' };
       }
       host.remove();
-      resolve(confirmed);
+      settle(confirmed);
     });
     cancel.addEventListener('click', () => {
       host.remove();
-      resolve(null);
+      settle(null);
     });
     host.append(confirm, cancel);
     msgsEl.appendChild(host);
@@ -2355,6 +2456,7 @@ function addMessageDOM(role, text, opts = {}) {
       contextTier: opts.contextTier,
       contextReason: opts.contextReason,
       screenshot: opts.screenshot,
+      conversationId: opts.conversationId,
     });
   }
 
@@ -2786,6 +2888,7 @@ function onComposerKeydownForTabs(e) {
     e.stopPropagation();
     selectTabAutocomplete(tabAcIndex);
   } else if (e.key === 'Escape') {
+    e.preventDefault(); // consumed — the panel-level Esc-to-stop (#133) must not also fire
     closeTabAutocomplete();
   }
 }
@@ -3072,6 +3175,7 @@ function onComposerKeydownForPickers(e) {
     e.stopPropagation();
     select(ac.index);
   } else if (e.key === 'Escape') {
+    e.preventDefault(); // consumed — the panel-level Esc-to-stop (#133) must not also fire
     closeAllPickerPopups();
   }
 }
@@ -4174,7 +4278,10 @@ function handleStreamMessage(msg) {
         // No streaming chunks — fallback to addMessage
         let fallbackEl = null;
         if (responseText) {
-          fallbackEl = addMessage('assistant', responseText);
+          // conversationId rides the opts so the fallback footer carries the
+          // conv-id chip too (the STREAM_DONE footer below no-ops — this one
+          // already rendered).
+          fallbackEl = addMessage('assistant', responseText, { conversationId: msg.conversationId || undefined });
           addReasoningBubble(fallbackEl, msg.reasoning);
         } else if (msg.actions?.length) {
           // Response is in actions — will be rendered by handleStreamActions
@@ -4215,6 +4322,7 @@ function handleStreamMessage(msg) {
           contextTier: streamSession.effectiveTier,
           contextReason: streamSession.contextReason,
           screenshot: streamSession.hadScreenshot,
+          conversationId: msg.conversationId || undefined,
         });
         // Code blocks in the final rendered markdown get their Copy buttons.
         const doneBody = streamSession.msgEl.querySelector('.msg-body');

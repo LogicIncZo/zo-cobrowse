@@ -60,4 +60,18 @@ open the side panel on a normal website.
 - [ ] **Reasoning streams inline (probe #110)** — on a thinking model (e.g. GLM), a hard
       question shows the 💭 trace growing DURING the stream, not only at the end.
 
+## 0.2.8 additions (conversation-id debug tooling, 0.2.8.0)
+
+- [ ] **`#con_…` conversation-id chip** — after any send, the assistant footer shows a
+      muted monospace chip with the truncated thread id; hover shows the FULL id;
+      click copies the full id (chip flips to "Copied ✓" briefly).
+- [ ] **↗ Open in Zo** — Settings → Connection → "Zo Web Origin": set it to your Zo
+      chat host (e.g. `https://<slug>.zo.computer`) and save; NEW assistant footers
+      show ↗ next to the chip; clicking opens `<origin>/?chat=<id>&t=chats` at the
+      right thread in Zo's web UI. Empty origin → ↗ never renders (chip still copies).
+- [ ] **History cards** — chats with a Zo thread show ⧉ (copy id) and ↗ (open in Zo)
+      beside ✎/⬇/🗑; both act on that conversation's thread id; ⧉ flips to ✓ on copy.
+- [ ] **Origin validation** — saving a garbage origin ("not a url") flags a clear
+      error and persists nothing; a valid http(s) URL saves with "✅ Saved!".
+
 Log results (pass/fail + commit SHA) in the release PR description.

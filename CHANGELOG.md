@@ -6,6 +6,83 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.2.8.0] — 2026-09-05
+
+### Added — conversation-id debug tooling (the 0.2.8 stabilization bash's enabler release)
+- **`#con_…` conversation-id chip on assistant footers.** Every assistant turn
+  whose conversation has a Zo thread id shows a muted chip with the truncated
+  id; hover reveals the full id; click copies it for bug reports. Always the
+  conversation's real Zo thread — never a derived handoff run sessionId.
+- **↗ Open in Zo.** When Settings → Connection → **Zo Web Origin** is
+  configured (the host of your Zo chat URL, e.g.
+  `https://<slug>.zo.computer` — not derivable from the API token, so
+  user-configured), assistant footers and history cards gain an ↗ action that
+  opens `https://<slug>.zo.computer/?chat=<conversation_id>&t=chats` — the
+  exact thread in Zo's web UI. Empty origin = no ↗ anywhere; the chip alone
+  still copies.
+- **History cards join in.** Chats with a Zo thread show ⧉ (copy id) and ↗
+  (open in Zo) beside ✎/⬇/🗑.
+- **`lib/zo-links.js`** — pure URL builder + id truncation with schema
+  contract (`tests/schemas/zo-links.ts`); ids must match the real `con_*`
+  shape, origins must parse as http(s); callers hide the affordance on
+  invalid input — no dead links.
+- **Settings** — "Zo Web Origin" field on the Connection card (synced, not a
+  credential); non-empty values must parse as http(s) or Save flags it.
+  Spec: `docs/superpowers/specs/2026-09-03-0.2.8-stabilization-slate-design.md`.
+
+## [0.2.7.1] — 2026-09-05
+
+### Fixed — stabilization round (2026-09-05 end-to-end + usability pass)
+- **Esc-to-stop works anywhere in the panel (#133).** The "Press Esc to stop"
+  gesture previously only fired while the composer was focused; focus leaves
+  the composer in common flows (clicking a message, a chat tab, a footer).
+  Esc now cancels the in-flight stream from the panel level; autocomplete
+  popups consume Esc first (closing the popup never cancels the stream).
+- **Chat-tab streaming dot is background-only (#135).** The pulsing dot now
+  marks only background chats that are still generating — it no longer
+  renders on the tab the user is already watching.
+- **＋ New chat no longer kills an in-flight stream (#134, option A).** The
+  stream backgrounds like any tab switch: pulsing dot on the old tab, chunks
+  accumulate, actions park instead of auto-running. The "streams survive
+  switches" behavior is no longer unreachable via the most obvious gesture.
+- **Handoff done no longer repeats the digest (#138).** The run-completion
+  status line is compact (`✅ Handoff done`); the deliverable renders once,
+  as the turn's answer. Previously the full done() response (with raw
+  markdown headings) rendered a second time inside the status line.
+- **Form review card finished (#139).** "Fill 1 field" plural fixed; the
+  Run All / Skip bar no longer competes with the card's Fill / Cancel (one
+  decision per turn); the card is finally styled — amber-bordered card,
+  reason chips as pills, consistent label+input rows (it previously rendered
+  with zero CSS).
+- **Header selectors legible at panel width (#140).** Model / Persona / Mode
+  are now stacked label-over-value groups with weighted widths — Mode (the
+  per-task switch) gets the widest group and reads in full at the ~400px
+  dock width; Persona (set-once) the narrowest.
+- **Popups follow the theme; theme menu readable (#141).** The select-shim,
+  `/` skills and `@` tab popups used undefined CSS tokens (`--bg-card`,
+  `--bg-secondary`) so they always rendered with dark fallbacks — now they
+  use `--bg-elevated` and follow light/sepia/forest/ocean themes. The theme
+  menu's unselected options were near-invisible for two stacked reasons:
+  muted label color, and each option carrying a `data-theme` attribute that
+  collided with the global `[data-theme="…"]` variable scopes — re-coloring
+  every label with its OWN theme's text (dark themes = pale-on-light).
+- **Emoji fallbacks (#142).** The UI font stacks now fall through to
+  'Apple Color Emoji' / 'Segoe UI Emoji' / 'Noto Color Emoji' so UI emoji
+  render on systems that have an emoji font but don't alias it by default
+  (common on Linux); also defined the phantom `--font` token.
+
+### Added — regression coverage promoted from the stabilization pass (#137)
+- Four new e2e specs: `19-error-paths` (Esc cancel incl. focus-outside, 401
+  error card, failed-action UX, conversation threading), `20-chat-tabs-parking`
+  (streams survive switches AND ＋; backgrounded actions park — page untouched
+  until Run All), `21-history-ops` (rename / export download / delete incl.
+  the active chat), `22-bang-commands` (`!summarize`, `!context`, `!handoff`
+  stop, digest-renders-once). Mock Zo server gained `unauthorized` (401) and
+  `fill-slow` (slow fill envelope) scenarios.
+- Drift: Zo pruned its MCP catalog 93→79 tools (removed `use_integration` et
+  al.); baselines re-pinned (#136) and the snapshot floor test loosened
+  accordingly (the required-tools loop is the real gate).
+
 ## [0.2.7] — 2026-09-02
 
 ### Changed — Lane B: cold-start lazy-import trim measured and rejected (2b)

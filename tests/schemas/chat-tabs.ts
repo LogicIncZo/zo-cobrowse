@@ -74,6 +74,9 @@ export const ChatSummarySchema = z.object({
   updatedAt: z.number(),
   messageCount: z.number().int().min(0),
   isActive: z.boolean(),
+  /** Zo thread id when the conversation has one (drives the history card's
+   *  copy-id / Open-in-Zo actions, 0.2.8.0). Absent otherwise. */
+  zoThreadId: z.string().optional(),
 });
 export type ChatSummary = z.infer<typeof ChatSummarySchema>;
 export const ChatSummaryArray = z.array(ChatSummarySchema);

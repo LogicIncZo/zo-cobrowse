@@ -24,12 +24,14 @@ feature/*  fix/*  chore/*   ← one branch per unit of work, branched from dev
 4. **Releases are deliberate, not automatic.** To cut a release from `main`:
    ```bash
    git checkout main && git pull
-   git tag vX.Y.Z && git push origin vX.Y.Z
+   git tag vX.Y.Z.W && git push origin vX.Y.Z.W
    ```
    The tag triggers `.github/workflows/release.yml`, which re-verifies the tree, builds the zip, and publishes a GitHub Release with auto-generated notes.
 5. **Never commit secrets.** API tokens live in `chrome.storage.local` at runtime, not in the repo.
 
 > Merging to `main` does **not** publish a release — it only keeps `main` releasable. The `v*` tag is the release trigger.
+
+**Versioning:** 4-segment `MAJOR.MINOR.PATCH.STAB` — SemVer on the first three segments plus a Chrome-native fourth that carries **stabilization fixes only** (never features — those bump MINOR, breaking changes MAJOR). `manifest.json` `version`/`version_name`, `package.json`, and the git tag all use the full four segments (e.g. `0.2.8.1` / `v0.2.8.1`); `release.yml` triggers on any `v*` tag. During a stabilization bash (e.g. 0.2.8) each verified fix ships as its own `.N` point release — one fix = one release.
 
 ## Development Setup
 

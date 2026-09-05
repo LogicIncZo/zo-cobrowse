@@ -142,6 +142,9 @@ export function searchConversations(convos, query, { activeId = null } = {}) {
       updatedAt: c.updatedAt || 0,
       messageCount: Array.isArray(c.messages) ? c.messages.length : 0,
       isActive: c.id === activeId,
+      // Zo thread id when present — drives the history card's copy-id /
+      // Open-in-Zo actions (0.2.8.0). Omitted otherwise.
+      ...(txt(c.zoThreadId) ? { zoThreadId: txt(c.zoThreadId) } : {}),
     }));
 }
 

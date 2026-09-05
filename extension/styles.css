@@ -35,9 +35,12 @@
 
 /* ── Dark (default) ── */
 :root {
-  --font-display: 'Hanken Grotesk', system-ui, sans-serif;
-  --font-ui: 'Hanken Grotesk', system-ui, sans-serif;
-  --font-code: 'JetBrains Mono', ui-monospace, monospace;
+  /* #142: explicit emoji fallbacks — on systems without a color-emoji font
+     aliased by default (common on Linux), UI emoji rendered as tofu boxes. */
+  --font-display: 'Hanken Grotesk', system-ui, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
+  --font-ui: 'Hanken Grotesk', system-ui, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
+  --font-code: 'JetBrains Mono', ui-monospace, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', monospace;
+  --font: var(--font-ui); /* alias — some rules consume --font directly */
 
   --bg-deep: #070914;
   --bg-surface: #0f1128;
@@ -375,7 +378,8 @@
   border: 1.5px solid transparent;
   transition: background 0.12s, border-color 0.12s;
   background: transparent;
-  color: var(--text-muted);
+  color: var(--text); /* options ARE the choice list — muted text made the
+                        unselected themes near-invisible, esp. in light (#141) */
   font-size: 10px;
   font-family: var(--font);
 }
@@ -544,11 +548,11 @@ input, textarea, select {
   white-space: nowrap;
   transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
 }
-.chat-tab:hover { color: var(--text); background: var(--bg-secondary, rgba(255,255,255,0.03)); }
+.chat-tab:hover { color: var(--text); background: var(--bg-hover, rgba(255,255,255,0.03)); }
 .chat-tab-active {
   color: var(--text);
   border-bottom-color: var(--amber);
-  background: var(--bg-secondary, rgba(255,255,255,0.03));
+  background: var(--bg-hover, rgba(255,255,255,0.03));
 }
 .chat-tab-label {
   overflow: hidden;
@@ -688,6 +692,18 @@ input, textarea, select {
   letter-spacing: 0.06em;
   color: var(--text-faint);
 }
+/* #140: stacked label-over-value groups; MODE gets the widest group (it is
+   switched per task and its value must read at ~400px dock width), PERSONA
+   the narrowest (set once, editable in Settings). */
+.controls-bar .sel-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.controls-bar .sel-model { flex: 1 1 0; }
+.controls-bar .sel-persona { flex: 0.62 1 0; }
+.controls-bar .sel-mode { flex: 1.3 1 0; }
 .controls-bar select {
   flex: 1;
   min-width: 0;
@@ -752,7 +768,7 @@ input, textarea, select {
   max-height: 320px;
   overflow-y: auto;
   padding: 4px;
-  background: var(--bg-card, #161a22);
+  background: var(--bg-elevated, #161a22);
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.4));
@@ -2278,6 +2294,11 @@ body.options-page {
   border: 1px solid var(--zo-border);
   white-space: nowrap;
 }
+/* Conversation-id debug chip (0.2.8.0) — monospace so it reads as an id. */
+.msg-footer-convid {
+  font-family: var(--mono-font, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 10px;
+}
 .msg-footer-time {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
@@ -2481,7 +2502,7 @@ body.options-page {
   max-height: 320px;
   overflow: auto;
   z-index: 40;
-  background: var(--bg-secondary, #15182e);
+  background: var(--bg-elevated, #15182e);
   border: 1px solid var(--border, #333);
   border-radius: var(--radius-md, 10px);
   box-shadow: var(--shadow-md, 0 4px 12px rgba(0,0,0,0.5));
@@ -2808,4 +2829,56 @@ body.options-page {
   font-size: 11px;
   padding: 2px 10px;
   cursor: pointer;
+}
+
+/* ── Sensitive-fill review card (#26) — #139: consistent row grammar.
+   Previously the card rendered with zero CSS: reason chips looked like
+   stray bold lines and rows had no shared structure. ── */
+.form-review-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--amber);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  margin: 6px 0;
+}
+.form-review-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.form-review-chip {
+  display: inline-block;
+  width: fit-content;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--amber-glow);
+  border: 1px solid var(--amber-muted);
+  color: var(--text);
+}
+.form-review-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+}
+.form-review-row input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 3px 6px;
+  font-size: 12px;
+  color: var(--text);
+}
+.form-review-row input:focus {
+  outline: none;
+  border-color: var(--amber);
+  box-shadow: 0 0 0 2px var(--amber-glow);
 }

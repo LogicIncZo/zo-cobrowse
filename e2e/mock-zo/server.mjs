@@ -66,7 +66,7 @@ async function streamSse(res, blocks, { delayMs = 60 } = {}) {
     "content-type": "text/event-stream",
     "cache-control": "no-cache",
     "access-control-allow-origin": "*",
-    "x-conversation-id": "e2e-conv-1",
+    "x-conversation-id": "con_e2e-conv-1",
   });
   for (const block of blocks) {
     res.write(block);
@@ -107,12 +107,14 @@ function pickScenario(input) {
   if (q.includes("then click")) return "fill-then-click";
   if (q.includes("application")) return "app-section-1";
   if (q.includes("continue") || q.includes("next section")) return "app-section-2";
+  if (q.includes("slow fill")) return "fill-slow";
   if (q.includes("fill")) return "fill";
   if (q.includes("click")) return "click";
   if (q.includes("scroll")) return "scroll";
   if (q.includes("extract")) return "extract";
   if (q.includes("links")) return "links";
   if (q.includes("error") || q.includes("fail")) return "error";
+  if (q.includes("unauthorized")) return "unauthorized";
   if (q.includes("navigate")) return "navigate";
   return "prose";
 }
@@ -503,6 +505,23 @@ const server = http.createServer(async (req, res) => {
         [thinkingStart("Searching the fixture site… "), ...proseChunks(text).map(textDelta), completed()],
         { delayMs: q_slow(body.input) ? 350 : 60 },
       );
+    }
+    if (scenario === "unauthorized") {
+      // 401 — non-retriable auth failure. The panel must render an error card
+      // (not hang, not retry-loop).
+      res.writeHead(401, { "content-type": "application/json", ...cors });
+      return res.end(JSON.stringify({ error: "invalid token" }));
+    }
+    if (scenario === "fill-slow") {
+      // Exploratory: a fill envelope that takes ~2s to finish streaming, so
+      // STREAM_DONE lands well after the panel switched to another chat.
+      const envelope = JSON.stringify({
+        actions: [
+          { type: "fill", selector: "#name", value: "Background Fill" },
+          { type: "done", response: "Filled the name field." },
+        ],
+      });
+      return streamSse(res, [textStart(envelope), completed()], { delayMs: 700 });
     }
     if (scenario === "error") {
       res.writeHead(200, { "content-type": "text/event-stream", ...cors });
