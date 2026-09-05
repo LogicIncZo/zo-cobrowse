@@ -92,6 +92,6 @@ test.describe("error & cancel paths", () => {
     const asks = await recordedAsks();
     expect(asks.length).toBeGreaterThanOrEqual(2);
     const [, second] = asks.slice(-2);
-    expect(second.body.conversation_id).toBe("e2e-conv-1");
+    expect(second.body.conversation_id).toBe("con_e2e-conv-1");
   });
 });

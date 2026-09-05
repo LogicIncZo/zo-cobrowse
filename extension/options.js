@@ -140,6 +140,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const tokenInput = document.getElementById('access-token');
   const apiEndpointInput = document.getElementById('api-endpoint');
   const spaceEndpointInput = document.getElementById('space-endpoint');
+  const zoWebOriginInput = document.getElementById('zo-web-origin');
   const modelStatus = document.getElementById('model-status');
   const themeSelect = document.getElementById(OPTIONS_THEME_SELECTOR);
 
@@ -269,7 +270,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   chrome.storage.local.get(['zoAccessToken', 'zoSpaceEndpoint'], (localResult) => {
     chrome.storage.sync.get([
       'zoApiUrl', 'zoModel', 'zoPersonaId',
-      'zoQuickActions',
+      'zoQuickActions', 'zoWebOrigin',
       'zoTtsLang', 'zoTtsRate', 'zoTtsAutoRead', 'enabledMenus', 'enableScreenshots', 'enableWriteAssist'
     ], (syncResult) => {
       const token = localResult.zoAccessToken;
@@ -279,6 +280,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Restore BEFORE the model/persona loaders run — they derive their URLs
       // from this field (QA finding B).
       if (apiEndpointInput && syncResult.zoApiUrl) apiEndpointInput.value = syncResult.zoApiUrl;
+      if (zoWebOriginInput && syncResult.zoWebOrigin) zoWebOriginInput.value = syncResult.zoWebOrigin;
 
       // Persona — single default; the side panel's Mode selector does the routing.
       const personaId = syncResult.zoPersonaId || '';
@@ -377,6 +379,21 @@ document.addEventListener('DOMContentLoaded', async () => {
       statusMsg.className = 'inline-status err';
       return;
     }
+    // Zo web origin (0.2.8.0): optional, but a non-empty value must be a real
+    // http(s) URL — it becomes the base of "Open in Zo" deep links.
+    const zoWebOrigin = (zoWebOriginInput?.value || '').trim();
+    if (zoWebOrigin) {
+      let originOk = false;
+      try {
+        const u = new URL(zoWebOrigin);
+        originOk = u.protocol === 'http:' || u.protocol === 'https:';
+      } catch { /* not a URL */ }
+      if (!originOk) {
+        statusMsg.textContent = 'Zo Web Origin must be a valid http(s) URL (e.g. https://cashlessconsumer.zo.computer), or empty to disable.';
+        statusMsg.className = 'inline-status err';
+        return;
+      }
+    }
     // Store sensitive data separately in storage.local (not synced across devices)
     chrome.storage.local.set({
       zoAccessToken: token,
@@ -385,6 +402,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Non-sensitive config stays in storage.sync
       chrome.storage.sync.set({
         zoApiUrl: (apiEndpointInput?.value || '').trim() || 'https://api.zo.computer/zo/ask',
+        zoWebOrigin,
         zoModel: getModelValue(),
         zoPersonaId: personaSelect.value,
         zoQuickActions: quickActions,

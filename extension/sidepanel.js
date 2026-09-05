@@ -15,6 +15,7 @@ import { describePrompt } from './lib/prompt.js';
 import { assignRefs, ensureActiveTabRef, isBlankPage, thinTabExcerpts } from './lib/tab-contexts.js';
 import { visionModelSuggestion, modelVisionSupport, findModelEntry } from './lib/vision.js';
 import { extractUrls, MAX_LINK_CHIPS } from './lib/links.js';
+import { zoChatUrl, truncateId } from './lib/zo-links.js';
 import { WORKSPACE_ROOT, filterPickerEntries } from './lib/pickers.js';
 import { applyI18nDom } from './lib/i18n.js';
 import { handoffInstructions, runProgress } from './lib/handoff.js';
@@ -281,6 +282,11 @@ async function finishInit() {
       if (changes[STORAGE_OVERRIDES_KEY]) {
         modeOverrides = changes[STORAGE_OVERRIDES_KEY].newValue || {};
         refreshPageContext().then(renderPromptInspector);
+      }
+      // 0.2.8.0: follow Zo-web-origin changes live (drives ↗ Open in Zo on
+      // future footers; already-rendered chips keep their snapshot URL).
+      if (changes.zoWebOrigin) {
+        config.zoWebOrigin = changes.zoWebOrigin.newValue || '';
       }
     });
     chrome.runtime.onMessage.addListener((msg) => {
@@ -921,7 +927,7 @@ function renderCurrentConversation() {
   for (const msg of conv.messages) {
     const m = msg.role === 'assistant' ? healAssistantMessage(msg) : msg;
     const opts = m.role === 'assistant'
-      ? { timestamp: m.timestamp, durationMs: m.durationMs, contextTier: m.contextTier, contextReason: m.contextReason, screenshot: m.screenshot }
+      ? { timestamp: m.timestamp, durationMs: m.durationMs, contextTier: m.contextTier, contextReason: m.contextReason, screenshot: m.screenshot, conversationId: conv.zoThreadId || undefined }
       : {};
     const el = addMessageDOM(m.role, m.text, opts);
     if (m.role === 'assistant' && m.reasoning) addReasoningBubble(el, m.reasoning);
@@ -1278,6 +1284,37 @@ function renderHistoryView() {
         exportConversation(item.id);
       });
 
+      // Conversation-id debug tooling (0.2.8.0): copy the chat's real Zo
+      // thread id + open it in Zo's web UI (only when zoWebOrigin is set).
+      // Same actions as the assistant footer; hidden without a thread id.
+      let copyIdBtn = null;
+      let openInZoBtn = null;
+      if (item.zoThreadId) {
+        copyIdBtn = document.createElement('button');
+        copyIdBtn.className = 'history-card-rename';
+        copyIdBtn.textContent = '⧉';
+        copyIdBtn.title = `${item.zoThreadId} — copy Zo conversation id`;
+        copyIdBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          try {
+            await navigator.clipboard.writeText(item.zoThreadId);
+            copyIdBtn.textContent = '✓';
+            setTimeout(() => { copyIdBtn.textContent = '⧉'; }, 1500);
+          } catch { /* clipboard unavailable */ }
+        });
+        const chatUrl = zoChatUrl(config.zoWebOrigin, item.zoThreadId);
+        if (chatUrl) {
+          openInZoBtn = document.createElement('button');
+          openInZoBtn.className = 'history-card-rename';
+          openInZoBtn.textContent = '↗';
+          openInZoBtn.title = 'Open in Zo';
+          openInZoBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            try { chrome.tabs.create({ url: chatUrl }); } catch { /* tabs unavailable */ }
+          });
+        }
+      }
+
       const deleteBtn = document.createElement('button');
       deleteBtn.className = 'history-card-delete';
       deleteBtn.textContent = '✕';
@@ -1293,6 +1330,8 @@ function renderHistoryView() {
       card.appendChild(metaEl);
       card.appendChild(renameBtn);
       card.appendChild(exportBtn);
+      if (copyIdBtn) card.appendChild(copyIdBtn);
+      if (openInZoBtn) card.appendChild(openInZoBtn);
       card.appendChild(deleteBtn);
 
       card.addEventListener('click', () => switchToConversation(item.id));
@@ -1713,7 +1752,7 @@ function relativeTime(ts, now = Date.now()) {
 // locally on the history entry (no backend).
 function addMessageFooter(parentMsgEl, opts = {}) {
   if (!parentMsgEl || parentMsgEl.querySelector('.msg-footer')) return null;
-  const { timestamp, modeName, modelName, durationMs, contextTier, contextReason, screenshot } = opts;
+  const { timestamp, modeName, modelName, durationMs, contextTier, contextReason, screenshot, conversationId } = opts;
   const footer = document.createElement('div');
   footer.className = 'msg-footer';
 
@@ -1768,6 +1807,40 @@ function addMessageFooter(parentMsgEl, opts = {}) {
     shotChip.textContent = '📷';
     shotChip.title = 'A page screenshot was attached to this turn';
     footer.appendChild(shotChip);
+  }
+
+  // Conversation-id debug chip (0.2.8.0): a muted `#con_…` chip that copies
+  // the chat's real Zo thread id (for bug reports) + ↗ Open in Zo when the
+  // user configured `zoWebOrigin`. Hidden entirely without an id — no dead
+  // affordances. Always the conversation's real Zo thread id, never a derived
+  // handoff run sessionId — that's the thread visible in Zo's web UI.
+  if (conversationId) {
+    const idChip = document.createElement('button');
+    idChip.type = 'button';
+    idChip.className = 'msg-footer-btn msg-footer-chip msg-footer-convid';
+    idChip.textContent = `#${truncateId(conversationId)}`;
+    idChip.title = `${conversationId} — click to copy`;
+    idChip.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(conversationId);
+        idChip.textContent = 'Copied ✓';
+        setTimeout(() => { idChip.textContent = `#${truncateId(conversationId)}`; }, 1500);
+      } catch { /* clipboard unavailable */ }
+    });
+    footer.appendChild(idChip);
+
+    const chatUrl = zoChatUrl(config.zoWebOrigin, conversationId);
+    if (chatUrl) {
+      const openBtn = document.createElement('button');
+      openBtn.type = 'button';
+      openBtn.className = 'msg-footer-btn msg-footer-zolink';
+      openBtn.textContent = '↗';
+      openBtn.title = 'Open in Zo';
+      openBtn.addEventListener('click', () => {
+        try { chrome.tabs.create({ url: chatUrl }); } catch { /* tabs unavailable */ }
+      });
+      footer.appendChild(openBtn);
+    }
   }
 
   if (timestamp) {
@@ -2383,6 +2456,7 @@ function addMessageDOM(role, text, opts = {}) {
       contextTier: opts.contextTier,
       contextReason: opts.contextReason,
       screenshot: opts.screenshot,
+      conversationId: opts.conversationId,
     });
   }
 
@@ -4204,7 +4278,10 @@ function handleStreamMessage(msg) {
         // No streaming chunks — fallback to addMessage
         let fallbackEl = null;
         if (responseText) {
-          fallbackEl = addMessage('assistant', responseText);
+          // conversationId rides the opts so the fallback footer carries the
+          // conv-id chip too (the STREAM_DONE footer below no-ops — this one
+          // already rendered).
+          fallbackEl = addMessage('assistant', responseText, { conversationId: msg.conversationId || undefined });
           addReasoningBubble(fallbackEl, msg.reasoning);
         } else if (msg.actions?.length) {
           // Response is in actions — will be rendered by handleStreamActions
@@ -4245,6 +4322,7 @@ function handleStreamMessage(msg) {
           contextTier: streamSession.effectiveTier,
           contextReason: streamSession.contextReason,
           screenshot: streamSession.hadScreenshot,
+          conversationId: msg.conversationId || undefined,
         });
         // Code blocks in the final rendered markdown get their Copy buttons.
         const doneBody = streamSession.msgEl.querySelector('.msg-body');
