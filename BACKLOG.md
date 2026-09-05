@@ -1,11 +1,11 @@
 # Zo Co-browse — Backlog
 
-> Updated 2026-09-05 — **v0.2.7.1 stabilization round** in PR (`fix/0.2.7.1-stabilization` → `dev`): 2026-09-05 end-to-end pass (full suites + exploratory e2e) found 3 product bugs + 2 housekeeping items, all filed on the `0.2.7.x` milestone; fixes for #133/#135/#138/#139 + regression specs (#137) + drift re-pin (#136) ship in 0.2.7.1. Usability-review findings (#138–#142) split: #139/#138 fixed now; #140/#141/#142 (header-select truncation, popup theme/contrast, emoji tofu) = 0.2.7.2 polish candidates. #134 (＋ button cancels stream) awaits an owner A/B call. v0.2.6 + v0.2.7 tagged & released earlier (see 🎯 0.2.7 below); Tier-1 carry-overs (#19/#10/#29) + #46–#54 stay in 0.3.0 planning; #11 store listing its own milestone.
+> Updated 2026-09-05 — **0.2.8 = STABILIZATION BASH underway**: the enabler release **v0.2.8.0** ships the conversation-id debug tooling (`lib/zo-links.js`, Zo Web Origin setting, `#con_…` copy chip + ↗ Open-in-Zo on assistant footers + history cards) — the triage tool for the rest of the bash (spec: `docs/superpowers/specs/2026-09-03-0.2.8-stabilization-slate-design.md`, PR #132). **v0.2.7.1 stabilization round** shipped earlier today: fixes for #133/#135/#138/#139 + regression specs (#137) + drift re-pin (#136); #140/#141/#142 = 0.2.7.2 polish candidates; #134 awaits an owner A/B call. v0.2.6 + v0.2.7 tagged & released earlier (see 🎯 0.2.7 below); Tier-1 carry-overs (#19/#10/#29) + #46–#54 stay in **0.9.0** planning; #11 store listing its own milestone.
 
 ## Current state
 
 - **Branches:** git-flow (`dev` integration, `main` releases); local branch tree pruned 2026-08-28 after v0.2.0 (15 merged/stale branches deleted)
-- **Tests:** ✅ **1096 pass / 0 fail** (49 files, 3119 expect() calls) + 34 Playwright e2e across 17 numbered specs (+2 demo specs)
+- **Tests:** ✅ **1116 pass / 0 fail** (50 files, 3175 expect() calls) + 53 Playwright e2e across 18 numbered specs (+2 demo specs)
 - **Loop engineering:** `bun run verify` gate + committed hard-gate pre-commit hook (`bun run setup-hooks` to install); lint now also gates version-sync (package.json ↔ manifest) and the docs-changelog mirror
 - **CI/CD:** CI runs on every branch push + PR to `main` (tests + transpile + release checks + zip artifact); `.github/workflows/release.yml` publishes `v*` tag releases (used for v0.0.2)
 - **Streaming:** hardened end-to-end (sessionId isolation, port-disconnect safety, retry correctness — QA finding D fixed: the Reconnecting banner now actually shows; 60s liveness timeout). **Streaming reasoning live-verified 2026-08-31** (incremental; probe committed)
