@@ -8,6 +8,26 @@ This page mirrors everything **unreleased** on `dev`.
 
 
 
+## [0.2.7.1] — 2026-09-05
+
+### Fixed — stabilization round (2026-09-05 end-to-end pass)
+- **Esc-to-stop works anywhere in the panel (#133).** The "Press Esc to stop"
+  gesture previously only fired while the composer was focused. Esc now
+  cancels the in-flight stream from the panel level; autocomplete popups
+  consume Esc first (closing a popup never cancels the stream).
+- **Chat-tab streaming dot is background-only (#135)** — no longer renders on
+  the tab the user is already watching.
+- **Handoff done no longer repeats the digest (#138)** — the completion status
+  line is compact; the deliverable renders once, as the turn's answer.
+- **"Fill 1 fields" → "Fill 1 field" (#139)** — plural fixed on the review
+  confirm button and the fill_form card meta.
+
+### Added — regression coverage (#137)
+- e2e specs `19-error-paths`, `20-chat-tabs-parking`, `21-history-ops`,
+  `22-bang-commands`; mock Zo `unauthorized` (401) + `fill-slow` scenarios.
+- Drift: Zo MCP catalog pruned 93→79 tools upstream; baselines re-pinned
+  (#136), snapshot floor test loosened (required-tools loop is the real gate).
+
 ## [0.2.5] — 2026-08-30
 
 ### Changed — mode surface rationalized (5 modes, leaner prompts)

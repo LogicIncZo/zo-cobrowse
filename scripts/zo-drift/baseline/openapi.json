@@ -1210,6 +1210,74 @@
             "title": "Cached Write Tok Price",
             "description": "Price per cached-write token (cents)"
           },
+          "promotion_ends_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Promotion Ends At",
+            "description": "Exclusive UTC cutoff for temporary promotional pricing"
+          },
+          "promotion_discount_percent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Promotion Discount Percent",
+            "description": "Discount shown in the model picker during the promotion"
+          },
+          "promotional_input_tok_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Promotional Input Tok Price"
+          },
+          "promotional_output_tok_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Promotional Output Tok Price"
+          },
+          "promotional_cached_read_tok_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Promotional Cached Read Tok Price"
+          },
+          "promotional_cached_write_tok_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Promotional Cached Write Tok Price"
+          },
           "input_audio_minutes_price": {
             "anyOf": [
               {
