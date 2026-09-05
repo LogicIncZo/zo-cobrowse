@@ -88,7 +88,9 @@ test.describe("zo-links (0.2.8.0)", () => {
     await page.goto(`chrome-extension://${h.extensionId}/options.html`);
 
     // Non-empty must be a real http(s) URL — Save flags it, nothing persists.
-    await page.locator("#zo-web-origin").fill("not a url");
+    // ("not a url" would be blocked natively by the type=url input before the
+    // form ever submits; ftp:// passes native validation but fails our check.)
+    await page.locator("#zo-web-origin").fill("ftp://example.com");
     await page.locator("#card-connection button[type=submit]").click();
     await expect(page.locator("#status-message")).toContainText("Zo Web Origin");
 
