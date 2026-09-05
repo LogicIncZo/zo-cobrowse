@@ -40,7 +40,7 @@ test.describe("zo-links (0.2.8.0)", () => {
     await waitForTurnComplete(h.panel, 20_000);
 
     const chip = h.panel.locator("#messages .msg-assistant .msg-footer-convid").last();
-    await expect(chip).toHaveText("#con_e2e-c…"); // truncateId display form
+    await expect(chip).toHaveText("#con_e2e-co…"); // truncateId display form
     expect(await chip.getAttribute("title")).toContain("con_e2e-conv-1");
 
     // Click → real clipboard write of the FULL id.
