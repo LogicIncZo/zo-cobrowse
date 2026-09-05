@@ -19,6 +19,9 @@ test.describe("form-fill (#26)", () => {
       // Only the non-secret row is editable — password + card are "left for you".
       await expect(card.locator("input")).toHaveCount(1);
       await expect(card.locator("input[data-target='Email']")).toHaveValue("e2e@example.com");
+      // One decision per turn (#139): the Run All / Skip bar must NOT compete
+      // with the review card's Fill / Cancel.
+      await expect(h.panel.locator("#actions-bar")).toBeHidden();
 
       // Nothing was filled yet — the page stays untouched until confirm.
       await expect(h.site.locator("#email")).toHaveValue("");
