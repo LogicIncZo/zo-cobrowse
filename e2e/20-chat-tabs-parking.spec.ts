@@ -58,6 +58,24 @@ test.describe("chat tabs mid-stream", () => {
     await expect(h.panel.locator("#query-input")).toBeEnabled();
   });
 
+  test("＋ new chat during a stream BACKGROUNDS it (#134 option A) — dot, accumulation, no cancel", async () => {
+    // Slow stream in chat A, then click ＋ (new chat B) mid-stream.
+    await sendQuery(h.panel, "answer slowly: keep streaming across new chat");
+    await expect(h.panel.locator("#messages .msg-streaming-text").first()).toBeVisible({ timeout: 15_000 });
+    await h.panel.locator("#new-chat-btn").click();
+    await h.panel.waitForTimeout(500);
+    // New chat is active and empty; the streaming chat is a background tab
+    // with the pulsing dot — the stream was NOT cancelled.
+    await expect(h.panel.locator("#messages .msg-streaming-text")).toHaveCount(0);
+    await expect(h.panel.locator("#chat-tabs .chat-tab-stream-dot").first()).toBeVisible({ timeout: 5_000 });
+    // Wait out the stream, switch back to the old chat: answer intact.
+    await h.panel.waitForTimeout(6000);
+    await clickTab(0);
+    await h.panel.waitForTimeout(500);
+    await expect(h.panel.locator("#messages .msg-assistant .msg-body").last()).toContainText("mock answer", { timeout: 15_000 });
+    await expect(h.panel.locator("#query-input")).toBeEnabled();
+  });
+
   test("actions in a backgrounded chat park; the page is untouched until the user runs them", async () => {
     // Site is on form.html; chat 1 is active. Arm a SLOW fill turn (~0.7s of
     // streaming) so STREAM_DONE lands after the switch to chat 2.

@@ -117,7 +117,10 @@ function showThemePopover() {
       const t = THEMES[key];
       const opt = document.createElement('button');
       opt.className = `theme-option${key === currentTheme ? ' selected' : ''}`;
-      opt.dataset.theme = key;
+      // No data-theme attribute here — [data-theme="…"] is the global
+      // variable-scope selector, so per-option attrs re-colored each label
+      // with its OWN theme's --text (dark themes = pale-on-light, invisible).
+      // The .theme-swatch <key> class already keys the swatch styling.
       opt.innerHTML = `<div class="theme-swatch ${key || 'system'}"></div><span class="theme-label">${t.icon} ${t.name}</span>`;
       opt.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -939,9 +942,11 @@ function renderCurrentConversation() {
 }
 
 async function startNewConversation() {
-  // The in-flight stream belongs to the OLD chat — cancel it (a new chat with
-  // a stale live bubble would be confusing).
-  cancelStream();
+  // The in-flight stream stays with the OLD chat and keeps accumulating in
+  // the background (#134, option A) — same contract as switching to another
+  // existing tab: pulsing dot on the old tab, chunks accumulate, actions
+  // park instead of auto-running. Killing it here would make the flagship
+  // "streams survive switches" behavior unreachable via the ＋ gesture.
   // Save current if it has messages
   const current = getActiveConversation();
   if (current && current.messages.length > 0) {
@@ -1914,6 +1919,14 @@ function renderFormReview(payload) {
     const fills = (payload.actions || []).filter((a) => a && (a.type === 'fill_form' || a.type === 'fill'));
     if (!fills.length) { resolve(null); return; }
     const rows = fillBatchRows(fills, payload.fields);
+    // One decision per turn: the Run All / Skip bar (for the same parked
+    // actions) must not compete with the review card's Fill / Cancel (#139).
+    const barWasHidden = actionsBar?.classList.contains('hidden');
+    actionsBar?.classList.add('hidden');
+    const settle = (value) => {
+      if (!barWasHidden && pendingActions) actionsBar?.classList.remove('hidden');
+      resolve(value);
+    };
     const host = document.createElement('div');
     host.className = 'msg form-review-card';
     let hostName = '';
@@ -1970,11 +1983,11 @@ function renderFormReview(payload) {
         else confirmed[row.ai] = { ...confirmed[row.ai], value: '' };
       }
       host.remove();
-      resolve(confirmed);
+      settle(confirmed);
     });
     cancel.addEventListener('click', () => {
       host.remove();
-      resolve(null);
+      settle(null);
     });
     host.append(confirm, cancel);
     msgsEl.appendChild(host);
