@@ -26,6 +26,9 @@ export const STORAGE = {
   TTS_VOICE: 'zoTtsVoice',
   TTS_AUTO_READ: 'zoTtsAutoRead',
   API_URL: 'zoApiUrl',
+  // Zo web UI origin (e.g. https://<slug>.zo.computer) — enables the
+  // "#con_…" copy chip + ↗ Open-in-Zo deep link (0.2.8.0). Not a credential.
+  ZO_WEB_ORIGIN: 'zoWebOrigin',
 };
 
 export const DEFAULTS = {
@@ -43,6 +46,7 @@ export const DEFAULTS = {
   [STORAGE.TTS_VOICE]: '',
   [STORAGE.TTS_AUTO_READ]: false,
   [STORAGE.QUICK_ACTIONS]: [],
+  [STORAGE.ZO_WEB_ORIGIN]: '',
 };
 
 const SENSITIVE_KEYS = new Set([STORAGE.TOKEN, STORAGE.SPACE_ENDPOINT]);

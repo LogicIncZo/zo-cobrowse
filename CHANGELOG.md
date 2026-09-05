@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.2.8.0] — 2026-09-05
+
+### Added — conversation-id debug tooling (the 0.2.8 stabilization bash's enabler release)
+- **`#con_…` conversation-id chip on assistant footers.** Every assistant turn
+  whose conversation has a Zo thread id shows a muted chip with the truncated
+  id; hover reveals the full id; click copies it for bug reports. Always the
+  conversation's real Zo thread — never a derived handoff run sessionId.
+- **↗ Open in Zo.** When Settings → Connection → **Zo Web Origin** is
+  configured (the host of your Zo chat URL, e.g.
+  `https://<slug>.zo.computer` — not derivable from the API token, so
+  user-configured), assistant footers and history cards gain an ↗ action that
+  opens `https://<slug>.zo.computer/?chat=<conversation_id>&t=chats` — the
+  exact thread in Zo's web UI. Empty origin = no ↗ anywhere; the chip alone
+  still copies.
+- **History cards join in.** Chats with a Zo thread show ⧉ (copy id) and ↗
+  (open in Zo) beside ✎/⬇/🗑.
+- **`lib/zo-links.js`** — pure URL builder + id truncation with schema
+  contract (`tests/schemas/zo-links.ts`); ids must match the real `con_*`
+  shape, origins must parse as http(s); callers hide the affordance on
+  invalid input — no dead links.
+- **Settings** — "Zo Web Origin" field on the Connection card (synced, not a
+  credential); non-empty values must parse as http(s) or Save flags it.
+  Spec: `docs/superpowers/specs/2026-09-03-0.2.8-stabilization-slate-design.md`.
+
 ## [0.2.7.1] — 2026-09-05
 
 ### Fixed — stabilization round (2026-09-05 end-to-end + usability pass)

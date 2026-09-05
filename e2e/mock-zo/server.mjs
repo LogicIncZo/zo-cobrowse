@@ -66,7 +66,7 @@ async function streamSse(res, blocks, { delayMs = 60 } = {}) {
     "content-type": "text/event-stream",
     "cache-control": "no-cache",
     "access-control-allow-origin": "*",
-    "x-conversation-id": "e2e-conv-1",
+    "x-conversation-id": "con_e2e-conv-1",
   });
   for (const block of blocks) {
     res.write(block);

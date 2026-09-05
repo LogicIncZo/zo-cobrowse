@@ -2294,6 +2294,11 @@ body.options-page {
   border: 1px solid var(--zo-border);
   white-space: nowrap;
 }
+/* Conversation-id debug chip (0.2.8.0) — monospace so it reads as an id. */
+.msg-footer-convid {
+  font-family: var(--mono-font, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 10px;
+}
 .msg-footer-time {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
