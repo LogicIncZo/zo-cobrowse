@@ -89,12 +89,12 @@ test.describe("zo-links (0.2.8.0)", () => {
 
     // Non-empty must be a real http(s) URL — Save flags it, nothing persists.
     await page.locator("#zo-web-origin").fill("not a url");
-    await page.locator("button[type=submit]").click();
+    await page.locator("#card-connection button[type=submit]").click();
     await expect(page.locator("#status-message")).toContainText("Zo Web Origin");
 
     // Valid value saves (token is pre-seeded by the harness).
     await page.locator("#zo-web-origin").fill("https://cashlessconsumer.zo.computer");
-    await page.locator("button[type=submit]").click();
+    await page.locator("#card-connection button[type=submit]").click();
     await expect(page.locator("#status-message")).toContainText("Saved");
     const stored = await page.evaluate(
       () =>
