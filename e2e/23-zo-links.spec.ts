@@ -80,7 +80,7 @@ test.describe("zo-links (0.2.8.0)", () => {
     expect(zoTab.url()).toContain("/?chat=con_e2e-conv-1&t=chats");
     await zoTab.close();
 
-    await h.panel.locator("#history-btn").click(); // back to chat view
+    await h.panel.locator("#back-to-chat-btn").click(); // back to chat view
   });
 
   test("options: Zo Web Origin field validates http(s) and saves", async () => {
