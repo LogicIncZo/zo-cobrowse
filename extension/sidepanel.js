@@ -298,7 +298,10 @@ async function finishInit() {
           activeHandoffRun = null;
           removeHandoffLine();
           const icon = { done: '✅', paused: '⏸️', aborted: '🛑', blocked: '⛔' }[run.status] || 'ℹ️';
-          const reason = run.stopReason ? ` — ${safeText(run.stopReason)}` : '';
+          // On done, the deliverable already rendered as the turn's answer —
+          // repeating run.stopReason here showed the digest twice, once with
+          // raw markdown (#138). Other statuses carry a real reason worth showing.
+          const reason = run.status !== 'done' && run.stopReason ? ` — ${safeText(run.stopReason)}` : '';
           addMessage('system', `${icon} Handoff ${run.status}${reason}`);
         }
       }
@@ -613,6 +616,12 @@ function bindEvents() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); closeTabAutocomplete(); sendQuery(); }
     // Esc cancels an in-flight stream (Zo: "Press Esc to stop").
     if (e.key === 'Escape' && streamSession.active) { cancelStream(); e.preventDefault(); }
+  });
+  // Esc works anywhere in the panel, not just with the composer focused
+  // (#133). Bubble phase: component Escape handlers (autocomplete popups,
+  // rename input, review card) run first — skip keys they consumed.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && streamSession.active && !e.defaultPrevented) cancelStream();
   });
 
   // Mic button — STT
@@ -1097,7 +1106,9 @@ function renderChatTabs() {
     tab.setAttribute('role', 'tab');
     tab.setAttribute('aria-selected', String(id === activeId));
     tab.title = tabTitleFor(convo) + (id === streamingId ? ' — generating…' : '');
-    if (id === streamingId) {
+    if (id === streamingId && id !== activeId) {
+      // Pulsing dot marks BACKGROUND chats still generating (#135) — on the
+      // active tab the user is already watching the stream live.
       const dot = document.createElement('span');
       dot.className = 'chat-tab-stream-dot';
       tab.appendChild(dot);
@@ -1610,7 +1621,10 @@ const ACTION_META = {
 
 function actionDetail(action) {
   if (action.response) return '';
-  if (action.type === 'fill_form') return action.values?.length ? `${action.values.length} fields` : '';
+  if (action.type === 'fill_form') {
+    const n = action.values?.length || 0;
+    return n ? `${n} ${n === 1 ? 'field' : 'fields'}` : '';
+  }
   return action.selector || action.url || action.value || action.ms || '';
 }
 
@@ -1935,7 +1949,8 @@ function renderFormReview(payload) {
     confirm.className = 'btn btn-primary form-review-confirm';
     const cancel = document.createElement('button');
     cancel.className = 'btn btn-ghost form-review-cancel';
-    confirm.textContent = `Fill ${rows.filter((r) => !r.secret).length} fields`;
+    const fillCount = rows.filter((r) => !r.secret).length;
+    confirm.textContent = `Fill ${fillCount} ${fillCount === 1 ? 'field' : 'fields'}`;
     cancel.textContent = 'Cancel';
     confirm.addEventListener('click', () => {
       // Confirmed batch — same order/count as `fills`; edits mapped back via
@@ -2786,6 +2801,7 @@ function onComposerKeydownForTabs(e) {
     e.stopPropagation();
     selectTabAutocomplete(tabAcIndex);
   } else if (e.key === 'Escape') {
+    e.preventDefault(); // consumed — the panel-level Esc-to-stop (#133) must not also fire
     closeTabAutocomplete();
   }
 }
@@ -3072,6 +3088,7 @@ function onComposerKeydownForPickers(e) {
     e.stopPropagation();
     select(ac.index);
   } else if (e.key === 'Escape') {
+    e.preventDefault(); // consumed — the panel-level Esc-to-stop (#133) must not also fire
     closeAllPickerPopups();
   }
 }
