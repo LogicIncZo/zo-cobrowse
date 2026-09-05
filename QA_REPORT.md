@@ -308,3 +308,29 @@ so catalog BYOK models were used.
 work needed. Items closed: whether to implement incremental reasoning = already shipped;
 live verification = done above. Model-dependent (models without a thinking channel emit
 nothing incremental, which the panel already handles by no-op).
+
+## 2026-09-05 — 0.2.8 round 0: enabler release (v0.2.8.0) + automated matrix green
+
+**Scope:** the 0.2.8 stabilization bash kicked off — spec landed (PR #132), and the
+enabler release **v0.2.8.0** shipped the bash's triage tooling (PR #144):
+`lib/zo-links.js` (schema-backed), the `zoWebOrigin` Settings field, the `#con_…`
+copy chip + ↗ Open-in-Zo deep link on assistant footers and history cards, and
+`e2e/23-zo-links.spec.ts` (real-clipboard + opened-tab assertions). The mock Zo
+server now echoes a realistic `con_*` thread id.
+
+**Automated verification matrix at merge time:**
+
+| Gate | Result |
+|---|---|
+| `bun run verify` (tests + lint + transpile) | ✅ 1116 tests / 50 files, 3175 expect() — 0 failures |
+| Playwright e2e (CI, real Chromium + mock Zo) | ✅ green incl. new `23-zo-links` (3 tests) |
+| `bun run evals` (offline cache) | ✅ 19/19 |
+| `bun run check:drift` | ✅ 0 findings, 0 hard |
+
+**Environment note:** e2e cannot launch on this dev machine (missing `libnspr4`
+system lib, no passwordless sudo) — CI's e2e job is the operative gate.
+
+**Next (owner-gated):** full manual-panel-checklist pass (0.2.8 section added to
+`docs/qa/manual-panel-checklist.md`), the live `!handoff` acceptance run, and the
+week of real usage — findings file as issues on the `0.2.8` milestone, one
+verified fix = one `0.2.8.N` point release.
