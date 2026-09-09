@@ -366,20 +366,20 @@ The QA agent itself: findings queue (`docs/qa/findings/`, Zod contract in `tests
 
 | key | severity | surface | source | disposition |
 |-----|----------|---------|--------|-------------|
-| qa-chat-switch-stream-answer-lost | P1 | streaming | explorer | open |
-| qa-handoff-paused-runs-unresumable | P1 | handoff | review | open |
-| qa-handoff-run-state-leaks-across-chats | P1 | handoff | review | open |
-| qa-stream-accumulation-debugger-conflict | P2 | streaming | matrix | open |
-| qa-pickers-skills-section-residue | P2 | pickers | matrix | open |
-| qa-action-timeline-html-injection | P2 | action-timeline | review | open |
-| qa-handoff-loop-stalls-on-chat-switch | P2 | handoff | review | open |
-| qa-handoff-execution-tab-floats | P2 | handoff | review | open |
-| qa-handoff-parked-actions-unreachable | P2 | handoff | review | open |
-| qa-handoff-chained-turns-re-send-chips | P2 | handoff | review | open |
-| qa-stream-live-bubble-not-restored | P3 | streaming | explorer | open (needs confirm rerun) |
-| qa-handoff-blocked-notification-unreachable | P3 | handoff | review | open |
-| qa-handoff-budget-not-configurable | P3 | handoff | review | open |
-| qa-handoff-run-tab-marker-missing | P3 | handoff | review | open |
-| qa-handoff-done-refire-race | P3 | handoff | review | open |
+| qa-chat-switch-stream-answer-lost | P1 | streaming | explorer | filed #156 |
+| qa-handoff-paused-runs-unresumable | P1 | handoff | review | filed #164 |
+| qa-handoff-run-state-leaks-across-chats | P1 | handoff | review | filed #165 |
+| qa-stream-accumulation-debugger-conflict | P2 | streaming | matrix | filed #168 |
+| qa-pickers-skills-section-residue | P2 | pickers | matrix | filed #167 |
+| qa-action-timeline-html-injection | P2 | action-timeline | review | filed #155 |
+| qa-handoff-loop-stalls-on-chat-switch | P2 | handoff | review | filed #162 |
+| qa-handoff-execution-tab-floats | P2 | handoff | review | filed #161 |
+| qa-handoff-parked-actions-unreachable | P2 | handoff | review | filed #163 |
+| qa-handoff-chained-turns-re-send-chips | P2 | handoff | review | filed #159 |
+| qa-stream-live-bubble-not-restored | P3 | streaming | explorer | filed #169 (needs confirm rerun) |
+| qa-handoff-blocked-notification-unreachable | P3 | handoff | review | filed #157 |
+| qa-handoff-budget-not-configurable | P3 | handoff | review | filed #158 |
+| qa-handoff-run-tab-marker-missing | P3 | handoff | review | filed #166 |
+| qa-handoff-done-refire-race | P3 | handoff | review | filed #160 |
 
 **Queue:** 0 open at start → 15 at close. Gate `qa-gate` correctly red; findings triage (fix / file on the 0.2.8 milestone / dismiss) is the owner's call per `docs/qa/agent-playbook.md` § Triage. Highest-impact cluster: the handoff run loop (10 findings — the promised resume path is a dead letter, run state leaks across chats, and chained turns re-send send-once chips) and streaming-accumulation data loss under two distinct triggers (CDP contention; concurrent-turn + rapid switch).
