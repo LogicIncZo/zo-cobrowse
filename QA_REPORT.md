@@ -353,3 +353,33 @@ Open in Zo") 4/4 green; `bun run verify` 1116/50 green.
 behavior in the real docked panel shell — the documented unautomatable surface
 (`docs/qa/manual-panel-checklist.md` header). Everything behind those two visual confirmations
 is verified above on the tagged commit.
+
+## 2026-09-10 — QA agent round 1 (pipeline build + first hunt)
+
+**Branch:** `chore/qa-agent-pipeline` (PR #154) · **Scope:** full pipeline build (schema/validator/gate/CI + qa-matrix m1–m4, `docs/qa/agent-playbook.md`) + all four lanes run end-to-end.
+
+### Delivered
+
+The QA agent itself: findings queue (`docs/qa/findings/`, Zod contract in `tests/schemas/qa-findings.ts`), release gate (`scripts/qa/qa-gate.sh` + CI `qa-gate` job on dev→main), deterministic entry (`bun run qa` / `qa:gate` / `qa:matrix`), matrix lanes m1 chat-tabs / m2 history+options / m3 write-assist / m4 pickers, and the playbook. Matrix: 8 passed, 1 `test.fixme` (pinned to a finding). `bun run verify` green. Two matrix spec bugs were caught and fixed during authoring (tab-bar ≤1-tab hide; Escape's icon-hide contract) — spec-wrong, not product-wrong.
+
+### Findings (15 filed → `docs/qa/findings/`)
+
+| key | severity | surface | source | disposition |
+|-----|----------|---------|--------|-------------|
+| qa-chat-switch-stream-answer-lost | P1 | streaming | explorer | open |
+| qa-handoff-paused-runs-unresumable | P1 | handoff | review | open |
+| qa-handoff-run-state-leaks-across-chats | P1 | handoff | review | open |
+| qa-stream-accumulation-debugger-conflict | P2 | streaming | matrix | open |
+| qa-pickers-skills-section-residue | P2 | pickers | matrix | open |
+| qa-action-timeline-html-injection | P2 | action-timeline | review | open |
+| qa-handoff-loop-stalls-on-chat-switch | P2 | handoff | review | open |
+| qa-handoff-execution-tab-floats | P2 | handoff | review | open |
+| qa-handoff-parked-actions-unreachable | P2 | handoff | review | open |
+| qa-handoff-chained-turns-re-send-chips | P2 | handoff | review | open |
+| qa-stream-live-bubble-not-restored | P3 | streaming | explorer | open (needs confirm rerun) |
+| qa-handoff-blocked-notification-unreachable | P3 | handoff | review | open |
+| qa-handoff-budget-not-configurable | P3 | handoff | review | open |
+| qa-handoff-run-tab-marker-missing | P3 | handoff | review | open |
+| qa-handoff-done-refire-race | P3 | handoff | review | open |
+
+**Queue:** 0 open at start → 15 at close. Gate `qa-gate` correctly red; findings triage (fix / file on the 0.2.8 milestone / dismiss) is the owner's call per `docs/qa/agent-playbook.md` § Triage. Highest-impact cluster: the handoff run loop (10 findings — the promised resume path is a dead letter, run state leaks across chats, and chained turns re-send send-once chips) and streaming-accumulation data loss under two distinct triggers (CDP contention; concurrent-turn + rapid switch).
