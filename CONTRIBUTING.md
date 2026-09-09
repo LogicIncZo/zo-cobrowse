@@ -19,7 +19,7 @@ feature/*  fix/*  chore/*   ← one branch per unit of work, branched from dev
 **Rules:**
 
 1. **Branch from `dev`, merge back to `dev`.** Every feature/fix/chore branch starts at `dev` and returns to `dev` via pull request. CI must be green to merge.
-2. **`dev` → `main` is a PR.** Promotion to `main` stabilizes it for release. CI must be green; `main` is kept strictly up-to-date before merge (no stale merges).
+2. **`dev` → `main` is a PR.** Promotion to `main` stabilizes it for release. CI must be green; `main` is kept strictly up-to-date before merge (no stale merges). The CI `qa-gate` job additionally requires the QA findings queue (`docs/qa/findings/`) to be **empty** — every finding from a QA round must be fixed (file deleted in the fix PR) or filed on GitHub (milestone `0.2.8`) before a release merge; see `docs/qa/agent-playbook.md`.
 3. **No direct pushes to `main` or `dev`.** Both are protected — all changes land via PR. (Admins can force-bypass in an emergency; don't make it a habit.)
 4. **Releases are deliberate, not automatic.** To cut a release from `main`:
    ```bash
