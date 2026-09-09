@@ -27,6 +27,8 @@ database/
 # Playwright e2e output (reports, traces, test profiles)
 e2e/report/
 e2e/results/
+e2e/qa-matrix/report/
+e2e/qa-matrix/results/
 playwright-report/
 # Demo recording output (ZO_DEMO=1 run of e2e/demo-open-all.spec.ts)
 e2e/demo-video/

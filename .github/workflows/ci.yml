@@ -193,6 +193,32 @@ jobs:
           fi
           echo "gate passed — no hard drift"
 
+  qa-gate:
+    # QA findings release gate (2026-09-10): the local findings queue
+    # (docs/qa/findings/) must be empty on release merges — every finding is
+    # either fixed (file deleted in the fix PR) or filed on GitHub (milestone
+    # 0.2.8). Same trigger shape as the drift job: gates dev→main, not
+    # development commits. See docs/superpowers/specs/2026-09-10-qa-agent-design.md
+    if: >-
+      github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: QA gate — findings queue must be empty
+        run: bun run qa:gate
+
   package:
     needs: [test, lint]
     runs-on: ubuntu-latest
