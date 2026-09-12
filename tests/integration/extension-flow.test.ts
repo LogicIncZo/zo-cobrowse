@@ -1232,3 +1232,54 @@ describe("@ titles (#72) — chips + autocomplete distinguish same-host tabs", (
     composer.dispatchEvent(new panelWin.Event("input", { bubbles: true }));
   });
 });
+
+describe("superseded-stream recovery (#156) — a stale session must not cost its chat the answer", () => {
+  it("a stream superseded by a second chat's send still persists its DONE into its own conversation", async () => {
+    // Chat A's stream is held open; chat B's send supersedes the session.
+    // Production reaches this state because any keystroke re-enables send
+    // (syncSendBtn ignores stream state) and sendQuery has no stream guard.
+    const dA = deferredSse();
+    const dB = deferredSse();
+    let askCount = 0;
+    fm.handle((url: string) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      if (url.includes("/zo/ask")) {
+        askCount += 1;
+        return askCount === 1 ? dA.response : dB.response;
+      }
+      return dA.response;
+    });
+
+    const boxA = armAskCapture();
+    await typeAndSend("slow answer in chat A");
+    await waitUntil(() => boxA.msg != null, 8000);
+    const sessionA = boxA.msg.sessionId;
+
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await new Promise((r) => setTimeout(r, 200));
+    const boxB = armAskCapture();
+    await typeAndSend("chat B question");
+    await waitUntil(() => boxB.msg != null, 8000);
+    expect(boxB.msg.sessionId).toBe(sessionA + 1);
+
+    // Chat A's stream completes AFTER being superseded. Before the fix, the
+    // stale-session guard dropped this DONE and chat A never got its answer.
+    dA.push(sseEvent("PartStartEvent", { index: 1, part: { part_kind: "text", content: "Chat A answer " } }));
+    dA.push(sseEvent("PartDeltaEvent", { delta: { part_delta_kind: "text", content_delta: "survives." } }));
+    dA.push(sseEvent("completed", {}));
+
+    await waitUntil(() => {
+      const convs: any[] = Object.values(bus.storage.local._store.cobrowse_convos || {});
+      const a: any = convs.find((c: any) =>
+        (c.messages || []).some((m: any) => m.role === "user" && m.text === "slow answer in chat A"));
+      return !!a && (a.messages || []).some(
+        (m: any) => m.role === "assistant" && String(m.text || "").includes("survives."));
+    }, 8000);
+
+    // B's live session is untouched: A's late DONE must not disturb it
+    // (B's stream is still held open on dB, so the panel stays in-stream).
+    expect(panelWin.document.querySelector("#query-input").disabled).toBe(true);
+    expect(panelWin.document.querySelectorAll("#messages .msg-user").length).toBe(1); // only B's turn
+  }, 20000);
+});
