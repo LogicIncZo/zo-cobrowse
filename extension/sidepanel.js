@@ -3874,6 +3874,10 @@ let streamPort = null;
 // summary bubble above the body if the user wants a compact view, but the
 // full reasoning stream is always visible in chronological order.
 let streamSession = { active: false, sessionId: 0, chatId: null, msgEl: null, fullText: '', reasoningText: '', remainingActions: null, startTime: 0 };
+// Superseded in-flight streams (#156): when a new send replaces a session
+// that is still streaming, its identity parks here so its STREAM_DONE can
+// still persist into its chat — only rendering goes stale, never the answer.
+let orphanedStreams = [];
 
 // Live "processing" timer: ticks the elapsed time on the in-flight assistant
 // bubble's first line until STREAM_DONE replaces it with the real footer
@@ -3966,6 +3970,50 @@ function connectStreamingPort() {
   }
 }
 
+/** Persist a completed turn into its conversation record — shared by the
+ *  background-chat DONE path and orphaned-stream recovery (#156): the
+ *  stale-session guard must never cost a chat its answer. Returns nothing;
+ *  saveConversationById already ran when this returns. */
+function persistTurnToConversation(msg, sess, fallbackFullText = '') {
+  const conv = conversations[sess.chatId];
+  if (!conv) return;
+  // When the response carried actions, prefer done.response and skip any
+  // fallback that is the raw action-JSON envelope (which would leak
+  // {"actions":[...]} into the chat body when done.response is absent).
+  const doneAction = (msg.actions || []).find(a => a.type === 'done');
+  const hasActions = (msg.actions || []).some(a => a.type !== 'done' && a.type !== 'navigate');
+  const candidateText = safeText(doneAction?.response)
+    || (hasActions ? '' : safeText(msg.fullText))
+    || (hasActions ? '' : safeText(fallbackFullText))
+    || safeText(msg.reasoning)
+    || '';
+  const responseText = hasActions && !candidateText
+    ? '_Done — see the action timeline above._'
+    : candidateText;
+
+  const doneTimestamp = Date.now();
+  const doneDuration = sess.startTime ? doneTimestamp - sess.startTime : 0;
+  if (msg.conversationId) conv.zoThreadId = msg.conversationId;
+  if (responseText) {
+    const reasoningVal = safeText(msg.reasoning) || safeText(sess.reasoningText) || undefined;
+    conv.messages.push({ role: 'assistant', text: responseText, reasoning: reasoningVal, timestamp: doneTimestamp, durationMs: doneDuration || undefined, contextTier: sess.effectiveTier, contextReason: sess.contextReason, screenshot: sess.hadScreenshot || undefined });
+    if (conv.messages.length > MAX_HISTORY) {
+      conv.messages = conv.messages.slice(-MAX_HISTORY);
+    }
+  }
+  // Actions from a backgrounded chat are never auto-run against a page
+  // the user isn't looking at — store them as pending for that chat.
+  const bgDom = (msg.actions || []).filter((a) => a.type !== 'navigate' && a.type !== 'done' && !isContextAction(a));
+  if (bgDom.length) {
+    conv.pendingActions = { reasoning: safeText(msg.reasoning), actions: bgDom };
+  }
+  const bgNav = (msg.actions || []).filter((a) => a.type === 'navigate');
+  if (bgNav.length) {
+    conv.messages.push({ role: 'system', text: `📍 Navigation to ${safeText(bgNav[0].url)} deferred — re-ask from this chat.`, timestamp: Date.now() });
+  }
+  saveConversationById(sess.chatId);
+}
+
 function handleStreamMessage(msg) {
   // Ignore stale messages from previous sessions — UNLESS this is a chained
   // handoff turn (Lane E): the background re-enters the stream with a fresh
@@ -3976,7 +4024,20 @@ function handleStreamMessage(msg) {
   if (msg.sessionId && msg.sessionId !== streamSession.sessionId) {
     const base = String(streamSession.handoffBaseId ?? streamSession.sessionId);
     const chainedHandoff = activeHandoffRun && String(msg.sessionId).startsWith(`${base}-h`);
-    if (!chainedHandoff) return;
+    if (!chainedHandoff) {
+      // #156: a superseded stream's completion still persists into its chat —
+      // the session identity is stale for RENDERING, never for the answer.
+      const oi = msg.type === 'STREAM_DONE'
+        ? orphanedStreams.findIndex((s) => s.sessionId === msg.sessionId)
+        : -1;
+      if (oi !== -1) {
+        const [rec] = orphanedStreams.splice(oi, 1);
+        persistTurnToConversation(msg, rec);
+        renderChatTabs(); // clear the pulse if this chat was backgrounded
+        if (rec.chatId === activeId) renderCurrentConversation(); // user is watching it
+      }
+      return;
+    }
     streamSession.sessionId = msg.sessionId;
     streamSession.active = true;
     streamSession.chatId = activeHandoffRun.chatId ?? streamSession.chatId;
@@ -4202,28 +4263,7 @@ function handleStreamMessage(msg) {
 
       // ---- Background chat: persist into its conversation, no DOM ----
       if (streamSession.chatId && streamSession.chatId !== activeId) {
-        const conv = conversations[streamSession.chatId];
-        if (conv) {
-          if (msg.conversationId) conv.zoThreadId = msg.conversationId;
-          if (responseText) {
-            const reasoningVal = safeText(msg.reasoning) || safeText(streamSession.reasoningText) || undefined;
-            conv.messages.push({ role: 'assistant', text: responseText, reasoning: reasoningVal, timestamp: doneTimestamp, durationMs: doneDuration || undefined, contextTier: streamSession.effectiveTier, contextReason: streamSession.contextReason, screenshot: streamSession.hadScreenshot || undefined });
-            if (conv.messages.length > MAX_HISTORY) {
-              conv.messages = conv.messages.slice(-MAX_HISTORY);
-            }
-          }
-          // Actions from a backgrounded chat are never auto-run against a page
-          // the user isn't looking at — store them as pending for that chat.
-          const bgDom = (msg.actions || []).filter((a) => a.type !== 'navigate' && a.type !== 'done' && !isContextAction(a));
-          if (bgDom.length) {
-            conv.pendingActions = { reasoning: safeText(msg.reasoning), actions: bgDom };
-          }
-          const bgNav = (msg.actions || []).filter((a) => a.type === 'navigate');
-          if (bgNav.length) {
-            conv.messages.push({ role: 'system', text: `📍 Navigation to ${safeText(bgNav[0].url)} deferred — re-ask from this chat.`, timestamp: Date.now() });
-          }
-          saveConversationById(streamSession.chatId);
-        }
+        persistTurnToConversation(msg, streamSession, streamSession.fullText);
         renderChatTabs(); // clear the pulse
         input.disabled = false;
         sendBtn.disabled = false;
@@ -4876,6 +4916,20 @@ sendQuery = async function() {
   // --- Streaming path: (re)connect port if needed ---
   if (!streamPort) connectStreamingPort();
   if (streamPort) {
+    // #156: if a previous stream is still in flight, park its identity so its
+    // STREAM_DONE can still persist into its chat (stale-session recovery).
+    if (streamSession.active && streamSession.chatId) {
+      orphanedStreams.push({
+        sessionId: streamSession.sessionId,
+        chatId: streamSession.chatId,
+        startTime: streamSession.startTime,
+        effectiveTier: streamSession.effectiveTier,
+        contextReason: streamSession.contextReason,
+        hadScreenshot: streamSession.hadScreenshot,
+        reasoningText: streamSession.reasoningText,
+      });
+      if (orphanedStreams.length > 4) orphanedStreams.shift();
+    }
     streamSession.sessionId++;
     const thisSessionId = streamSession.sessionId;
     if (activeHandoffRun) streamSession.handoffBaseId = thisSessionId; // Lane E: pinned adoption base

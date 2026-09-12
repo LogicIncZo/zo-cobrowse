@@ -11,6 +11,9 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: ".",
+  // The QA matrix is its own on-demand project (e2e/qa-matrix/, own config:
+  // `bun run qa:matrix`) — never part of the PR-gating suite.
+  testIgnore: ["qa-matrix/**"],
   timeout: 30_000,
   fullyParallel: false, // one browser profile; tests share the extension
   workers: 1,

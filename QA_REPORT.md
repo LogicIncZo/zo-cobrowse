@@ -334,3 +334,52 @@ system lib, no passwordless sudo) — CI's e2e job is the operative gate.
 `docs/qa/manual-panel-checklist.md`), the live `!handoff` acceptance run, and the
 week of real usage — findings file as issues on the `0.2.8` milestone, one
 verified fix = one `0.2.8.N` point release.
+
+### 0.2.8 manual-checklist section — pass logged 2026-09-05 (tagged commit `83f9ed2` / `v0.2.8.0`)
+
+The four 0.2.8 checklist items were exercised against the promoted release commit.
+Automated evidence: CI e2e run `33969916152` (PR #146, merge-commit build) — `e2e/23-zo-links.spec.ts`
+3/3 green; integration suite (`tests/integration/extension-flow.test.ts` "conversation-id chip +
+Open in Zo") 4/4 green; `bun run verify` 1116/50 green.
+
+| Checklist item | Result | Evidence |
+|---|---|---|
+| **`#con_…` conversation-id chip** | ✅ pass | e2e/23: chip renders `#con_e2e-co…` on the assistant footer after a real send; tooltip carries the FULL id (`title` asserted); click copies the FULL id — real-clipboard read-back equals `con_e2e-conv-1`, label flips to `Copied ✓`. |
+| **↗ Open in Zo** | ✅ pass | e2e/23: with Zo Web Origin set via storage.sync (the same write a Settings save makes — the panel's `storage.onChanged` live-sync picked it up with no reload), ↗ renders and opens a real tab at `<origin>/?chat=con_e2e-conv-1&t=chats`; URL asserted. Gating integration-tested both ways: no thread id → no chip/↗; no origin → chip but no ↗. |
+| **History cards** | ✅ pass | e2e/23: card shows ⧉ (tooltip = full id) + ↗ beside ✎/⬇/🗑; ⧉ flips to ✓ on click with the clipboard holding the full id; ↗ opens the deep-link tab. |
+| **Origin validation** | ✅ pass | e2e/23: `ftp://example.com` (passes the type=url native check, fails the http(s) rule) → Save flags the "Zo Web Origin" error and persists nothing; a valid https origin saves (`✅ Saved!`) and round-trips through storage. |
+
+**Residual (owner's daily-use window):** hover/tooltip rendering and Settings-pane focus
+behavior in the real docked panel shell — the documented unautomatable surface
+(`docs/qa/manual-panel-checklist.md` header). Everything behind those two visual confirmations
+is verified above on the tagged commit.
+
+## 2026-09-10 — QA agent round 1 (pipeline build + first hunt)
+
+**Branch:** `chore/qa-agent-pipeline` (PR #154) · **Scope:** full pipeline build (schema/validator/gate/CI + qa-matrix m1–m4, `docs/qa/agent-playbook.md`) + all four lanes run end-to-end.
+
+### Delivered
+
+The QA agent itself: findings queue (`docs/qa/findings/`, Zod contract in `tests/schemas/qa-findings.ts`), release gate (`scripts/qa/qa-gate.sh` + CI `qa-gate` job on dev→main), deterministic entry (`bun run qa` / `qa:gate` / `qa:matrix`), matrix lanes m1 chat-tabs / m2 history+options / m3 write-assist / m4 pickers, and the playbook. Matrix: 8 passed, 1 `test.fixme` (pinned to a finding). `bun run verify` green. Two matrix spec bugs were caught and fixed during authoring (tab-bar ≤1-tab hide; Escape's icon-hide contract) — spec-wrong, not product-wrong.
+
+### Findings (15 filed → `docs/qa/findings/`)
+
+| key | severity | surface | source | disposition |
+|-----|----------|---------|--------|-------------|
+| qa-chat-switch-stream-answer-lost | P1 | streaming | explorer | filed #156 |
+| qa-handoff-paused-runs-unresumable | P1 | handoff | review | filed #164 |
+| qa-handoff-run-state-leaks-across-chats | P1 | handoff | review | filed #165 |
+| qa-stream-accumulation-debugger-conflict | P2 | streaming | matrix | filed #168 |
+| qa-pickers-skills-section-residue | P2 | pickers | matrix | filed #167 |
+| qa-action-timeline-html-injection | P2 | action-timeline | review | filed #155 |
+| qa-handoff-loop-stalls-on-chat-switch | P2 | handoff | review | filed #162 |
+| qa-handoff-execution-tab-floats | P2 | handoff | review | filed #161 |
+| qa-handoff-parked-actions-unreachable | P2 | handoff | review | filed #163 |
+| qa-handoff-chained-turns-re-send-chips | P2 | handoff | review | filed #159 |
+| qa-stream-live-bubble-not-restored | P3 | streaming | explorer | filed #169 (needs confirm rerun) |
+| qa-handoff-blocked-notification-unreachable | P3 | handoff | review | filed #157 |
+| qa-handoff-budget-not-configurable | P3 | handoff | review | filed #158 |
+| qa-handoff-run-tab-marker-missing | P3 | handoff | review | filed #166 |
+| qa-handoff-done-refire-race | P3 | handoff | review | filed #160 |
+
+**Queue:** 0 open at start → 15 at close. Gate `qa-gate` correctly red; findings triage (fix / file on the 0.2.8 milestone / dismiss) is the owner's call per `docs/qa/agent-playbook.md` § Triage. Highest-impact cluster: the handoff run loop (10 findings — the promised resume path is a dead letter, run state leaks across chats, and chained turns re-send send-once chips) and streaming-accumulation data loss under two distinct triggers (CDP contention; concurrent-turn + rapid switch).
