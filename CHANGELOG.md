@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.2.8.1] — 2026-09-13
+
+### Fixed — stabilization bash point release
+- **A superseded stream no longer costs its chat the answer (#156).** Sending
+  a message in another chat while a stream was still in flight used to orphan
+  the first turn: the stale-session guard dropped its completion and the chat
+  permanently lost the reply (storage kept only the user message; a panel
+  reload did not recover it). The superseded session's completion now
+  persists into its own conversation — backgrounded accumulation, parked
+  actions, and the footer's context fields all ride along. Rendering may
+  still go stale; the answer never does. Regression-tested in
+  `tests/integration/extension-flow.test.ts` (red on the old code, green with
+  the fix).
+
 ## [0.2.8.0] — 2026-09-05
 
 ### Added — conversation-id debug tooling (the 0.2.8 stabilization bash's enabler release)
