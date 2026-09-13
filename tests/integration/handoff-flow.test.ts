@@ -14,6 +14,7 @@ import {
   ZoFetchMock,
   MOCK_ZO_TOKEN,
   sseResponse,
+  textResponse,
   zoSseText,
 } from "../helpers/zo-fetch-mock.ts";
 
@@ -85,7 +86,7 @@ async function panelLoop(run: any, opts: { boundaryMode?: string; sessionBase: s
       continue;
     }
     const st = await bus.runtime.sendMessage({ type: "HANDOFF_STATUS", runId: run.runId });
-    if (st.run && ["done", "aborted", "paused"].includes(st.run.status)) return st.run;
+    if (st.run && ["done", "aborted", "paused", "blocked"].includes(st.run.status)) return st.run;
     if (executed >= max) return st.run;
     await new Promise((r) => setTimeout(r, 50));
   }
@@ -150,19 +151,40 @@ describe("handoff run loop (Lane E)", () => {
     expect(finalRun.parkLog[0].action.type).toBe("click");
   });
 
-  it("pauses when the turn budget is exhausted — no runaway chaining", async () => {
+  it("blocks when the turn budget is exhausted — no runaway chaining, user notified", async () => {
     const run = await startRun({ budget: { maxTurns: 1 } });
     fm.handle(() => envelope({ actions: [{ type: "navigate", url: "https://x.example" }] }));
     const asksBefore = fm.to("/zo/ask").length;
     port.postMessage({ sessionId: 920, type: "ASK_ZO", chatId: run.chatId, modeId: "cobrowse", userQuery: run.goal, handoffRunId: run.runId });
     const finalRun = await panelLoop(run, { sessionBase: "920" });
-    expect(finalRun.status).toBe("paused");
+    // #157: the run needs the user's call, so it is BLOCKED (not paused) —
+    // which is what fires the one-shot "needs you" notification.
+    expect(finalRun.status).toBe("blocked");
     expect(finalRun.stopReason).toContain("turn budget");
-    expect(fm.to("/zo/ask").length).toBe(asksBefore + 1); // no chained fetch after the pause
+    expect(fm.to("/zo/ask").length).toBe(asksBefore + 1); // no chained fetch after the block
+    const note = notifications.find((n) => n.id === `handoff-${run.runId}`);
+    expect(note?.opts.title).toBe("Zo handoff needs you");
+    expect(note?.opts.message).toContain("turn budget");
   });
 
-  it("STOP aborts the run; a late turn completion does not chain", async () => {
+  it("blocks and notifies when a chained stream fails mid-run (#157)", async () => {
     const run = await startRun();
+    let asks = 0;
+    fm.handle((url) => {
+      if (!url.includes("/zo/ask")) return envelope({ actions: [] });
+      asks++;
+      // Turn 1 drives the loop; the chained turn dies on a non-retriable 4xx.
+      if (asks === 1) return envelope({ actions: [{ type: "navigate", url: "https://d.example" }] });
+      return textResponse("bad request", 400);
+    });
+    port.postMessage({ sessionId: 960, type: "ASK_ZO", chatId: run.chatId, modeId: "cobrowse", userQuery: run.goal, handoffRunId: run.runId });
+    const finalRun = await panelLoop(run, { sessionBase: "960" });
+    expect(finalRun.status).toBe("blocked");
+    expect(finalRun.stopReason).toBe("stream error mid-run");
+    expect(notifications.find((n) => n.id === `handoff-${run.runId}`)?.opts.title).toBe("Zo handoff needs you");
+  });
+
+  it("STOP aborts the run; a late turn completion does not chain", async () => {    const run = await startRun();
     fm.handle(() => envelope({ actions: [{ type: "navigate", url: "https://y.example" }] }));
     const asksBefore = fm.to("/zo/ask").length;
     port.postMessage({ sessionId: 930, type: "ASK_ZO", chatId: run.chatId, modeId: "cobrowse", userQuery: run.goal, handoffRunId: run.runId });
@@ -170,6 +192,9 @@ describe("handoff run loop (Lane E)", () => {
     const stop = await bus.runtime.sendMessage({ type: "HANDOFF_STOP", runId: run.runId });
     expect(stop.ok).toBe(true);
     expect(stop.run.status).toBe("aborted");
+    // Aborting is panel-only — never a notification (#157: 'blocked' is the
+    // needs-you notify path; done/blocked are the only notifying statuses).
+    expect(notifications.some((n) => n.id === `handoff-${run.runId}`)).toBe(false);
     // A stale EXECUTE_ACTIONS arriving after the stop must NOT resurrect the loop.
     await bus.runtime.sendMessage({
       type: "EXECUTE_ACTIONS", tabId: 1, handoffRunId: run.runId,
@@ -196,7 +221,5 @@ describe("handoff run loop (Lane E)", () => {
     expect(note).toBeTruthy();
     expect(note.opts.title).toBe("Zo handoff finished");
     expect(note.opts.message).toContain("Digest the tabs");
-    // aborted/paused runs never notified (panel-only).
-    expect(notifications.every((n) => !n.id.startsWith("handoff-run") || n.opts.title.includes("finished"))).toBe(true);
   });
 });

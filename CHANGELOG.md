@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.2.8.6] — 2026-09-13
+
+### Fixed — stabilization bash point release
+- **A handoff run that needs you now tells you (#157).** The spec promises a
+  one-shot notification for done/blocked runs, but nothing ever transitioned a
+  run to `blocked` — budget exhaustion and mid-run stream errors used `pause`,
+  so someone who delegated a run and walked away was only ever notified when
+  the goal completed. Those two stops now transition to `blocked` and fire the
+  "Zo handoff needs you" notification; they remain resumable exactly like
+  paused runs (the ▶ Resume control already covers both).
+
 ## [0.2.8.5] — 2026-09-13
 
 ### Fixed — stabilization bash point release
