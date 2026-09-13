@@ -1344,3 +1344,133 @@ describe("handoff resume (#164) — paused runs are resumable from the panel", (
     expect(bus.storage.session._store["cobrowse_handoff_runs"]["run-164-b"].status).toBe("running");
   }, 15000);
 });
+
+describe("handoff run-state isolation (#165) — the runId never leaves the run's chat", () => {
+  it("HANDOFF_PAUSE pauses a priming run; unknown and terminal ids refuse", async () => {
+    bus.storage.session._store["cobrowse_handoff_runs"] = {
+      "run-165-priming": {
+        runId: "run-165-priming",
+        chatId: "conv-165",
+        goal: "Summarize the release notes",
+        status: "priming",
+        boundaryMode: "readonly",
+        budget: { maxTurns: 6, maxNavigations: 12, maxMinutes: 15 },
+        usage: { turns: 0, navigations: 0, startedAt: Date.now() - 5_000 },
+        pagesVisited: [],
+        parkLog: [],
+        tabId: TAB_ID,
+        createdAt: Date.now() - 10_000,
+        updatedAt: Date.now() - 5_000,
+      },
+      "run-165-done": {
+        runId: "run-165-done",
+        chatId: "conv-165",
+        goal: "already finished",
+        status: "done",
+        stopReason: "goal reached",
+        boundaryMode: "readonly",
+        budget: { maxTurns: 6, maxNavigations: 12, maxMinutes: 15 },
+        usage: { turns: 3, navigations: 1, startedAt: Date.now() - 60_000 },
+        pagesVisited: [],
+        parkLog: [],
+        tabId: TAB_ID,
+        createdAt: Date.now() - 120_000,
+        updatedAt: Date.now() - 30_000,
+      },
+    };
+    const res = await bus.runtime.sendMessage({
+      type: "HANDOFF_PAUSE", runId: "run-165-priming", reason: "streaming unavailable",
+    });
+    expect(res.ok).toBe(true);
+    expect(res.run.status).toBe("paused");
+    expect(res.run.stopReason).toBe("streaming unavailable");
+    expect(bus.storage.session._store["cobrowse_handoff_runs"]["run-165-priming"].status).toBe("paused");
+
+    const done = await bus.runtime.sendMessage({ type: "HANDOFF_PAUSE", runId: "run-165-done" });
+    expect(done.ok).toBe(false);
+    const missing = await bus.runtime.sendMessage({ type: "HANDOFF_PAUSE", runId: "run-none" });
+    expect(missing.ok).toBe(false);
+  });
+
+  it("a manual send in another chat carries no handoffRunId; the run's own chat does", async () => {
+    // Clear whatever run a previous test left armed — the same terminal push
+    // the background sends on abort (the update handler ignores updates for
+    // other chats while a run is armed).
+    await bus.runtime.sendMessage({
+      type: "HANDOFF_UPDATE",
+      run: { runId: "run-164-b", status: "aborted", chatId: "conv-cleanup", stopReason: "test cleanup" },
+    });
+    // The run's chat must be the ACTIVE one — an open tab can't be LRU-evicted
+    // when the new chat B opens (the 8-tab cap would otherwise drop it).
+    const chatIdA = (bus.storage.local._store.cobrowse_open_tabs || {}).activeId
+      || Object.keys(bus.storage.local._store.cobrowse_convos || {})[0]
+      || "conv-165-a";
+    // Free tab-bar headroom (cap 8, LRU-evict) so opening chat B later cannot
+    // evict the run's tab. The active tab is never clicked.
+    for (let guard = 0; guard < 8; guard++) {
+      const all = [...panelWin.document.querySelectorAll("#chat-tabs .chat-tab")] as any[];
+      if (all.length <= 6) break;
+      const victim = all.find((t) => !t.classList.contains("chat-tab-active"));
+      if (!victim) break;
+      victim.dispatchEvent(new panelWin.MouseEvent("auxclick", { button: 1, bubbles: true }));
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    bus.storage.session._store["cobrowse_handoff_runs"] = {
+      "run-165-leak": {
+        runId: "run-165-leak", chatId: chatIdA, goal: "watch the release page",
+        status: "paused", stopReason: "paused for the test", boundaryMode: "readonly",
+        budget: { maxTurns: 6, maxNavigations: 12, maxMinutes: 15 },
+        usage: { turns: 1, navigations: 0, startedAt: Date.now() - 30_000 },
+        pagesVisited: [], parkLog: [], tabId: TAB_ID,
+        createdAt: Date.now() - 60_000, updatedAt: Date.now() - 20_000,
+      },
+    };
+    // Arm the run via the #164 resume path (runs in chat A).
+    await bus.runtime.sendMessage({
+      type: "HANDOFF_UPDATE",
+      run: bus.storage.session._store["cobrowse_handoff_runs"]["run-165-leak"],
+    });
+    await waitUntil(() => {
+      const btns = [...panelWin.document.querySelectorAll("#messages .msg-system button")];
+      return btns.some((b: any) => (b.textContent || "").includes("Resume"));
+    }, 5000);
+    const askBase = askLog.length;
+    ([...panelWin.document.querySelectorAll("#messages .msg-system button")] as any[])
+      .find((b: any) => (b.textContent || "").includes("Resume")).click();
+    await waitUntil(() => askLog.length > askBase && askLog[askLog.length - 1].handoffRunId === "run-165-leak", 10_000);
+
+    // Manual send in a NEW chat B — must NOT be conscripted by the run.
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await new Promise((r) => setTimeout(r, 200));
+    const askBaseB = askLog.length;
+    await typeAndSend("just a manual question in chat B");
+    await waitUntil(() => askLog.length > askBaseB, 10_000);
+    const askB = askLog[askLog.length - 1];
+    expect(askB.handoffRunId).toBeUndefined();
+    expect(askB.chatId).not.toBe(chatIdA);
+    expect(askB.userQuery).toBe("just a manual question in chat B");
+
+    // Back to the run's chat — find its tab by the conversation's stored
+    // title (tab labels derive from it); its sends DO carry the runId.
+    const convA = (bus.storage.local._store.cobrowse_convos || {})[chatIdA];
+    const titleA = String(convA?.title || convA?.messages?.[0]?.text || "");
+    expect(titleA.length).toBeGreaterThan(0);
+    const aTab = [...panelWin.document.querySelectorAll("#chat-tabs .chat-tab")]
+      .find((t: any) => (t.textContent || "").startsWith(titleA.slice(0, 60))) as any;
+    expect(aTab).toBeTruthy();
+    aTab.click();
+    await new Promise((r) => setTimeout(r, 300));
+    const askBaseA = askLog.length;
+    await typeAndSend("keep pursuing the goal");
+    await waitUntil(() => askLog.length > askBaseA, 10_000);
+    const askA = askLog[askLog.length - 1];
+    if (askA.chatId !== chatIdA) {
+      console.log("165 DEBUG — chatIdA:", chatIdA, "| askA.chatId:", askA.chatId,
+        "| tab labels:", [...panelWin.document.querySelectorAll("#chat-tabs .chat-tab-label")]
+          .map((l: any) => (l.textContent || "").slice(0, 40)));
+    }
+    expect(askA.chatId).toBe(chatIdA);
+    expect(askA.handoffRunId).toBe("run-165-leak");
+    expect(bus.storage.session._store["cobrowse_handoff_runs"]["run-165-leak"].status).toBe("running");
+  }, 25000);
+});

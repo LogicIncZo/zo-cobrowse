@@ -5000,7 +5000,11 @@ sendQuery = async function() {
         ...(sendTabContexts.length ? { tabContexts: sendTabContexts } : {}),
         ...(turnSkills.length ? { skills: turnSkills } : {}),
         ...(turnFiles.length ? { workspaceFiles: turnFiles } : {}),
-        ...(activeHandoffRun ? { handoffRunId: activeHandoffRun.runId } : {}),
+        // #165: the runId rides ONLY the run's own chat's sends — a manual
+        // query in another chat must never be conscripted as a handoff turn.
+        ...(activeHandoffRun && activeId === activeHandoffRun.chatId
+          ? { handoffRunId: activeHandoffRun.runId }
+          : {}),
       });
     } catch (e) {
       // Port disconnected between check and postMessage — fall through to non-streaming fallback
@@ -5014,6 +5018,19 @@ sendQuery = async function() {
   }
 
   // --- Fallback: one-shot sendMessage if port unavailable ---
+  // #165: a handoff turn cannot drive the loop without streaming — pause the
+  // run honestly (the pause line's ▶ Resume re-issues it) instead of letting
+  // it sit in priming forever while the plain answer still renders.
+  if (activeHandoffRun && activeId === activeHandoffRun.chatId) {
+    const runId = activeHandoffRun.runId;
+    activeHandoffRun = null;
+    chrome.runtime.sendMessage({
+      type: 'HANDOFF_PAUSE',
+      runId,
+      reason: 'streaming unavailable — non-streaming fallback cannot drive the run',
+    });
+    addMessage('system', '⏸️ Handoff paused — streaming unavailable. Resume to retry once the connection is back.');
+  }
   const resp = await chrome.runtime.sendMessage({
     type: 'ASK_ZO',
     chatId: activeId,
