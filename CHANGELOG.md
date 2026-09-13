@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.2.8.12] — 2026-09-13
+
+### Fixed — stabilization bash point release
+- **The run's chat tab is marked while a handoff run works (#166).** The spec
+  promises a run-tab marker, but only the extension badge existed — a
+  delegated run's chat tab looked like any other streaming chat.
+  `tabTitleFor` gained a `handoff` flag and the tab bar marks the run's chat
+  while the run is live, clearing it when the run leaves the loop.
+
 ## [0.2.8.11] — 2026-09-13
 
 ### Fixed — stabilization bash point release
