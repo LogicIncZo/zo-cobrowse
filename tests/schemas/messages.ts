@@ -29,6 +29,7 @@ export const MESSAGE_TYPES = [
   "GET_DEBUG_LOG",
   "CLEAR_DEBUG_LOG",
   "HANDOFF_START",
+  "HANDOFF_RESUME",
   "HANDOFF_STOP",
   "HANDOFF_STATUS",
 ] as const;

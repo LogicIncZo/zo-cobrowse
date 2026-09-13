@@ -311,7 +311,18 @@ async function finishInit() {
           // repeating run.stopReason here showed the digest twice, once with
           // raw markdown (#138). Other statuses carry a real reason worth showing.
           const reason = run.status !== 'done' && run.stopReason ? ` — ${safeText(run.stopReason)}` : '';
-          addMessage('system', `${icon} Handoff ${run.status}${reason}`);
+          const line = addMessage('system', `${icon} Handoff ${run.status}${reason}`);
+          if (run.status === 'paused' || run.status === 'blocked') {
+            // #164: paused runs are resumable — offer the control inline.
+            const body = line.querySelector('.msg-body') || line;
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.textContent = '▶ Resume';
+            btn.className = 'btn btn-ghost btn-sm';
+            btn.addEventListener('click', () => resumeHandoffRun(run.runId));
+            body.appendChild(document.createElement('br'));
+            body.appendChild(btn);
+          }
         }
       }
       // Ctrl+Shift+N shortcut: the background broadcasts NEW_CONVERSATION; the
@@ -1151,6 +1162,13 @@ function renderChatTabs() {
 
 /** Close one chat tab (the conversation itself stays in history). */
 async function closeChatTabById(id) {
+  // #164: closing the run's tab aborts the run (spec: "closing the run tab
+  // aborts") — without this the port death merely pauses it, stranded.
+  if (activeHandoffRun && activeHandoffRun.chatId === id) {
+    const runId = activeHandoffRun.runId;
+    activeHandoffRun = null;
+    chrome.runtime.sendMessage({ type: 'HANDOFF_STOP', runId, reason: 'run tab closed' });
+  }
   if (streamSession.active && streamSession.chatId === id) cancelStream();
   const next = closeChatTab(tabsState, id);
   if (next.activeId && next.activeId !== activeId) {
@@ -1160,6 +1178,30 @@ async function closeChatTabById(id) {
   tabsState = next;
   await saveConversations();
   renderChatTabs();
+}
+
+// #164: resume a paused handoff run from the panel. The background validates
+// + transitions and returns the continuation turn text; the panel re-issues
+// it as an ASK_ZO carrying handoffRunId, which re-registers the loop's turn
+// context on the live port (the old one died with the pause).
+async function resumeHandoffRun(runId) {
+  let res;
+  try {
+    res = await chrome.runtime.sendMessage({ type: 'HANDOFF_RESUME', runId });
+  } catch (e) {
+    addMessage('error', `Handoff resume failed: ${safeText(e)}`);
+    return;
+  }
+  if (!res || !res.ok) {
+    addMessage('error', `Handoff resume failed: ${safeText(res?.error || 'no response')}`);
+    return;
+  }
+  const run = res.run;
+  activeHandoffRun = run;
+  removeHandoffLine();
+  if (activeId !== run.chatId) await switchToConversation(run.chatId);
+  input.value = safeText(res.continuationQuery) || `Resume the handoff run: ${safeText(run.goal)}`;
+  await sendQuery();
 }
 
 function listConversationSummaries() {
