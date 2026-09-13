@@ -236,6 +236,28 @@ describe("handoff run loop (Lane E)", () => {
     expect(second).not.toContain("## Referenced Tabs");
   });
 
+  it("STOP on an already-finished run is a no-op — no second notification (#160)", async () => {
+    const run = await startRun();
+    fm.handle(() => envelope({ actions: [{ type: "done", response: "All finished" }] }));
+    port.postMessage({ sessionId: 940, type: "ASK_ZO", chatId: run.chatId, modeId: "cobrowse", userQuery: run.goal, handoffRunId: run.runId });
+    const finalRun = await panelLoop(run, { sessionBase: "940" });
+    expect(finalRun.status).toBe("done");
+    const notes = () => notifications.filter((n) => n.id === `handoff-${run.runId}`);
+    expect(notes().length).toBe(1);
+
+    // The stop button is already gone on done, but a late click (or a stray
+    // message) must not re-save the run: doing so re-ran the notify and
+    // re-pushed the terminal update, which the panel rendered a second time.
+    const stop = await bus.runtime.sendMessage({ type: "HANDOFF_STOP", runId: run.runId });
+    expect(stop.ok).toBe(false);
+    expect(stop.error).toContain("already done");
+    expect(stop.run.status).toBe("done");
+    await flush();
+    expect(notes().length).toBe(1);
+    const st = await bus.runtime.sendMessage({ type: "HANDOFF_STATUS", runId: run.runId });
+    expect(st.run.status).toBe("done");
+  });
+
   it("STOP aborts the run; a late turn completion does not chain", async () => {
     const run = await startRun();
     fm.handle(() => envelope({ actions: [{ type: "navigate", url: "https://y.example" }] }));
