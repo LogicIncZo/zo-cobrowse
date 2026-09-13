@@ -6,7 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
-### Fixed
+## [0.2.8.2] — 2026-09-13
+
+### Fixed — stabilization bash point release
 - **Paused handoff runs are actually resumable (#164).** "Extension restarted —
   resume to continue" used to be a dead letter: no resume path existed, so a
   paused run was stranded until the browser closed. The panel's pause line now

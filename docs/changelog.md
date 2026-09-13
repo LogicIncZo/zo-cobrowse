@@ -6,15 +6,7 @@ This page mirrors everything **unreleased** on `dev`.
 
 ## [Unreleased]
 
-### Fixed
-- **Paused handoff runs are actually resumable (#164).** "Extension restarted —
-  resume to continue" used to be a dead letter: no resume path existed, so a
-  paused run was stranded until the browser closed. The panel's pause line now
-  carries a ▶ Resume control (`HANDOFF_RESUME`): the run transitions back to
-  running and the panel re-issues the continuation turn with `handoffRunId`,
-  re-registering the loop's turn context on the live port. Closing the run's
-  chat tab now also aborts the run (as the 0.2.7 spec always said) instead of
-  leaving it paused forever.
+
 
 ## [0.2.7.1] — 2026-09-05
 
