@@ -1653,3 +1653,71 @@ describe("handoff survives a backgrounded chat (#162)", () => {
     expect([...panelWin.document.querySelectorAll("#messages .handoff-batch")]).toHaveLength(0);
   }, 30000);
 });
+
+describe("handoff actions stay on the run's pinned tab (#161)", () => {
+  const envelope161 = (obj: unknown) => sseResponse(zoSseText({ text: JSON.stringify(obj) }));
+
+  it("a mid-run browser-tab switch does not redirect the run's DOM actions", async () => {
+    const RUN_TAB = 44;
+    bus.tabs.registerTab({ id: RUN_TAB, url: "https://pinned.example/step1", title: "Pinned", active: false });
+    const chatId = (bus.storage.local._store.cobrowse_open_tabs || {}).activeId
+      || Object.keys(bus.storage.local._store.cobrowse_convos || {})[0];
+    expect(chatId).toBeTruthy();
+
+    bus.storage.session._store["cobrowse_handoff_runs"] = {
+      "run-161": {
+        runId: "run-161", chatId, goal: "drive the pinned tab",
+        status: "paused", boundaryMode: "readonly",
+        budget: { maxTurns: 6, maxNavigations: 12, maxMinutes: 15 },
+        usage: { turns: 1, navigations: 0, startedAt: Date.now() - 30_000 },
+        pagesVisited: [], parkLog: [], tabId: RUN_TAB,
+        createdAt: Date.now() - 60_000, updatedAt: Date.now() - 20_000,
+      },
+    };
+    await bus.runtime.sendMessage({
+      type: "HANDOFF_UPDATE",
+      run: bus.storage.session._store["cobrowse_handoff_runs"]["run-161"],
+    });
+    await waitUntil(() => {
+      const btns = [...panelWin.document.querySelectorAll("#messages .msg-system button")];
+      return btns.some((b: any) => (b.textContent || "").includes("Resume"));
+    }, 5000);
+
+    const gate = deferredSse();
+    const exec161: any[] = [];
+    const origSend161 = bus.runtime.sendMessage.bind(bus.runtime);
+    (bus.runtime as any).sendMessage = (m: any, ...rest: any[]) => {
+      if (m?.type === "EXECUTE_ACTIONS" && m.handoffRunId) exec161.push({ tabId: m.tabId, url: m.url, actions: m.actions });
+      return origSend161(m, ...rest);
+    };
+    let asks = 0;
+    fm.handle((url, _init, req) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      const input = String((req as any)?.body?.input || "");
+      if (!input.includes("[handoff-run continuation]")) return sseResponse(zoSseText({ text: "ok" }));
+      asks++;
+      if (asks === 1) return gate.response;
+      return envelope161({ actions: [{ type: "done", response: "Tapped through" }] });
+    });
+
+    ([...panelWin.document.querySelectorAll("#messages .msg-system button")] as any[])
+      .find((b: any) => (b.textContent || "").includes("Resume")).click();
+    await waitUntil(() => asks >= 1, 10_000);
+
+    // The user switches their BROWSER tab mid-run: the panel adopts that tab
+    // as currentContext (display-only). The run's own turn must not follow it.
+    bus.tabs.onActivated.emit({ tabId: TAB_ID, windowId: 1 });
+    await new Promise((r) => setTimeout(r, 150));
+
+    gate.push(zoSseText({ text: JSON.stringify({ actions: [{ type: "click", selector: "#go" }] }) }));
+    gate.end();
+
+    await waitUntil(() => exec161.length > 0, 10_000);
+    expect(exec161[0].tabId).toBe(RUN_TAB);
+    expect(exec161[0].url).toBe("https://pinned.example/step1");
+    // …and the user's page was left alone.
+    const panelTab = (bus.tabs as any)._tabs.find((t: any) => t.id === TAB_ID);
+    expect(panelTab.url).toBe("https://example.test/form-page");
+  }, 30000);
+});

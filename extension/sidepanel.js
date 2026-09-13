@@ -4648,12 +4648,14 @@ async function executeHandoffBatch(actions, { backgrounded = false } = {}) {
       list.appendChild(row);
     }
   }
-  let tabId = currentContext?.tabId;
-  let url = currentContext?.url;
-  if (backgrounded) {
-    tabId = run.tabId;
-    try { url = (await chrome.tabs.get(run.tabId))?.url ?? url; } catch { /* tab gone — park log skips the url */ }
-  }
+  // #161: a run drives ONE tab — the pin stamped at HANDOFF_START. The
+  // panel's currentContext follows the user's browser-tab switches
+  // (adoptActiveTabDisplay), so reading it here would send the run's DOM
+  // actions to whatever tab the user focused while Zo still sees the pinned
+  // tab's capture — acting on one page while believing it is on another.
+  const tabId = run.tabId || currentContext?.tabId;
+  let url = null;
+  try { url = (await chrome.tabs.get(tabId))?.url ?? null; } catch { /* tab gone — the background parks the run */ }
   let res = null;
   try {
     res = await chrome.runtime.sendMessage({
