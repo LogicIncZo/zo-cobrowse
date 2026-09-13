@@ -454,6 +454,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       });
       return true;
     }
+    case 'HANDOFF_RESUME': {
+      // {runId} → {ok, run, continuationQuery}. Paused runs are resumable
+      // from the panel (#164): transition to running and hand back the
+      // continuation turn text — the PANEL re-issues it as an ASK_ZO carrying
+      // handoffRunId, which re-registers the loop's turn context on its live
+      // port (the old ctx died with the pause/port).
+      handoffGet({ runId: request.runId }).then(async (run) => {
+        if (!run) return sendResponse({ ok: false, error: 'no such handoff run' });
+        if (!['paused', 'blocked'].includes(run.status)) {
+          return sendResponse({ ok: false, error: `run is ${run.status}, not resumable` });
+        }
+        const res = handoffTransition(run, 'resume', { now: Date.now(), reason: 'resumed from panel' });
+        if (!res.ok) return sendResponse({ ok: false, error: res.error });
+        const saved = await handoffPut(res.run);
+        sendResponse({ ok: true, run: saved, continuationQuery: buildContinuationTurn(saved) });
+      });
+      return true;
+    }
     case 'HANDOFF_STATUS': {
       handoffGet(request.runId ? { runId: request.runId } : { chatId: request.chatId }).then((run) => sendResponse({ ok: true, run }));
       return true;
