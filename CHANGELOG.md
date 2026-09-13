@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.2.8.8] — 2026-09-13
+
+### Fixed — stabilization bash point release
+- **Handoff continuation turns no longer replay send-once attachments
+  (#159).** A continuation turn was built by spreading turn 1's `ASK_ZO`
+  message, so anything the composer had attached for exactly one turn —
+  picked skills, workspace files, tab excerpts, the screenshot flag — rode
+  every chained turn. Skills re-ran turn after turn and stale tab excerpts
+  were re-billed against Zo's thread for the life of the run. The contract
+  now lives in `lib/handoff.js` (`SEND_ONCE_FIELDS` + `continuationPayload()`)
+  and the loop builds each turn through it: identity and thread fields carry
+  over, send-once fields never do.
+
 ## [0.2.8.7] — 2026-09-13
 
 ### Fixed — stabilization bash point release
