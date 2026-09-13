@@ -6,7 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
-### Fixed
+## [0.2.8.3] — 2026-09-13
+
+### Fixed — stabilization bash point release
 - **Handoff runs no longer leak into other chats (#165).** `activeHandoffRun`
   was panel-global: while a run was live, a manual query typed in ANY other
   chat carried the run's id and was conscripted as a handoff turn — hijacking
