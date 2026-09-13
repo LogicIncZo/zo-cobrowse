@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.2.8.10] — 2026-09-13
+
+### Fixed — stabilization bash point release
+- **Handoff actions no longer follow the browser's focus (#161).** The visible
+  execution path sent its actions against the panel's `currentContext` tab,
+  which `adoptActiveTabDisplay` replaces on every tab switch — so focusing a
+  different tab mid-run pointed the run's DOM actions at that page while Zo
+  kept receiving the pinned tab's capture (acting on one page, believing it was
+  on another; the spec pins a run to one tab). Both paths now resolve the tab
+  from the run's stamped pin, and parked-action URLs come from that tab.
+
 ## [0.2.8.9] — 2026-09-13
 
 ### Fixed — stabilization bash point release
