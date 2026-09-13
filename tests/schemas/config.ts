@@ -13,6 +13,12 @@ export const ConfigSchema = z.object({
   zoAccessToken: z.string(),
   enableScreenshots: z.boolean(),
   enabledMenus: z.record(z.string(), z.boolean()),
+  // !handoff run budget (#158) — config-resident so it is user-tunable.
+  cobrowse_handoff_budget: z.object({
+    maxTurns: z.number().int().positive(),
+    maxNavigations: z.number().int().positive(),
+    maxMinutes: z.number().positive(),
+  }).optional(),
 }).passthrough();
 
 export type Config = z.infer<typeof ConfigSchema>;
