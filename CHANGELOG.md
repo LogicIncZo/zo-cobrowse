@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.2.8.13] — 2026-09-13
+
+### Fixed — stabilization bash point release
+- **Picker send-once assertions are deterministic (#167).** The QA matrix's
+  m4 specs graded `lastAskBody()` before the follow-up ASK had been recorded
+  — an assertion could read turn 1's body (or `null`), which surfaced as a
+  phantom "`## Skills to Run` residue" finding. Both specs now poll
+  `recordedAsks()` until the ask they intend to grade has landed, and the
+  skills spec is un-`fixme`'d. The product contract itself held: picked chips
+  are snapshotted into the turn and cleared before the `ASK_ZO`.
+
 ## [0.2.8.12] — 2026-09-13
 
 ### Fixed — stabilization bash point release
