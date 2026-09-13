@@ -2198,10 +2198,13 @@ async function handoffAfterExecute(runId, request, res) {
       return;
     }
 
-    // Budget exhausted → paused (the panel offers resume / wrap-up).
+    // Budget exhausted → blocked: the run cannot continue without the user's
+    // call (wrap up vs raise the budget), so it needs their attention — the
+    // 'blocked' status is what fires the one-shot "needs you" notification
+    // (#157). The panel offers ▶ Resume, same as a paused run.
     const budget = handoffWithinBudget(run);
     if (!budget.ok) {
-      const t = handoffTransition(run, 'pause', { now: Date.now(), reason: budget.reason });
+      const t = handoffTransition(run, 'block', { now: Date.now(), reason: budget.reason });
       handoffTurnCtx.delete(runId);
       await handoffPut(t.ok ? t.run : run);
       return;
@@ -2244,10 +2247,12 @@ async function handoffChainNextTurn(runId) {
     handoffRunId: runId,
   };
   askZoStream(port, turnMsg).catch(async () => {
-    // Stream failed mid-run — pause honestly; the panel can resume.
+    // Stream failed mid-run — blocked, not paused: the run cannot proceed
+    // unattended and the user (who walked away by design) must be told. The
+    // panel offers ▶ Resume (#157).
     const r = await handoffGet({ runId });
     if (r && r.status === 'running') {
-      const t = handoffTransition(r, 'pause', { now: Date.now(), reason: 'stream error mid-run' });
+      const t = handoffTransition(r, 'block', { now: Date.now(), reason: 'stream error mid-run' });
       handoffTurnCtx.delete(runId);
       await handoffPut(t.ok ? t.run : r);
     }
