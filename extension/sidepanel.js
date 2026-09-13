@@ -4018,7 +4018,7 @@ function connectStreamingPort() {
  *  background-chat DONE path and orphaned-stream recovery (#156): the
  *  stale-session guard must never cost a chat its answer. Returns nothing;
  *  saveConversationById already ran when this returns. */
-function persistTurnToConversation(msg, sess, fallbackFullText = '') {
+function persistTurnToConversation(msg, sess, fallbackFullText = '', opts = {}) {
   const conv = conversations[sess.chatId];
   if (!conv) return;
   // When the response carried actions, prefer done.response and skip any
@@ -4047,12 +4047,14 @@ function persistTurnToConversation(msg, sess, fallbackFullText = '') {
   }
   // Actions from a backgrounded chat are never auto-run against a page
   // the user isn't looking at — store them as pending for that chat.
+  // Exception (skipParking): a handoff run's turn just executed them
+  // (unattended by design); parking would double-run them on switch-back.
   const bgDom = (msg.actions || []).filter((a) => a.type !== 'navigate' && a.type !== 'done' && !isContextAction(a));
-  if (bgDom.length) {
+  if (bgDom.length && !opts.skipParking) {
     conv.pendingActions = { reasoning: safeText(msg.reasoning), actions: bgDom };
   }
   const bgNav = (msg.actions || []).filter((a) => a.type === 'navigate');
-  if (bgNav.length) {
+  if (bgNav.length && !opts.skipParking) {
     conv.messages.push({ role: 'system', text: `📍 Navigation to ${safeText(bgNav[0].url)} deferred — re-ask from this chat.`, timestamp: Date.now() });
   }
   saveConversationById(sess.chatId);
@@ -4307,7 +4309,21 @@ function handleStreamMessage(msg) {
 
       // ---- Background chat: persist into its conversation, no DOM ----
       if (streamSession.chatId && streamSession.chatId !== activeId) {
-        persistTurnToConversation(msg, streamSession, streamSession.fullText);
+        // Lane E: the active run's turn completing while its chat is
+        // backgrounded must still execute + tally — parking it here stranded
+        // the run 'running' forever (no EXECUTE_ACTIONS → no
+        // handoffAfterExecute → no continuation turn, badge stuck). !handoff
+        // IS explicit unattended execution; the batch targets the run's
+        // pinned tab, never the page the user is looking at.
+        const bgHandoff = Boolean(
+          activeHandoffRun
+          && streamSession.chatId === activeHandoffRun.chatId
+          && (msg.actions || []).length > 0
+        );
+        if (bgHandoff) executeHandoffBatch(msg.actions, { backgrounded: true });
+        // skipParking: these actions just executed — parking them too would
+        // re-run them from the review bar when the user switches back.
+        persistTurnToConversation(msg, streamSession, streamSession.fullText, { skipParking: bgHandoff });
         renderChatTabs(); // clear the pulse
         input.disabled = false;
         sendBtn.disabled = false;
@@ -4597,21 +4613,35 @@ function removeHandoffLine() {
 }
 
 /** Execute one handoff turn's actions as a single batch. Results render
- * compactly; the run's own HANDOFF_UPDATE push reports loop state. */
-async function executeHandoffBatch(actions) {
+ * compactly; the run's own HANDOFF_UPDATE push reports loop state.
+ * backgrounded:true (run's chat switched away, #162) skips the DOM entirely —
+ * rendering would inject rows into whichever chat the user is looking at —
+ * targets the run's PINNED tab (currentContext is the focused page, which is
+ * exactly what must not get clicked), and persists a compact execution record
+ * into the run's conversation so switching back shows what the turn did. */
+async function executeHandoffBatch(actions, { backgrounded = false } = {}) {
   const run = activeHandoffRun;
   if (!run) return;
-  const card = addMessageDOM('assistant', '', {});
-  const body = card.querySelector('.msg-body');
-  const list = document.createElement('div');
-  list.className = 'handoff-batch';
-  body.appendChild(list);
-  for (const a of actions) {
-    if (a.type === 'done') continue; // rendered below from the results
-    const row = document.createElement('div');
-    row.className = 'handoff-batch-row';
-    row.textContent = a.type === 'navigate' ? `→ ${safeText(a.url)}` : `→ ${safeText(a.type)} ${safeText(a.selector || '')}`;
-    list.appendChild(row);
+  let list = null;
+  if (!backgrounded) {
+    const card = addMessageDOM('assistant', '', {});
+    const body = card.querySelector('.msg-body');
+    list = document.createElement('div');
+    list.className = 'handoff-batch';
+    body.appendChild(list);
+    for (const a of actions) {
+      if (a.type === 'done') continue; // rendered below from the results
+      const row = document.createElement('div');
+      row.className = 'handoff-batch-row';
+      row.textContent = a.type === 'navigate' ? `→ ${safeText(a.url)}` : `→ ${safeText(a.type)} ${safeText(a.selector || '')}`;
+      list.appendChild(row);
+    }
+  }
+  let tabId = currentContext?.tabId;
+  let url = currentContext?.url;
+  if (backgrounded) {
+    tabId = run.tabId;
+    try { url = (await chrome.tabs.get(run.tabId))?.url ?? url; } catch { /* tab gone — park log skips the url */ }
   }
   let res = null;
   try {
@@ -4619,11 +4649,32 @@ async function executeHandoffBatch(actions) {
       type: 'EXECUTE_ACTIONS',
       handoffRunId: run.runId,
       boundaryMode: run.boundaryMode || 'readonly',
-      tabId: currentContext?.tabId,
+      tabId,
       actions,
-      url: currentContext?.url,
+      url,
     });
   } catch { /* background gone — the orphan-pause sweep handles the run */ }
+  if (backgrounded) {
+    const conv = conversations[run.chatId];
+    if (conv) {
+      const results = Array.isArray(res?.results) ? res.results : [];
+      const ran = actions.filter((a) => a.type !== 'done')
+        .map((a) => (a.type === 'navigate' ? `→ ${safeText(a.url)}` : `→ ${safeText(a.type)} ${safeText(a.selector || '')}`));
+      const parked = results.filter((r) => r?.handoffParked).length;
+      const failed = results.filter((r) => r && r.ok === false).length;
+      conv.messages.push({
+        role: 'system',
+        text: `🤖 Executed in background — ${ran.join(', ') || 'no actions'}`
+          + (parked ? ` · ⛔ ${parked} parked (boundary)` : '')
+          + (failed ? ` · ⚠️ ${failed} failed` : ''),
+        timestamp: Date.now(),
+      });
+      if (conv.messages.length > MAX_HISTORY) conv.messages = conv.messages.slice(-MAX_HISTORY);
+      saveConversationById(run.chatId);
+      renderChatTabs();
+    }
+    return;
+  }
   const results = Array.isArray(res?.results) ? res.results : [];
   results.forEach((r, i) => {
     const row = list.children[i];
