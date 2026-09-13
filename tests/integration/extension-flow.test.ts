@@ -1283,3 +1283,64 @@ describe("superseded-stream recovery (#156) — a stale session must not cost it
     expect(panelWin.document.querySelectorAll("#messages .msg-user").length).toBe(1); // only B's turn
   }, 20000);
 });
+
+describe("handoff resume (#164) — paused runs are resumable from the panel", () => {
+  const seedPausedRun = (runId: string, chatId: string) => {
+    bus.storage.session._store["cobrowse_handoff_runs"] = {
+      [runId]: {
+        runId,
+        chatId,
+        goal: "Find the cheapest flight to Tokyo",
+        status: "paused",
+        stopReason: "extension restarted — resume to continue",
+        boundaryMode: "readonly",
+        budget: { maxTurns: 6, maxNavigations: 12, maxMinutes: 15 },
+        usage: { turns: 2, navigations: 1, startedAt: Date.now() - 60_000 },
+        pagesVisited: ["https://example.test/form-page"],
+        parkLog: [],
+        tabId: TAB_ID,
+        createdAt: Date.now() - 120_000,
+        updatedAt: Date.now() - 30_000,
+      },
+    };
+  };
+
+  it("HANDOFF_RESUME transitions a paused run to running and returns the continuation turn", async () => {
+    seedPausedRun("run-164-a", "conv-164-a");
+    const res = await bus.runtime.sendMessage({ type: "HANDOFF_RESUME", runId: "run-164-a" });
+    expect(res.ok).toBe(true);
+    expect(res.run.status).toBe("running");
+    expect(res.continuationQuery).toContain("[handoff-run continuation]");
+    expect(bus.storage.session._store["cobrowse_handoff_runs"]["run-164-a"].status).toBe("running");
+
+    // Non-resumable states and unknown ids refuse honestly.
+    const again = await bus.runtime.sendMessage({ type: "HANDOFF_RESUME", runId: "run-164-a" });
+    expect(again.ok).toBe(false);
+    expect(again.error).toContain("running, not resumable");
+    const missing = await bus.runtime.sendMessage({ type: "HANDOFF_RESUME", runId: "run-none" });
+    expect(missing.ok).toBe(false);
+  });
+
+  it("the pause line's ▶ Resume control re-arms the run and sends the continuation turn", async () => {
+    const chatId = Object.keys(bus.storage.local._store.cobrowse_convos || {})[0] || "conv-164-b";
+    seedPausedRun("run-164-b", chatId);
+    // Background HANDOFF_UPDATE broadcasts reach the panel through the shared bus.
+    await bus.runtime.sendMessage({
+      type: "HANDOFF_UPDATE",
+      run: bus.storage.session._store["cobrowse_handoff_runs"]["run-164-b"],
+    });
+    await waitUntil(() => {
+      const btns = [...panelWin.document.querySelectorAll("#messages .msg-system button")];
+      return btns.some((b: any) => (b.textContent || "").includes("Resume"));
+    }, 5000);
+
+    const askBase = askLog.length;
+    const btn = [...panelWin.document.querySelectorAll("#messages .msg-system button")]
+      .find((b: any) => (b.textContent || "").includes("Resume")) as any;
+    btn.click();
+    await waitUntil(() => askLog.length > askBase && askLog[askLog.length - 1].handoffRunId === "run-164-b", 10_000);
+    const ask = askLog[askLog.length - 1];
+    expect(ask.userQuery).toContain("[handoff-run continuation]");
+    expect(bus.storage.session._store["cobrowse_handoff_runs"]["run-164-b"].status).toBe("running");
+  }, 15000);
+});
