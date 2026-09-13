@@ -198,7 +198,46 @@ describe("handoff run loop (Lane E)", () => {
     expect(notifications.find((n) => n.id === `handoff-${run.runId}`)?.opts.title).toBe("Zo handoff needs you");
   });
 
-  it("STOP aborts the run; a late turn completion does not chain", async () => {    const run = await startRun();
+  it("continuation turns drop turn 1's send-once attachments (#159)", async () => {
+    const run = await startRun();
+    let turn = 0;
+    fm.handle(() => {
+      turn++;
+      if (turn === 1) return envelope({ actions: [{ type: "navigate", url: "https://so.example" }] });
+      return envelope({ actions: [{ type: "done", response: "done" }] });
+    });
+    const asksBefore = fm.to("/zo/ask").length;
+    port.postMessage({
+      sessionId: 970, type: "ASK_ZO", chatId: run.chatId, modeId: "cobrowse",
+      userQuery: run.goal, handoffRunId: run.runId,
+      // send-once attachments — must ride turn 1 only
+      skills: [{ name: "thread-summarizer", description: "summarize a thread" }],
+      workspaceFiles: [{ path: "/home/workspace/notes.md" }],
+      tabContexts: [{ ref: "T1", url: "https://other.example", title: "Other tab", excerpt: "hello" }],
+    });
+    const finalRun = await panelLoop(run, { sessionBase: "970" });
+    expect(finalRun.status).toBe("done");
+    const asks = fm.to("/zo/ask").slice(asksBefore);
+    expect(asks.length).toBe(2);
+    const first = String(asks[0].body.input);
+    const second = String(asks[1].body.input);
+    // Turn 1 carried them…
+    expect(first).toContain("## Skills to Run");
+    expect(first).toContain("thread-summarizer");
+    expect(first).toContain("## Referenced Files");
+    expect(first).toContain("notes.md");
+    expect(first).toContain("## Referenced Tabs");
+    // …the continuation must not (progress report + continue prompt only).
+    expect(second).toContain("[handoff-run continuation]");
+    expect(second).not.toContain("## Skills to Run");
+    expect(second).not.toContain("thread-summarizer");
+    expect(second).not.toContain("## Referenced Files");
+    expect(second).not.toContain("notes.md");
+    expect(second).not.toContain("## Referenced Tabs");
+  });
+
+  it("STOP aborts the run; a late turn completion does not chain", async () => {
+    const run = await startRun();
     fm.handle(() => envelope({ actions: [{ type: "navigate", url: "https://y.example" }] }));
     const asksBefore = fm.to("/zo/ask").length;
     port.postMessage({ sessionId: 930, type: "ASK_ZO", chatId: run.chatId, modeId: "cobrowse", userQuery: run.goal, handoffRunId: run.runId });
