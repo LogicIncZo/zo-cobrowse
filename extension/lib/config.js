@@ -1,6 +1,8 @@
 // Zo Co-browse — Shared Config Module
 // Single source of truth for all config keys, defaults, load/save helpers.
 
+import { DEFAULT_BUDGET } from './handoff.js';
+
 export const STORAGE = {
   THEME: 'cobrowse_theme',
   TOKEN: 'zoAccessToken',
@@ -29,6 +31,10 @@ export const STORAGE = {
   // Zo web UI origin (e.g. https://<slug>.zo.computer) — enables the
   // "#con_…" copy chip + ↗ Open-in-Zo deep link (0.2.8.0). Not a credential.
   ZO_WEB_ORIGIN: 'zoWebOrigin',
+  // !handoff run budget (#158): maxTurns/maxNavigations/maxMinutes. The
+  // numeric defaults live in lib/handoff.js (DEFAULT_BUDGET) — this key makes
+  // them config-resident and overridable via storage.sync.
+  HANDOFF_BUDGET: 'cobrowse_handoff_budget',
 };
 
 export const DEFAULTS = {
@@ -47,6 +53,7 @@ export const DEFAULTS = {
   [STORAGE.TTS_AUTO_READ]: false,
   [STORAGE.QUICK_ACTIONS]: [],
   [STORAGE.ZO_WEB_ORIGIN]: '',
+  [STORAGE.HANDOFF_BUDGET]: { ...DEFAULT_BUDGET },
 };
 
 const SENSITIVE_KEYS = new Set([STORAGE.TOKEN, STORAGE.SPACE_ENDPOINT]);

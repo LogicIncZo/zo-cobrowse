@@ -5,6 +5,7 @@ import {
   loadConfig,
   saveConfig,
 } from "../extension/lib/config.js";
+import { DEFAULT_BUDGET } from "../extension/lib/handoff.js";
 
 /**
  * Behavioral tests for extension/lib/config.js.
@@ -138,6 +139,15 @@ describe("DEFAULTS + STORAGE — shape invariants", () => {
 
   it("the default active mode is cobrowse", () => {
     expect(DEFAULTS[STORAGE.ACTIVE_MODE]).toBe("cobrowse");
+  });
+
+  // #158: the !handoff budget is config-resident (was lib/handoff.js-only),
+  // with lib/handoff.js's DEFAULT_BUDGET as the single numeric source.
+  it("the handoff budget defaults live in DEFAULTS, matching DEFAULT_BUDGET", () => {
+    expect(DEFAULTS[STORAGE.HANDOFF_BUDGET]).toEqual(DEFAULT_BUDGET);
+    // A copy, not the shared object — a consumer mutating config must not
+    // corrupt the lib default for every other reader.
+    expect(DEFAULTS[STORAGE.HANDOFF_BUDGET]).not.toBe(DEFAULT_BUDGET);
   });
 });
 
