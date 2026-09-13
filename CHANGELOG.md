@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.2.8.5] — 2026-09-13
+
+### Fixed — stabilization bash point release
+- **Handoff runs survive switching panel chats mid-run (#162).** A chained
+  turn completing while its chat was backgrounded took the background-chat
+  branch of `STREAM_DONE`, which only persisted the turn and parked its
+  actions — no `EXECUTE_ACTIONS` carrying `handoffRunId`, so no continuation
+  turn was ever chained and the run sat `running` forever with the ▶ badge
+  stuck. The backgrounded branch now executes the active run's turn as a
+  batch (pinned to the run's own tab — never the page the user switched to),
+  without rendering rows into the visible chat and without parking the actions
+  for a later double-run; a compact `🤖 Executed in background` record is
+  persisted into the run's conversation so the turn's work is visible on
+  return.
+
 ## [0.2.8.4] — 2026-09-13
 
 ### Fixed — stabilization bash point release
