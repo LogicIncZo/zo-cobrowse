@@ -2386,7 +2386,14 @@ async function executeActions(actions, tabId, opts = {}) {
       const isSubmit = probe && probe.form &&
         (probe.type === 'submit' || SUBMIT_TEXT_RE.test(probe.text || ''));
       if (isSubmit) {
-        results.push({ ok: false, type: 'click', blocked: true, error: 'blocked submit on sensitive page - review and submit yourself' });
+        // #163: on a handoff run the refusal is a PARK, not a failure — the
+        // user still performs it from the review card, so it must reach the
+        // run's park log / "Parked for the user" count like any boundary stop.
+        results.push({
+          ok: false, type: 'click', blocked: true,
+          ...(opts.boundaryMode ? { handoffParked: true, action } : {}),
+          error: 'blocked submit on sensitive page - review and submit yourself',
+        });
         continue;
       }
     }
@@ -2407,7 +2414,11 @@ async function executeActions(actions, tabId, opts = {}) {
           (probe.tag === 'input' && (probe.type === 'submit' || probe.type === 'button')) ||
           probe.role === 'button');
         if (isActionButton) {
-          results.push({ ok: false, type: 'click', blocked: true, error: 'blocked action-button click after a form fill - review the page and click it yourself' });
+          results.push({
+            ok: false, type: 'click', blocked: true,
+            ...(opts.boundaryMode ? { handoffParked: true, action } : {}),
+            error: 'blocked action-button click after a form fill - review the page and click it yourself',
+          });
           continue;
         }
       }

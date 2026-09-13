@@ -394,6 +394,45 @@ describe("form-fill sensitivity gate (#26)", () => {
     expect(r.results[1].error).toMatch(/blocked submit/i);
   });
 
+  it("a handoff run's blocked submit is PARKED, not failed (#163)", async () => {
+    // A live (running) run — the loop only tallies/parks for runs it owns.
+    bus.storage.session._store["cobrowse_handoff_runs"] = {
+      "run-163": {
+        runId: "run-163", chatId: "conv-163", goal: "check out the cart",
+        status: "running", boundaryMode: "readonly",
+        budget: { maxTurns: 6, maxNavigations: 12, maxMinutes: 15 },
+        usage: { turns: 0, navigations: 0, startedAt: Date.now() },
+        pagesVisited: [], parkLog: [], tabId: checkoutTabId,
+        createdAt: Date.now(), updatedAt: Date.now(),
+      },
+    };
+    const r = await bus.runtime.sendMessage({
+      type: "EXECUTE_ACTIONS",
+      handoffRunId: "run-163",
+      boundaryMode: "readonly",
+      tabId: checkoutTabId,
+      actions: [
+        { type: "fill_form", values: [{ target: "Email", value: "a@b.c" }] },
+        { type: "click", selector: "#checkout-submit" },
+      ],
+      confirmed: true,
+    });
+    // The refusal carries the park marker + the action (pre-fix it was a bare
+    // blocked result, so it rendered as "⚠️ failed" and never entered parkLog).
+    expect(r.results[1].handoffParked).toBe(true);
+    expect(r.results[1].action).toEqual({ type: "click", selector: "#checkout-submit" });
+    // The park write happens after the response (the loop is event-driven),
+    // so poll for it.
+    let parked: any[] = [];
+    for (let i = 0; i < 60 && parked.length === 0; i++) {
+      const st = await bus.runtime.sendMessage({ type: "HANDOFF_STATUS", runId: "run-163" });
+      parked = st.run?.parkLog || [];
+      if (parked.length === 0) await new Promise((res) => setTimeout(res, 50));
+    }
+    expect(parked).toHaveLength(1);
+    expect(parked[0].reason).toMatch(/blocked submit/i);
+  });
+
   it("benign fill_form executes immediately (no confirm)", async () => {
     const r = await bus.runtime.sendMessage({
       type: "EXECUTE_ACTIONS",
