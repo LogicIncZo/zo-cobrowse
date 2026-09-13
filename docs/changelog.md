@@ -6,17 +6,7 @@ This page mirrors everything **unreleased** on `dev`.
 
 ## [Unreleased]
 
-### Fixed
-- **Handoff runs no longer leak into other chats (#165).** `activeHandoffRun`
-  was panel-global: while a run was live, a manual query typed in ANY other
-  chat carried the run's id and was conscripted as a handoff turn — hijacking
-  the run's Zo thread and executing as a handoff batch. The run id now rides
-  only sends from the run's own chat. A handoff turn that falls back to
-  non-streaming (no stream port) now pauses the run honestly via the new
-  `HANDOFF_PAUSE` message (the pause line's ▶ Resume re-issues it) instead of
-  stranding it in `priming` forever, and the SW-restart sweep pauses stranded
-  `priming` runs too. Priming runs are pausable in the state machine
-  (`lib/handoff.js` transitions).
+
 
 ## [0.2.7.1] — 2026-09-05
 
