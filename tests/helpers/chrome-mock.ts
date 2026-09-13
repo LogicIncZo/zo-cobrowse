@@ -326,15 +326,31 @@ const tabsApi: any = {
       if (!dom || typeof func !== "function") {
         return Promise.reject(new Error("Fake scripting.executeScript refused (no DOM configured)"));
       }
-      const injected = new Function(
-        "document",
-        "window",
-        "location",
-        "Event",
-        "CSS",
-        `return (${func.toString()});`,
-      )(dom.document, dom, dom.location, dom.Event, dom.CSS);
-      return Promise.resolve([{}]).then(async () => [{ result: await injected(...args) }]);
+      // Rebind the injected function's free document/window/location/Event/CSS
+      // references to the happy-dom instance for the duration of the call —
+      // the real extension serialises self-contained page-side functions.
+      const g = globalThis as any;
+      const domGlobals: Record<string, any> = {
+        document: dom.document,
+        window: dom,
+        location: dom.location,
+        Event: dom.Event,
+        CSS: dom.CSS,
+      };
+      const prev: Record<string, any> = {};
+      for (const key of Object.keys(domGlobals)) {
+        prev[key] = g[key];
+        g[key] = domGlobals[key];
+      }
+      return Promise.resolve([{}]).then(async () => {
+        try {
+          return [{ result: await func(...args) }];
+        } finally {
+          for (const key of Object.keys(domGlobals)) {
+            g[key] = prev[key];
+          }
+        }
+      });
     },
     insertCSS: () => Promise.resolve(),
   };

@@ -1,7 +1,7 @@
 /**
  * replay.ts — Replay captured .sse fixture bytes through the real Zo-cobrowse
  * stream parsers (extractStreamContent, finishStream, safeText) extracted from
- * extension/background.js via node:vm.
+ * extension/background.js via the shared sandbox helper (tests/helpers/vm-sandbox.ts).
  *
  * Usage:
  *   import { replaySse, replaySseFromFile } from "./replay.js";
@@ -14,7 +14,7 @@
 
 import { readFileSync } from "fs";
 import { resolve } from "path";
-import * as vm from "node:vm";
+import { runInSandbox } from "../helpers/vm-sandbox";
 import { normalizeActions } from "../../extension/lib/modes.js";
 import { safeText } from "../../extension/lib/prompt.js";
 
@@ -136,8 +136,6 @@ function loadParsers(): LoadedParsers {
     summarizeToolResult,
     console: { debug: () => {}, log: () => {}, warn: () => {}, error: () => {} },
   };
-  vm.createContext(sandbox);
-
   // safeText + safePost are injected above (no longer VM-extracted). The
   // remaining extractions (extractStreamContent, finishStream) still run their
   // background.js source slices in this sandbox.
@@ -149,10 +147,10 @@ function loadParsers(): LoadedParsers {
 
   // Find the end of extractStreamContent: brace-match from its body `{`
   const escEnd = braceEndFromBody(bgSource, escStart);
-  vm.runInContext(bgSource.slice(escStart, escEnd), sandbox);
+  runInSandbox(bgSource.slice(escStart, escEnd), sandbox);
 
   // Run finishStream
-  vm.runInContext(bgSource.slice(fsStart, fsEnd), sandbox);
+  runInSandbox(bgSource.slice(fsStart, fsEnd), sandbox);
 
   // Verify
   for (const fn of ["extractStreamContent", "safeText", "finishStream", "safePost", "stripCodeFence", "summarizeToolResult"]) {
