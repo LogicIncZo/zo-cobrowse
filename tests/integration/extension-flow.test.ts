@@ -1488,7 +1488,7 @@ describe("handoff run-state isolation (#165) — the runId never leaves the run'
     const titleA = String(convA?.title || convA?.messages?.[0]?.text || "");
     expect(titleA.length).toBeGreaterThan(0);
     const aTab = [...panelWin.document.querySelectorAll("#chat-tabs .chat-tab")]
-      .find((t: any) => (t.textContent || "").startsWith(titleA.slice(0, 60))) as any;
+      .find((t: any) => (t.textContent || "").includes(titleA.slice(0, 60))) as any;
     expect(aTab).toBeTruthy();
     aTab.click();
     await new Promise((r) => setTimeout(r, 300));
@@ -1545,11 +1545,11 @@ describe("handoff survives a backgrounded chat (#162)", () => {
     await new Promise((r) => setTimeout(r, 300));
     const bLabel = activeTabLabel();
     expect(bLabel.length).toBeGreaterThan(0);
-    expect(bLabel.startsWith(titleA.slice(0, 40))).toBe(false);
-    const aTab = tabList().find((t) => (t.textContent || "").startsWith(titleA.slice(0, 40)));
+    expect(bLabel.includes(titleA.slice(0, 40))).toBe(false);
+    const aTab = tabList().find((t) => (t.textContent || "").includes(titleA.slice(0, 40)));
     expect(aTab).toBeTruthy();
     aTab.click();
-    await waitUntil(() => activeTabLabel().startsWith(titleA.slice(0, 40)), 5000);
+    await waitUntil(() => activeTabLabel().includes(titleA.slice(0, 40)), 5000);
 
     bus.storage.session._store["cobrowse_handoff_runs"] = {
       "run-162-bg": {
@@ -1612,7 +1612,7 @@ describe("handoff survives a backgrounded chat (#162)", () => {
     expect(bTab).toBeTruthy();
     bTab.click();
     await waitUntil(() => activeTabLabel().trim() === bLabel, 5000);
-    expect(activeTabLabel().startsWith(titleA.slice(0, 40))).toBe(false);
+    expect(activeTabLabel().includes(titleA.slice(0, 40))).toBe(false);
 
     // The user also switches their BROWSER tab: the panel adopts that tab as
     // currentContext (display-only). The run's turn must NOT act on it.
@@ -1774,5 +1774,83 @@ describe("parked handoff actions reach the review card (#163)", () => {
     expect(bar()?.className || "").not.toContain("hidden");
     const card = panelWin.document.querySelector("#actions-reasoning") as any;
     expect(String(card?.textContent || "")).toContain("run these yourself");
+  }, 30000);
+});
+
+describe("run-tab marker (#166)", () => {
+  const envelope166 = (obj: unknown) => sseResponse(zoSseText({ text: JSON.stringify(obj) }));
+
+  it("the run's chat tab carries 🤖 while it works and drops it when done", async () => {
+    const RUN_TAB = 46;
+    bus.tabs.registerTab({ id: RUN_TAB, url: "https://pinned166.example/step", title: "Run 166", active: false });
+    const chatIdA = (bus.storage.local._store.cobrowse_open_tabs || {}).activeId
+      || Object.keys(bus.storage.local._store.cobrowse_convos || {})[0];
+    expect(chatIdA).toBeTruthy();
+    const titleA = String(
+      bus.storage.local._store.cobrowse_convos[chatIdA]?.title
+      || bus.storage.local._store.cobrowse_convos[chatIdA]?.messages?.find((m: any) => m.role === "user")?.text
+      || "");
+    expect(titleA.length).toBeGreaterThan(0);
+    const tabList = () => [...panelWin.document.querySelectorAll("#chat-tabs .chat-tab")] as any[];
+    const activeTabLabel = () => String(panelWin.document.querySelector("#chat-tabs .chat-tab-active")?.textContent || "");
+
+    // The tab bar only renders with >1 open chat — open a second, then come
+    // back to the run's chat.
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await new Promise((r) => setTimeout(r, 300));
+    const aTab = tabList().find((t) => (t.textContent || "").includes(titleA.slice(0, 40)));
+    expect(aTab).toBeTruthy();
+    aTab.click();
+    await waitUntil(() => activeTabLabel().includes(titleA.slice(0, 40)), 5000);
+
+    bus.storage.session._store["cobrowse_handoff_runs"] = {
+      "run-166": {
+        runId: "run-166", chatId: chatIdA, goal: "walk the checkout",
+        status: "paused", boundaryMode: "readonly",
+        budget: { maxTurns: 6, maxNavigations: 12, maxMinutes: 15 },
+        usage: { turns: 1, navigations: 0, startedAt: Date.now() - 30_000 },
+        pagesVisited: [], parkLog: [], tabId: RUN_TAB,
+        createdAt: Date.now() - 60_000, updatedAt: Date.now() - 20_000,
+      },
+    };
+    await bus.runtime.sendMessage({
+      type: "HANDOFF_UPDATE",
+      run: bus.storage.session._store["cobrowse_handoff_runs"]["run-166"],
+    });
+    await waitUntil(() => {
+      const btns = [...panelWin.document.querySelectorAll("#messages .msg-system button")];
+      return btns.some((b: any) => (b.textContent || "").includes("Resume"));
+    }, 5000);
+
+    // Turn 1 is HELD, so the run stays live while we look at the tab bar.
+    const gate166 = deferredSse();
+    let asks = 0;
+    fm.handle((url, _init, req) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      const input = String((req as any)?.body?.input || "");
+      if (!input.includes("[handoff-run continuation]")) return sseResponse(zoSseText({ text: "ok" }));
+      asks++;
+      if (asks === 1) return gate166.response;
+      return envelope166({ actions: [{ type: "done", response: "Walkthrough finished" }] });
+    });
+
+    ([...panelWin.document.querySelectorAll("#messages .msg-system button")] as any[])
+      .find((b: any) => (b.textContent || "").includes("Resume")).click();
+
+    await waitUntil(() => tabList().some((t) => String(t.textContent || "").includes("🤖")), 10_000);
+    const runTabEl = tabList().find((t) => String(t.textContent || "").includes(titleA.slice(0, 40)));
+    expect(String(runTabEl?.textContent || "")).toContain("🤖");
+    const other = tabList().find((t) => !String(t.textContent || "").includes(titleA.slice(0, 40)));
+    expect(String(other?.textContent || "")).not.toContain("🤖");
+
+    // Release turn 1; the run finishes and the marker clears.
+    gate166.push(zoSseText({ text: JSON.stringify({ actions: [{ type: "done", response: "Walkthrough finished" }] }) }));
+    gate166.end();
+    await waitUntil(() => {
+      const st = bus.storage.session._store["cobrowse_handoff_runs"]["run-166"];
+      return st && st.status === "done";
+    }, 10_000);
+    await waitUntil(() => tabList().every((t) => !String(t.textContent || "").includes("🤖")), 10_000);
   }, 30000);
 });

@@ -317,6 +317,7 @@ async function finishInit() {
           // done / paused / aborted / blocked — the loop has left the chat.
           activeHandoffRun = null;
           removeHandoffLine();
+          renderChatTabs(); // drop the run marker from the chat tab (#166)
           const icon = { done: '✅', paused: '⏸️', aborted: '🛑', blocked: '⛔' }[run.status] || 'ℹ️';
           // On done, the deliverable already rendered as the turn's answer —
           // repeating run.stopReason here showed the digest twice, once with
@@ -1130,15 +1131,19 @@ function renderChatTabs() {
   chatTabsEl.replaceChildren();
   if (tabsState.openIds.length <= 1) return; // a single tab adds noise, not value
   const streamingId = streamSession.active ? streamSession.chatId : null;
+  // #166: the chat a live handoff run is driving carries the 🤖 run marker.
+  const handoffId = activeHandoffRun?.chatId || null;
   for (const id of tabsState.openIds) {
     const convo = conversations[id];
     if (!convo) continue;
+    const isRun = id === handoffId;
+    const labelText = tabTitleFor(convo, { handoff: isRun });
     const tab = document.createElement('button');
     tab.type = 'button';
     tab.className = 'chat-tab' + (id === activeId ? ' chat-tab-active' : '');
     tab.setAttribute('role', 'tab');
     tab.setAttribute('aria-selected', String(id === activeId));
-    tab.title = tabTitleFor(convo) + (id === streamingId ? ' — generating…' : '');
+    tab.title = labelText + (id === streamingId ? ' — generating…' : '');
     if (id === streamingId && id !== activeId) {
       // Pulsing dot marks BACKGROUND chats still generating (#135) — on the
       // active tab the user is already watching the stream live.
@@ -1148,7 +1153,7 @@ function renderChatTabs() {
     }
     const label = document.createElement('span');
     label.className = 'chat-tab-label';
-    label.textContent = tabTitleFor(convo);
+    label.textContent = labelText;
     tab.appendChild(label);
     const close = document.createElement('span');
     close.className = 'chat-tab-close';
@@ -1210,6 +1215,7 @@ async function resumeHandoffRun(runId) {
   const run = res.run;
   activeHandoffRun = run;
   removeHandoffLine();
+  renderChatTabs(); // the run's chat tab gets the 🤖 marker (#166)
   if (activeId !== run.chatId) await switchToConversation(run.chatId);
   input.value = safeText(res.continuationQuery) || `Resume the handoff run: ${safeText(run.goal)}`;
   await sendQuery();
@@ -4829,6 +4835,7 @@ sendQuery = async function() {
         return;
       }
       activeHandoffRun = start.run;
+      renderChatTabs(); // mark the run's chat tab (#166)
       effectiveQuery = `${bang.query}\n\n${handoffInstructions(start.run)}`;
       tempMode = 'cobrowse';
     }
@@ -5114,6 +5121,7 @@ sendQuery = async function() {
       reason: 'streaming unavailable — non-streaming fallback cannot drive the run',
     });
     addMessage('system', '⏸️ Handoff paused — streaming unavailable. Resume to retry once the connection is back.');
+    renderChatTabs(); // the run left the loop — drop its tab marker (#166)
   }
   const resp = await chrome.runtime.sendMessage({
     type: 'ASK_ZO',

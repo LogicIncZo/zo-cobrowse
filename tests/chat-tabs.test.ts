@@ -181,6 +181,15 @@ describe("tabTitleFor", () => {
     expect(tabTitleFor(conv("a", { title: "   " }))).toBe("New Chat");
     expect(tabTitleFor(null)).toBe("New Chat");
   });
+
+  it("prefixes the run marker for a handoff run's chat (#166)", () => {
+    const c = conv("a", { title: "Digest the tabs" });
+    expect(tabTitleFor(c, { handoff: true })).toBe("🤖 Digest the tabs");
+    // The cap still applies to the title itself, and the default is unmarked.
+    expect(tabTitleFor(conv("b", { title: "y".repeat(80) }), { handoff: true }))
+      .toBe(`🤖 ${"y".repeat(TITLE_MAX)}`);
+    expect(tabTitleFor(c)).toBe("Digest the tabs");
+  });
 });
 
 describe("renameConversation", () => {
