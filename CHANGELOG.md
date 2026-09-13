@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.2.8.11] — 2026-09-13
+
+### Fixed — stabilization bash point release
+- **Parked handoff actions reach the review card, and backstop refusals park
+  (#163).** Boundary-parked actions were display-only rows on the batch card —
+  nothing added them to the #26 review card and nothing could run them, though
+  the spec has the user perform them. They now register as pending actions
+  (Run All / Skip), on the live chat or on the conversation when the turn was
+  backgrounded. Separately, the sensitive-page submit backstop and the
+  post-fill action-button rule fire before the boundary check and returned a
+  bare `blocked`, so on a run those refusals never entered the park log
+  (under-counting "parked for the user") and rendered as failures; they now
+  carry the park marker and the action while a run is active.
+
 ## [0.2.8.10] — 2026-09-13
 
 ### Fixed — stabilization bash point release
