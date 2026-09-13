@@ -1069,6 +1069,16 @@ async function switchToConversation(id) {
       span.className = 'msg-streaming-text';
       span.textContent = streamSession.fullText;
       body.appendChild(span);
+    } else if (body && looksLikeActionJson(streamSession.fullText)) {
+      // #169: an action-envelope turn has no prose to replay. Without the
+      // placeholder the user returns to a blank bubble that never updates
+      // until STREAM_DONE — the live progress the first chunk had created is
+      // lost. Re-create the SAME tagged placeholder so STREAM_DONE swaps it
+      // for the done response.
+      const span = document.createElement('span');
+      span.className = 'msg-actions-placeholder';
+      span.textContent = 'Preparing actions…';
+      body.appendChild(span);
     }
     startStreamTimer(streamSession.msgEl);
   } else if (streamSession.active) {
