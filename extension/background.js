@@ -472,6 +472,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       });
       return true;
     }
+    case 'HANDOFF_PAUSE': {
+      // {runId, reason?} → {ok, run}. Panel-side honest pause (#165): a
+      // handoff turn that falls back to non-streaming cannot drive the loop,
+      // so the panel pauses the run (priming included — the transition table
+      // allows pause from priming) instead of stranding it.
+      handoffGet({ runId: request.runId }).then(async (run) => {
+        if (!run) return sendResponse({ ok: false, error: 'no such handoff run' });
+        const res = handoffTransition(run, 'pause', { now: Date.now(), reason: safeText(request.reason) || 'paused' });
+        handoffTurnCtx.delete(request.runId);
+        const saved = await handoffPut(res.ok ? res.run : run);
+        sendResponse({ ok: res.ok, run: saved, error: res.ok ? undefined : res.error });
+      });
+      return true;
+    }
     case 'HANDOFF_STATUS': {
       handoffGet(request.runId ? { runId: request.runId } : { chatId: request.chatId }).then((run) => sendResponse({ ok: true, run }));
       return true;
@@ -2137,13 +2151,14 @@ async function handoffGet({ runId, chatId } = {}) {
   return null;
 }
 
-// SW restart: a running run lost its turn context — pause it honestly so the
-// panel can offer resume instead of the user waiting on a dead loop.
+// SW restart: a running (or priming — turn 1 never landed) run lost its turn
+// context — pause it honestly so the panel can offer resume instead of the
+// user waiting on a dead loop. (#165: priming runs were skipped and stranded.)
 (function handoffPauseOrphans() {
   handoffStore.load().then(async (runs) => {
     let dirty = false;
     for (const run of Object.values(runs)) {
-      if (run.status === 'running') {
+      if (run.status === 'running' || run.status === 'priming') {
         const res = handoffTransition(run, 'pause', { now: Date.now(), reason: 'extension restarted — resume to continue' });
         if (res.ok) { runs[run.runId] = res.run; dirty = true; }
       }
