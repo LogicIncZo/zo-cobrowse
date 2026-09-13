@@ -34,6 +34,7 @@ Git-flow model — see `CONTRIBUTING.md` for the full rules. Short version:
 - **`backend/relay.ts`** — optional HTTP+WebSocket service for multi-participant sessions. Not required for single-user co-browsing.
 - **`extension/AGENTS.md`** — Zo API reference (endpoints, auth, SSE event types). Read before touching API calls in `background.js`.
 - **`skill/`** — the Zo-side companion to the extension: co-browse personas, preset library, and the action-schema protocol (`skill/SKILL.md`, `skill/references/presets.md`; presets sync via `skill/scripts/sync-presets.ts`). Presets feed the Mode system through `presetToMode` in `modes.js`.
+- **`scripts/swamp/`** — the improvement loop as a standing gated [Swamp](https://swamp-club.com) `@swamp/software-factory` machine (`factory.yaml`): intake → implement → verify → adversarial review → merge, run on loop over findings → issues → backlog; releases are owner-called items, not per-fix. Evidence via `record-gate.sh`; Swamp mirrors the repo's gates for local agent runs — CI stays the enforcement. Setup + drive-loop walkthrough: `docs/swamp-factory.md`; the committed YAML is schema-tested (`tests/swamp-factory.test.ts`).
 
 ## Key patterns
 
