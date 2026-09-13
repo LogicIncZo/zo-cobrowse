@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.2.8.7] — 2026-09-13
+
+### Fixed — stabilization bash point release
+- **The handoff run budget is now config-resident and tunable (#158).** The
+  budget that caps an unattended run (turns / navigations / minutes) was only
+  ever the library default — `HANDOFF_START` read a `budget` off the request,
+  which nothing ever sent, so every run used the same hardcoded cap and no
+  user could adjust it. `DEFAULT_BUDGET` is now part of the extension's config
+  (`cobrowse_handoff_budget`, seeded from the library default and synced at
+  startup like the other keys), and `HANDOFF_START` falls back to it when a
+  request carries no explicit budget.
+
 ## [0.2.8.6] — 2026-09-13
 
 ### Fixed — stabilization bash point release
