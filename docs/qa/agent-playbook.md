@@ -143,6 +143,11 @@ Per finding file, exactly one of:
 The queue (presence of `docs/qa/findings/*.md`) gates releases:
 `bun run qa:gate`. Empty queue = releasable.
 
+The find→fix→review loop can be driven as a standing gated Swamp state
+machine (`scripts/swamp/factory.yaml`, one work item per finding, loop fed
+finding → issue → backlog) — setup, walkthrough, and the gate↔command map:
+`docs/swamp-factory.md`.
+
 ## QA_REPORT round-entry template
 
 ```markdown
