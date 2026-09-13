@@ -1284,6 +1284,37 @@ describe("superseded-stream recovery (#156) — a stale session must not cost it
   }, 20000);
 });
 
+describe("handoff terminal line renders once (#160)", () => {
+  it("a repeated terminal HANDOFF_UPDATE does not append a second Handoff done line", async () => {
+    const run = {
+      runId: "run-160",
+      chatId: "conv-160",
+      goal: "Digest the tabs",
+      status: "done",
+      stopReason: "",
+      boundaryMode: "readonly",
+      budget: { maxTurns: 6, maxNavigations: 12, maxMinutes: 15 },
+      usage: { turns: 1, navigations: 0, startedAt: Date.now() - 30_000 },
+      pagesVisited: [],
+      parkLog: [],
+      tabId: TAB_ID,
+      createdAt: Date.now() - 60_000,
+      updatedAt: Date.now(),
+    };
+    const doneLines = () =>
+      [...panelWin.document.querySelectorAll("#messages .msg-system")]
+        .filter((el: any) => (el.textContent || "").includes("Handoff done")).length;
+    const before = doneLines();
+    await bus.runtime.sendMessage({ type: "HANDOFF_UPDATE", run });
+    await waitUntil(() => doneLines() === before + 1, 5000);
+    // A duplicate push for the same run+status (a second saving path) must be
+    // swallowed — not rendered as another "✅ Handoff done".
+    await bus.runtime.sendMessage({ type: "HANDOFF_UPDATE", run });
+    await new Promise((r) => setTimeout(r, 150));
+    expect(doneLines()).toBe(before + 1);
+  }, 15000);
+});
+
 describe("handoff resume (#164) — paused runs are resumable from the panel", () => {
   const seedPausedRun = (runId: string, chatId: string) => {
     bus.storage.session._store["cobrowse_handoff_runs"] = {
@@ -1344,6 +1375,7 @@ describe("handoff resume (#164) — paused runs are resumable from the panel", (
     expect(bus.storage.session._store["cobrowse_handoff_runs"]["run-164-b"].status).toBe("running");
   }, 15000);
 });
+
 
 describe("handoff run-state isolation (#165) — the runId never leaves the run's chat", () => {
   it("HANDOFF_PAUSE pauses a priming run; unknown and terminal ids refuse", async () => {

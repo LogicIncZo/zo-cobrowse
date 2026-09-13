@@ -457,6 +457,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       handoffGet({ runId: request.runId }).then(async (run) => {
         if (!run) return sendResponse({ ok: false, error: 'no such handoff run' });
         handoffTurnCtx.delete(request.runId);
+        // A run that already left the loop (done/aborted) has nothing to stop.
+        // Saving it again would re-fire handoffMaybeNotify + re-push
+        // HANDOFF_UPDATE, showing the user a second "Handoff done" line for a
+        // run that ended once (#160). Report it as a no-op instead.
+        if (run.status === 'done' || run.status === 'aborted') {
+          return sendResponse({ ok: false, run, error: `run already ${run.status}` });
+        }
         const res = handoffTransition(run, 'abort', { now: Date.now(), reason: safeText(request.reason) || 'stopped by user' });
         const saved = await handoffPut(res.ok ? res.run : run);
         sendResponse({ ok: res.ok, run: saved, error: res.ok ? undefined : res.error });

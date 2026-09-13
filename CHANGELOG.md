@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.2.8.9] — 2026-09-13
+
+### Fixed — stabilization bash point release
+- **Stopping an already-finished handoff run is a no-op (#160).** `HANDOFF_STOP`
+  saved the run even when the abort was rejected because the run had already
+  left the loop, which re-ran the completion notification (same id, re-alerted)
+  and re-pushed the terminal update — the panel rendered a second
+  "✅ Handoff done" line. The background now answers `run already done|aborted`
+  without saving, and the panel renders each terminal line once per
+  run + status (a paused run that resumes and later finishes still gets its
+  own line).
+
 ## [0.2.8.8] — 2026-09-13
 
 ### Fixed — stabilization bash point release

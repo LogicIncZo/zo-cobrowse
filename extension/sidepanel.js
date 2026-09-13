@@ -170,6 +170,9 @@ let pendingActionsReasoning = '';   // reasoning to attach to the done-answer bu
 // Lane E: the live handoff run started from THIS panel (null when none).
 // Cleared by HANDOFF_UPDATE on done/paused/aborted, or on HANDOFF_STOP.
 let activeHandoffRun = null;
+// `<runId>:<status>` for every terminal line already rendered — a repeat
+// HANDOFF_UPDATE for a finished run must not append a second one (#160).
+const terminalHandoffLines = new Set();
 let currentContext = null;
 let actionRunning = false;
 let isHistoryView = false;
@@ -303,6 +306,14 @@ async function finishInit() {
           // lands before the panel has registered the run; then it's a no-op).
           if (activeHandoffRun) renderHandoffLine(run);
         } else {
+          // Terminal — render its line exactly once per run+status. A duplicate
+          // push (e.g. a second saving path for the same run) would otherwise
+          // append another "✅ Handoff done" (#160); keying on the status keeps
+          // a paused run's later finish as its own line.
+          const key = `${run.runId}:${run.status}`;
+          if (terminalHandoffLines.has(key)) return;
+          terminalHandoffLines.add(key);
+          if (terminalHandoffLines.size > 50) terminalHandoffLines.delete(terminalHandoffLines.values().next().value);
           // done / paused / aborted / blocked — the loop has left the chat.
           activeHandoffRun = null;
           removeHandoffLine();
