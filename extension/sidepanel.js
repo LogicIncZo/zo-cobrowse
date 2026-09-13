@@ -1090,7 +1090,7 @@ async function switchToConversation(id) {
 
 async function deleteConversation(id) {
   // A generating chat can't outlive its stream — cancel first.
-  if (streamSession.active && streamSession.chatId === id) cancelStream();
+  if (streamSession.active && streamSession.chatId === id && id === activeId) cancelStream();
   delete conversations[id];
   chatTabRefs.delete(id);
   tabsState = pruneChatTabs(tabsState, Object.keys(conversations));
@@ -1185,7 +1185,11 @@ async function closeChatTabById(id) {
     activeHandoffRun = null;
     chrome.runtime.sendMessage({ type: 'HANDOFF_STOP', runId, reason: 'run tab closed' });
   }
-  if (streamSession.active && streamSession.chatId === id) cancelStream();
+  // #168: closing a BACKGROUND chat's tab must not orphan its stream — the
+  // turn keeps accumulating into that conversation and lands in history (the
+  // panel reattaches when the chat is reopened). Only the chat the user is
+  // actually watching cancels on close; deleting a conversation cancels too.
+  if (streamSession.active && streamSession.chatId === id && id === activeId) cancelStream();
   const next = closeChatTab(tabsState, id);
   if (next.activeId && next.activeId !== activeId) {
     await switchToConversation(next.activeId);

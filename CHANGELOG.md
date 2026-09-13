@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.2.8.14] — 2026-09-13
+
+### Fixed — stabilization bash point release
+- **Closing a background chat's tab no longer orphans its stream (#168).**
+  `closeChatTabById` cancelled the in-flight stream whenever the closed tab's
+  chat owned it — including a chat running in the background. That turn was
+  already accumulating into the conversation, so the cancel killed the port
+  mid-flight and the answer never landed (the chat was left with a skeleton
+  that never resolved). Only the chat the user is viewing now cancels on close;
+  deleting a conversation still cancels too.
+
 ## [0.2.8.13] — 2026-09-13
 
 ### Fixed — stabilization bash point release
