@@ -1474,3 +1474,150 @@ describe("handoff run-state isolation (#165) — the runId never leaves the run'
     expect(bus.storage.session._store["cobrowse_handoff_runs"]["run-165-leak"].status).toBe("running");
   }, 25000);
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// #162: the loop must survive the run's chat being backgrounded. Pre-fix the
+// chained turn's STREAM_DONE took the background-chat branch and merely parked
+// the actions — no EXECUTE_ACTIONS, so the background's handoffAfterExecute
+// never fired and the run sat 'running' forever (badge stuck).
+describe("handoff survives a backgrounded chat (#162)", () => {
+  const envelope162 = (obj: unknown) => sseResponse(zoSseText({ text: JSON.stringify(obj) }));
+
+  it("a chained turn executes while the run's chat is backgrounded — no stall, pinned to the run tab", async () => {
+    // Unarm whatever run the previous test left armed (the same terminal push
+    // the background sends on abort; the update handler ignores other chats).
+    await bus.runtime.sendMessage({
+      type: "HANDOFF_UPDATE",
+      run: { runId: "run-165-leak", status: "aborted", chatId: "conv-cleanup", stopReason: "test cleanup" },
+    });
+    await new Promise((r) => setTimeout(r, 200));
+
+    // The run's own tab — never focused by the panel — vs the panel's tab.
+    const RUN_TAB = 43;
+    bus.tabs.registerTab({ id: RUN_TAB, url: "https://run-tab.example/start", title: "Run Tab", active: false });
+
+    const chatIdA = (bus.storage.local._store.cobrowse_open_tabs || {}).activeId
+      || Object.keys(bus.storage.local._store.cobrowse_convos || {})[0];
+    expect(chatIdA).toBeTruthy();
+    const titleA = String(
+      bus.storage.local._store.cobrowse_convos[chatIdA]?.title
+      || bus.storage.local._store.cobrowse_convos[chatIdA]?.messages?.find((m: any) => m.role === "user")?.text
+      || "");
+    expect(titleA.length).toBeGreaterThan(0);
+    const tabList = () => [...panelWin.document.querySelectorAll("#chat-tabs .chat-tab")] as any[];
+    const activeTabLabel = () => String(panelWin.document.querySelector("#chat-tabs .chat-tab-active")?.textContent || "");
+
+    // Open a SECOND chat to switch to mid-run (created now, with no stream in
+    // flight, so its creation can't disturb the run), then come back to A.
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await new Promise((r) => setTimeout(r, 300));
+    const bLabel = activeTabLabel();
+    expect(bLabel.length).toBeGreaterThan(0);
+    expect(bLabel.startsWith(titleA.slice(0, 40))).toBe(false);
+    const aTab = tabList().find((t) => (t.textContent || "").startsWith(titleA.slice(0, 40)));
+    expect(aTab).toBeTruthy();
+    aTab.click();
+    await waitUntil(() => activeTabLabel().startsWith(titleA.slice(0, 40)), 5000);
+
+    bus.storage.session._store["cobrowse_handoff_runs"] = {
+      "run-162-bg": {
+        runId: "run-162-bg", chatId: chatIdA, goal: "watch the deploy",
+        status: "paused", boundaryMode: "readonly",
+        budget: { maxTurns: 6, maxNavigations: 12, maxMinutes: 15 },
+        usage: { turns: 1, navigations: 0, startedAt: Date.now() - 30_000 },
+        pagesVisited: [], parkLog: [], tabId: RUN_TAB,
+        createdAt: Date.now() - 60_000, updatedAt: Date.now() - 20_000,
+      },
+    };
+    // Arm it through the #164 Resume path — the panel sets activeHandoffRun
+    // and re-issues the continuation turn from chat A (the run's chat, active).
+    await bus.runtime.sendMessage({
+      type: "HANDOFF_UPDATE",
+      run: bus.storage.session._store["cobrowse_handoff_runs"]["run-162-bg"],
+    });
+    await waitUntil(() => {
+      const btns = [...panelWin.document.querySelectorAll("#messages .msg-system button")];
+      return btns.some((b: any) => (b.textContent || "").includes("Resume"));
+    }, 5000);
+
+    // Turn 1 (visible) navigates the run's tab; turn 2 is HELD until after
+    // the switch so its completion lands while the chat is backgrounded;
+    // turn 3's done() ends the run.
+    const gate2 = deferredSse();
+    let asks = 0;
+    const exec162: any[] = [];
+    const origSend162 = bus.runtime.sendMessage.bind(bus.runtime);
+    (bus.runtime as any).sendMessage = (m: any, ...rest: any[]) => {
+      if (m?.type === "EXECUTE_ACTIONS" && m.handoffRunId) exec162.push({ tabId: m.tabId, actions: m.actions });
+      return origSend162(m, ...rest);
+    };
+    fm.handle((url, _init, req) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      // Only the run's own turns (the continuation marker rides every handoff
+      // turn's query) get the scripted envelopes — stray asks stay plain.
+      const input = String((req as any)?.body?.input || "");
+      if (!input.includes("[handoff-run continuation]")) return sseResponse(zoSseText({ text: "ok" }));
+      asks++;
+      if (asks === 2) return gate2.response;
+      if (asks === 3) return envelope162({ actions: [{ type: "done", response: "Deploy finished" }] });
+      return envelope162({ actions: [{ type: "navigate", url: `https://step${asks}.example` }] });
+    });
+
+    const asksBase = askLog.length;
+    ([...panelWin.document.querySelectorAll("#messages .msg-system button")] as any[])
+      .find((b: any) => (b.textContent || "").includes("Resume")).click();
+
+    // Turn 1 completes visibly → execute → the loop chains turn 2 (held).
+    await waitUntil(() => askLog.length > asksBase, 10_000); // the resume ask
+    await waitUntil(() => asks >= 2, 10_000);                // the chained turn hit the wire
+    expect(askLog[askLog.length - 1].handoffRunId).toBe("run-162-bg");
+
+    // Switch to chat B (a tab click, the finding's scenario — the in-flight
+    // stream survives the switch), backgrounding the run's chat.
+    const bTab = tabList().find((t) => String(t.textContent || "").trim() === bLabel)
+      || tabList().find((t) => !t.classList.contains("chat-tab-active"));
+    expect(bTab).toBeTruthy();
+    bTab.click();
+    await waitUntil(() => activeTabLabel().trim() === bLabel, 5000);
+    expect(activeTabLabel().startsWith(titleA.slice(0, 40))).toBe(false);
+
+    // The user also switches their BROWSER tab: the panel adopts that tab as
+    // currentContext (display-only). The run's turn must NOT act on it.
+    bus.tabs.onActivated.emit({ tabId: TAB_ID, windowId: 1 });
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Release turn 2: its STREAM_DONE arrives with the run's chat backgrounded.
+    gate2.push(zoSseText({ text: JSON.stringify({ actions: [{ type: "navigate", url: "https://step2.example" }] }) }));
+    gate2.end();
+
+    // THE regression: the loop must continue (turn 3 ask) and the run reach
+    // done — pre-fix neither happened (the run was stuck 'running').
+    await waitUntil(() => asks >= 3, 10_000);
+    let finalRun: any = null;
+    for (let i = 0; i < 100 && !finalRun; i++) {
+      const st = await bus.runtime.sendMessage({ type: "HANDOFF_STATUS", runId: "run-162-bg" });
+      if (st.run && ["done", "aborted", "paused"].includes(st.run.status)) finalRun = st.run;
+      else await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(finalRun?.status).toBe("done");
+    expect(finalRun?.stopReason).toBe("Deploy finished");
+
+    // The backgrounded turn targeted the run's PINNED tab, never the tab the
+    // panel had adopted as focused (a currentContext-based fix would have
+    // navigated the user's page instead).
+    const runTab = (bus.tabs as any)._tabs.find((t: any) => t.id === RUN_TAB);
+    const panelTab = (bus.tabs as any)._tabs.find((t: any) => t.id === TAB_ID);
+    expect(exec162.some((e) => e.tabId === RUN_TAB && e.actions.some((a: any) => a.url === "https://step2.example"))).toBe(true);
+    expect(runTab.url).toBe("https://step2.example");
+    expect(panelTab.url).toBe("https://example.test/form-page");
+
+    // Executed, not parked — a pendingActions entry would double-run them
+    // from the review bar when the user switches back.
+    const convA = bus.storage.local._store.cobrowse_convos[chatIdA];
+    expect(convA.pendingActions).toBeUndefined();
+    expect(convA.messages.some((m: any) => String(m.text || "").includes("Executed in background"))).toBe(true);
+    // …and the visible chat (B) never got the batch rows injected.
+    expect([...panelWin.document.querySelectorAll("#messages .handoff-batch")]).toHaveLength(0);
+  }, 30000);
+});
