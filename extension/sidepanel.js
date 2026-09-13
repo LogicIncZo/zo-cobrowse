@@ -317,6 +317,7 @@ async function finishInit() {
           // done / paused / aborted / blocked — the loop has left the chat.
           activeHandoffRun = null;
           removeHandoffLine();
+          renderChatTabs(); // drop the run marker from the chat tab (#166)
           const icon = { done: '✅', paused: '⏸️', aborted: '🛑', blocked: '⛔' }[run.status] || 'ℹ️';
           // On done, the deliverable already rendered as the turn's answer —
           // repeating run.stopReason here showed the digest twice, once with
@@ -1068,6 +1069,16 @@ async function switchToConversation(id) {
       span.className = 'msg-streaming-text';
       span.textContent = streamSession.fullText;
       body.appendChild(span);
+    } else if (body && looksLikeActionJson(streamSession.fullText)) {
+      // #169: an action-envelope turn has no prose to replay. Without the
+      // placeholder the user returns to a blank bubble that never updates
+      // until STREAM_DONE — the live progress the first chunk had created is
+      // lost. Re-create the SAME tagged placeholder so STREAM_DONE swaps it
+      // for the done response.
+      const span = document.createElement('span');
+      span.className = 'msg-actions-placeholder';
+      span.textContent = 'Preparing actions…';
+      body.appendChild(span);
     }
     startStreamTimer(streamSession.msgEl);
   } else if (streamSession.active) {
@@ -1089,7 +1100,7 @@ async function switchToConversation(id) {
 
 async function deleteConversation(id) {
   // A generating chat can't outlive its stream — cancel first.
-  if (streamSession.active && streamSession.chatId === id) cancelStream();
+  if (streamSession.active && streamSession.chatId === id && id === activeId) cancelStream();
   delete conversations[id];
   chatTabRefs.delete(id);
   tabsState = pruneChatTabs(tabsState, Object.keys(conversations));
@@ -1130,15 +1141,19 @@ function renderChatTabs() {
   chatTabsEl.replaceChildren();
   if (tabsState.openIds.length <= 1) return; // a single tab adds noise, not value
   const streamingId = streamSession.active ? streamSession.chatId : null;
+  // #166: the chat a live handoff run is driving carries the 🤖 run marker.
+  const handoffId = activeHandoffRun?.chatId || null;
   for (const id of tabsState.openIds) {
     const convo = conversations[id];
     if (!convo) continue;
+    const isRun = id === handoffId;
+    const labelText = tabTitleFor(convo, { handoff: isRun });
     const tab = document.createElement('button');
     tab.type = 'button';
     tab.className = 'chat-tab' + (id === activeId ? ' chat-tab-active' : '');
     tab.setAttribute('role', 'tab');
     tab.setAttribute('aria-selected', String(id === activeId));
-    tab.title = tabTitleFor(convo) + (id === streamingId ? ' — generating…' : '');
+    tab.title = labelText + (id === streamingId ? ' — generating…' : '');
     if (id === streamingId && id !== activeId) {
       // Pulsing dot marks BACKGROUND chats still generating (#135) — on the
       // active tab the user is already watching the stream live.
@@ -1148,7 +1163,7 @@ function renderChatTabs() {
     }
     const label = document.createElement('span');
     label.className = 'chat-tab-label';
-    label.textContent = tabTitleFor(convo);
+    label.textContent = labelText;
     tab.appendChild(label);
     const close = document.createElement('span');
     close.className = 'chat-tab-close';
@@ -1180,7 +1195,11 @@ async function closeChatTabById(id) {
     activeHandoffRun = null;
     chrome.runtime.sendMessage({ type: 'HANDOFF_STOP', runId, reason: 'run tab closed' });
   }
-  if (streamSession.active && streamSession.chatId === id) cancelStream();
+  // #168: closing a BACKGROUND chat's tab must not orphan its stream — the
+  // turn keeps accumulating into that conversation and lands in history (the
+  // panel reattaches when the chat is reopened). Only the chat the user is
+  // actually watching cancels on close; deleting a conversation cancels too.
+  if (streamSession.active && streamSession.chatId === id && id === activeId) cancelStream();
   const next = closeChatTab(tabsState, id);
   if (next.activeId && next.activeId !== activeId) {
     await switchToConversation(next.activeId);
@@ -1210,6 +1229,7 @@ async function resumeHandoffRun(runId) {
   const run = res.run;
   activeHandoffRun = run;
   removeHandoffLine();
+  renderChatTabs(); // the run's chat tab gets the 🤖 marker (#166)
   if (activeId !== run.chatId) await switchToConversation(run.chatId);
   input.value = safeText(res.continuationQuery) || `Resume the handoff run: ${safeText(run.goal)}`;
   await sendQuery();
@@ -4595,6 +4615,10 @@ function handleStreamActions(actions, reasoning) {
 
 // ── Handoff run UX (Lane E) ─────────────────────────────────────────────────
 
+/** Review-card note for actions a handoff boundary — or the sensitive-submit
+ * backstop while a run is active — refused. The user performs them (#163). */
+const PARKED_REASONING = 'Parked by the handoff — review and run these yourself.';
+
 /** The slim run-status line above the composer area (progress + stop). */
 function renderHandoffLine(run) {
   if (!msgsEl) return;
@@ -4667,14 +4691,29 @@ async function executeHandoffBatch(actions, { backgrounded = false } = {}) {
       url,
     });
   } catch { /* background gone — the orphan-pause sweep handles the run */ }
+  const results = Array.isArray(res?.results) ? res.results : [];
+  // #163: a parked action is not a dead end — the spec has the user perform
+  // boundary refusals themselves, from the #26 review card. Register them
+  // there (Run All / Skip); the batch rows stay the turn's record.
+  const parkedActions = results.filter((r) => r?.handoffParked && r.action).map((r) => r.action);
+  if (parkedActions.length) {
+    if (backgrounded) {
+      const conv = conversations[run.chatId];
+      if (conv) conv.pendingActions = { actions: parkedActions, reasoning: PARKED_REASONING };
+    } else {
+      pendingActions = parkedActions;
+      pendingActionsReasoning = PARKED_REASONING;
+      actionsReasoning.textContent = `🧠 ${PARKED_REASONING}`;
+      actionsBar.classList.remove('hidden');
+    }
+  }
   if (backgrounded) {
     const conv = conversations[run.chatId];
     if (conv) {
-      const results = Array.isArray(res?.results) ? res.results : [];
       const ran = actions.filter((a) => a.type !== 'done')
         .map((a) => (a.type === 'navigate' ? `→ ${safeText(a.url)}` : `→ ${safeText(a.type)} ${safeText(a.selector || '')}`));
-      const parked = results.filter((r) => r?.handoffParked).length;
-      const failed = results.filter((r) => r && r.ok === false).length;
+      const parked = parkedActions.length;
+      const failed = results.filter((r) => r && r.ok === false && !r.handoffParked).length;
       conv.messages.push({
         role: 'system',
         text: `🤖 Executed in background — ${ran.join(', ') || 'no actions'}`
@@ -4688,7 +4727,6 @@ async function executeHandoffBatch(actions, { backgrounded = false } = {}) {
     }
     return;
   }
-  const results = Array.isArray(res?.results) ? res.results : [];
   results.forEach((r, i) => {
     const row = list.children[i];
     if (!row) return;
@@ -4811,6 +4849,7 @@ sendQuery = async function() {
         return;
       }
       activeHandoffRun = start.run;
+      renderChatTabs(); // mark the run's chat tab (#166)
       effectiveQuery = `${bang.query}\n\n${handoffInstructions(start.run)}`;
       tempMode = 'cobrowse';
     }
@@ -5096,6 +5135,7 @@ sendQuery = async function() {
       reason: 'streaming unavailable — non-streaming fallback cannot drive the run',
     });
     addMessage('system', '⏸️ Handoff paused — streaming unavailable. Resume to retry once the connection is back.');
+    renderChatTabs(); // the run left the loop — drop its tab marker (#166)
   }
   const resp = await chrome.runtime.sendMessage({
     type: 'ASK_ZO',

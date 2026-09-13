@@ -19,10 +19,12 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: [["list"], ["html", { outputFolder: "report", open: "never" }]],
   use: {
-    // Tracing must stay OFF: Playwright's CDP tracer contends with the
-    // extension's chrome.debugger fast-path and silently breaks background
-    // stream accumulation on tab close (m1 caught this — finding
-    // qa-stream-accumulation-debugger-conflict). Failure screenshots are fine.
+    // Tracing stays OFF: Playwright's CDP tracer contends with the extension's
+    // chrome.debugger fast-path, which distorts timing in capture-heavy specs
+    // (m1, finding qa-stream-accumulation-debugger-conflict). The product bug
+    // that symptom exposed — a closed background tab orphaning its stream —
+    // was fixed in #168, so a trace no longer silently loses an answer; keeping
+    // it off is for determinism. Failure screenshots are fine.
     trace: "off",
     screenshot: "only-on-failure",
   },

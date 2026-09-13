@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { readFileSync } from "fs";
 import { resolve } from "path";
-import * as vm from "node:vm";
+import { runInSandbox } from "./helpers/vm-sandbox";
 import { normalizeActions } from "../extension/lib/modes.js";
 
 const SIDEPANEL_PATH = resolve(import.meta.dir, "../extension/sidepanel.js");
@@ -520,10 +520,9 @@ describe("addReasoningBubble DOM behavior", () => {
 
   function loadAddReasoningBubble(): (parent: El, reasoning: any) => void {
     const sandbox: any = {};
-    vm.createContext(sandbox);
     // Provide document.createElement to the stub.
     sandbox.document = { createElement: (t: string) => new El(t) };
-    vm.runInContext(
+    runInSandbox(
       "const INLINE_REASONING_MAX = 120;\n" +
       extractFn("safeText") + "\n" +
       extractFn("reasoningSummary") + "\n" +
@@ -656,8 +655,7 @@ describe("healAssistantMessage — persisted-history repair", () => {
     const healStart = code.indexOf("function healAssistantMessage(");
     const healEnd = braceEnd(code, healStart);
     const sandbox: any = { normalizeActions };
-    vm.createContext(sandbox);
-    vm.runInContext(code.slice(safeStart, safeEnd) + "\n" + code.slice(healStart, healEnd), sandbox);
+    runInSandbox(code.slice(safeStart, safeEnd) + "\n" + code.slice(healStart, healEnd), sandbox);
     if (typeof sandbox.healAssistantMessage !== "function") {
       throw new Error("failed to load healAssistantMessage");
     }
@@ -841,8 +839,7 @@ describe("renderActionTimeline DOM behavior — inline run block", () => {
       actionsBar,
       msgsEl,
     };
-    vm.createContext(sandbox);
-    vm.runInContext(
+    runInSandbox(
       extractFn("safeText") + "\n" + extractFn("escapeHtml") + "\n" +
       extractConst("ACTION_META") + "\n" +
       extractFn("actionDetail") + "\n" + extractFn("actionKey") + "\n" +
@@ -989,10 +986,9 @@ describe("addLinkChipsCard / openAllLinks DOM behavior", () => {
   function loadCard() {
     createCalls.length = 0; // fresh recorder per test
     const sandbox: any = {};
-    vm.createContext(sandbox);
     sandbox.document = { createElement: (t: string) => new El(t) };
     sandbox.chrome = { tabs: { create: (props: any = {}) => { createCalls.push({ ...props }); return Promise.resolve({ id: 9001 + createCalls.length }); } } };
-    vm.runInContext(
+    runInSandbox(
       // var (not const/let) so the bindings attach to the sandbox object and
       // the test can inspect tabRefsEnabled / chatTabRefs afterwards.
       "var MAX_LINK_CHIPS = 10;\n" +

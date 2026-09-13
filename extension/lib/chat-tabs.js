@@ -89,11 +89,15 @@ export function pruneChatTabs(state, existingIds) {
   return { openIds, activeId };
 }
 
-/** The tab label for a conversation: its title (or "New Chat"), capped. */
-export function tabTitleFor(convo) {
+/** The tab label for a conversation: its title (or "New Chat"), capped.
+ * `opts.handoff` marks the tab whose chat a handoff run is driving (#166) —
+ * the run-tab marker the spec promises, so a delegated run is distinguishable
+ * from a chat that is merely streaming. */
+export function tabTitleFor(convo, opts = {}) {
   const c = convo || {};
   const t = txt(c.title).trim() || 'New Chat';
-  return t.length > TITLE_MAX ? t.slice(0, TITLE_MAX) : t;
+  const capped = t.length > TITLE_MAX ? t.slice(0, TITLE_MAX) : t;
+  return opts.handoff ? `🤖 ${capped}` : capped;
 }
 
 /**

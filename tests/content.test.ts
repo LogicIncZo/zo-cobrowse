@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { readFileSync } from "fs";
 import { resolve } from "path";
+import { parse } from "acorn";
 
 const CONTENT_PATH = resolve(import.meta.dir, "../extension/content.js");
 const code = readFileSync(CONTENT_PATH, "utf-8");
@@ -8,7 +9,7 @@ const code = readFileSync(CONTENT_PATH, "utf-8");
 describe("content.js", () => {
 
   it("is valid JavaScript (no syntax errors)", () => {
-    expect(() => new Function(code)).not.toThrow();
+    expect(() => parse(code, { ecmaVersion: "latest" })).not.toThrow();
   });
 
   it("captures page context via captureContext", () => {

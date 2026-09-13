@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { readFileSync } from "fs";
 import { resolve } from "path";
+import { parse } from "acorn";
 
 const OPTIONS_PATH = resolve(import.meta.dir, "../extension/options.js");
 const OPTIONS_HTML_PATH = resolve(import.meta.dir, "../extension/options.html");
@@ -9,7 +10,7 @@ describe("options.js", () => {
   const code = readFileSync(OPTIONS_PATH, "utf-8");
 
   it("is valid JavaScript", () => {
-    expect(() => new Function(code)).not.toThrow();
+    expect(() => parse(code, { ecmaVersion: "latest" })).not.toThrow();
   });
 
   it("loads saved config on DOMContentLoaded", () => {

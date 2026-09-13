@@ -6,6 +6,71 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.2.8.15] — 2026-09-13
+
+### Fixed — stabilization bash point release
+- **Returning to a streaming action turn restores its live progress (#169).**
+  The bubble re-created on switch-back only replayed prose, so a cobrowse
+  action turn — whose accumulated text is the JSON envelope — rendered a blank
+  bubble that never updated until `STREAM_DONE`. It now re-creates the same
+  tagged "Preparing actions…" placeholder the first chunk creates.
+
+## [0.2.8.14] — 2026-09-13
+
+### Fixed — stabilization bash point release
+- **Closing a background chat's tab no longer orphans its stream (#168).**
+  `closeChatTabById` cancelled the in-flight stream whenever the closed tab's
+  chat owned it — including a chat running in the background. That turn was
+  already accumulating into the conversation, so the cancel killed the port
+  mid-flight and the answer never landed (the chat was left with a skeleton
+  that never resolved). Only the chat the user is viewing now cancels on close;
+  deleting a conversation still cancels too.
+
+## [0.2.8.13] — 2026-09-13
+
+### Fixed — stabilization bash point release
+- **Picker send-once assertions are deterministic (#167).** The QA matrix's
+  m4 specs graded `lastAskBody()` before the follow-up ASK had been recorded
+  — an assertion could read turn 1's body (or `null`), which surfaced as a
+  phantom "`## Skills to Run` residue" finding. Both specs now poll
+  `recordedAsks()` until the ask they intend to grade has landed, and the
+  skills spec is un-`fixme`'d. The product contract itself held: picked chips
+  are snapshotted into the turn and cleared before the `ASK_ZO`.
+
+## [0.2.8.12] — 2026-09-13
+
+### Fixed — stabilization bash point release
+- **The run's chat tab is marked while a handoff run works (#166).** The spec
+  promises a run-tab marker, but only the extension badge existed — a
+  delegated run's chat tab looked like any other streaming chat.
+  `tabTitleFor` gained a `handoff` flag and the tab bar marks the run's chat
+  while the run is live, clearing it when the run leaves the loop.
+
+## [0.2.8.11] — 2026-09-13
+
+### Fixed — stabilization bash point release
+- **Parked handoff actions reach the review card, and backstop refusals park
+  (#163).** Boundary-parked actions were display-only rows on the batch card —
+  nothing added them to the #26 review card and nothing could run them, though
+  the spec has the user perform them. They now register as pending actions
+  (Run All / Skip), on the live chat or on the conversation when the turn was
+  backgrounded. Separately, the sensitive-page submit backstop and the
+  post-fill action-button rule fire before the boundary check and returned a
+  bare `blocked`, so on a run those refusals never entered the park log
+  (under-counting "parked for the user") and rendered as failures; they now
+  carry the park marker and the action while a run is active.
+
+## [0.2.8.10] — 2026-09-13
+
+### Fixed — stabilization bash point release
+- **Handoff actions no longer follow the browser's focus (#161).** The visible
+  execution path sent its actions against the panel's `currentContext` tab,
+  which `adoptActiveTabDisplay` replaces on every tab switch — so focusing a
+  different tab mid-run pointed the run's DOM actions at that page while Zo
+  kept receiving the pinned tab's capture (acting on one page, believing it was
+  on another; the spec pins a run to one tab). Both paths now resolve the tab
+  from the run's stamped pin, and parked-action URLs come from that tab.
+
 ## [0.2.8.9] — 2026-09-13
 
 ### Fixed — stabilization bash point release
