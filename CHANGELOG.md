@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+### Fixed
+- **Action-timeline details are HTML-escaped (#155).** The action cards rendered
+  `actionDetail()` — model-echoed selectors, URLs, and fill values derived from
+  page content — into `innerHTML` unescaped. A hostile page could plant markup
+  in a field name or attribute value that Zo quotes back in the action JSON,
+  injecting markup into the trusted extension panel (MV3 CSP blocks script
+  execution; UI spoofing and exfil-beacon markup were the realistic impact).
+  The detail span is now escaped like every other text sink.
+
 ## [0.2.8.3] — 2026-09-13
 
 ### Fixed — stabilization bash point release

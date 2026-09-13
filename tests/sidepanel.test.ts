@@ -843,6 +843,7 @@ describe("renderActionTimeline DOM behavior — inline run block", () => {
     };
     vm.createContext(sandbox);
     vm.runInContext(
+      extractFn("safeText") + "\n" + extractFn("escapeHtml") + "\n" +
       extractConst("ACTION_META") + "\n" +
       extractFn("actionDetail") + "\n" + extractFn("actionKey") + "\n" +
       extractFn("groupActions") + "\n" + extractFn("formatDuration") + "\n" +
@@ -902,6 +903,25 @@ describe("renderActionTimeline DOM behavior — inline run block", () => {
     // children), so assert on the innerHTML content rather than querySelector.
     expect(cards[0].innerHTML, "first group has a × 3 count badge").toContain("× 3");
     expect(cards[1].innerHTML, "single done has no count badge").not.toContain("action-count");
+  });
+
+  it("escapes model/page-derived action details before innerHTML (#155)", () => {
+    // A hostile page can plant markup in a field name / attribute value that
+    // Zo echoes back in the action JSON — the detail span must render it as
+    // text, never as markup.
+    const { msgsEl } = renderTimeline([
+      { type: "fill", value: '<img src=x onerror="window.__pwned=1">' },
+      { type: "click", selector: "<script>alert(1)</script>" },
+      { type: "done", response: "ok" },
+    ]);
+    const cards = findRun(msgsEl).querySelectorAll(".action-card");
+    expect(cards.length).toBe(3);
+    // Card 0: hostile fill VALUE (no selector → the value is the detail).
+    expect(cards[0].innerHTML).not.toContain("<img");
+    expect(cards[0].innerHTML).toContain("&lt;img src=x onerror=&quot;window.__pwned=1&quot;&gt;");
+    // Card 1: hostile selector.
+    expect(cards[1].innerHTML).not.toContain("<script>");
+    expect(cards[1].innerHTML).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
   });
 });
 
