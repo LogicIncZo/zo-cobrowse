@@ -38,6 +38,7 @@ import {
   checkBoundary as handoffCheckBoundary,
   buildContinuationTurn,
   handoffInstructions,
+  DEFAULT_BUDGET,
 } from './lib/handoff.js';
 import {
   buildEnhancePrompt,
@@ -236,6 +237,9 @@ const DEFAULTS = {
     link: true,
     editable: true,
   },
+  // !handoff run budget (#158) — config-resident so it is tunable via
+  // storage.sync; DEFAULT_BUDGET (lib/handoff.js) is the numeric source.
+  cobrowse_handoff_budget: { ...DEFAULT_BUDGET },
 };
 
 let config = { ...DEFAULTS };
@@ -304,7 +308,7 @@ try {
 
 // ---- Init ----
 chrome.storage.sync.get(
-  ['zoApiUrl', 'zoModel', 'zoPersonaId', 'zoActiveMode', 'enableScreenshots', 'enableWriteAssist', 'enabledMenus'],
+  ['zoApiUrl', 'zoModel', 'zoPersonaId', 'zoActiveMode', 'enableScreenshots', 'enableWriteAssist', 'enabledMenus', 'cobrowse_handoff_budget'],
   (result) => {
     if (result.zoApiUrl) config.zoApiUrl = result.zoApiUrl;
     if (result.zoModel) config.zoModel = result.zoModel;
@@ -313,6 +317,8 @@ chrome.storage.sync.get(
     if (result.enableScreenshots !== undefined) config.enableScreenshots = result.enableScreenshots;
     if (result.enableWriteAssist !== undefined) config.enableWriteAssist = result.enableWriteAssist;
       if (result.enabledMenus) config.enabledMenus = { ...config.enabledMenus, ...result.enabledMenus };
+    // #158: a stored handoff budget overrides the config default.
+    if (result.cobrowse_handoff_budget) config.cobrowse_handoff_budget = { ...config.cobrowse_handoff_budget, ...result.cobrowse_handoff_budget };
   }
 );
 // Sensitive config from storage.local (not synced)
@@ -438,7 +444,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         chatId: request.chatId,
         goal: request.goal,
         boundaryMode: request.boundaryMode,
-        budget: request.budget,
+        // #158: explicit request budget wins; else the config default
+        // (storage.sync `cobrowse_handoff_budget`); else the lib default.
+        budget: request.budget || config.cobrowse_handoff_budget || undefined,
       });
       run.tabId = request.tabId;
       handoffPut(run).then((saved) => sendResponse({ ok: true, run: saved }));

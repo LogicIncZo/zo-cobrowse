@@ -43,6 +43,10 @@ const seen: any[] = [];
 
 beforeAll(async () => {
   bus.storage.local._store.zoAccessToken = MOCK_ZO_TOKEN;
+  // #158: a stored handoff budget (sync) must be what HANDOFF_START uses when
+  // the request carries no explicit budget — seeded before the import so the
+  // background's init picks it up.
+  bus.storage.sync._store.cobrowse_handoff_budget = { maxTurns: 8, maxNavigations: 9, maxMinutes: 11 };
   await bus.tabs.create({ id: 1, url: "https://fixture.example/", active: true });
   fm.install();
   (globalThis as any).chrome = bus;
@@ -93,6 +97,16 @@ async function panelLoop(run: any, opts: { boundaryMode?: string; sessionBase: s
 }
 
 describe("handoff run loop (Lane E)", () => {
+  // #158: the budget defaults are config-resident (storage.sync
+  // `cobrowse_handoff_budget`, defaulting from lib/handoff.js DEFAULT_BUDGET)
+  // and an explicit request budget still wins.
+  it("HANDOFF_START takes an unset budget from the config-resident default", async () => {
+    const run = await startRun();
+    expect(run.budget).toEqual({ maxTurns: 8, maxNavigations: 9, maxMinutes: 11 });
+    const stop = await bus.runtime.sendMessage({ type: "HANDOFF_STOP", runId: run.runId });
+    expect(stop.ok).toBe(true);
+  });
+
   it("first handoff ASK_ZO flips priming → running and pushes the update", async () => {
     const run = await startRun();
     fm.handle(() => sseResponse(zoSseText({ text: "hello" })));
