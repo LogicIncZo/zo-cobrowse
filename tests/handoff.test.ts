@@ -11,6 +11,8 @@ import {
   withinBudget,
   handoffInstructions,
   buildContinuationTurn,
+  continuationPayload,
+  SEND_ONCE_FIELDS,
   runProgress,
 } from "../extension/lib/handoff.js";
 import {
@@ -251,5 +253,58 @@ describe("handoff — runProgress", () => {
     expect(line).toContain("1 pages");
     expect(line).toContain("2/12 turns");
     expect(line).toContain("5m");
+  });
+});
+
+// #159: a continuation is a progress report + continue prompt — turn 1's
+// send-once attachments must not ride along (replaying them re-runs picked
+// skills and re-bills stale tab excerpts).
+describe("continuationPayload — send-once attachments never replay", () => {
+  const turn1Msg = {
+    type: 'ASK_ZO',
+    chatId: 'conv-1',
+    modeId: 'cobrowse',
+    effectiveTier: 2,
+    userQuery: 'watch the deploy',
+    sessionId: '900',
+    // send-once by contract:
+    skills: [{ name: 'thread-summarizer' }],
+    workspaceFiles: [{ path: '/home/workspace/notes.md' }],
+    tabContexts: [{ ref: 'T1', url: 'https://other.example', title: 'Other' }],
+    shotOnly: true,
+    // thread/identity fields that MUST survive:
+    conversationId: 'con_abc',
+    modelName: 'byok:test',
+  };
+
+  it("strips exactly the send-once fields and re-stamps the turn's own", () => {
+    const out = continuationPayload(turn1Msg, {
+      sessionId: '900-h2-123',
+      conversationId: 'con_abc',
+      userQuery: '[handoff-run continuation] …',
+      pageContext: { url: 'https://pinned.example' },
+      runId: 'run-1',
+    });
+    for (const f of SEND_ONCE_FIELDS) expect(out[f]).toBeUndefined();
+    // identity survives — the continuation stays on the same Mode/tier/chat
+    expect(out.chatId).toBe('conv-1');
+    expect(out.modeId).toBe('cobrowse');
+    expect(out.effectiveTier).toBe(2);
+    expect(out.modelName).toBe('byok:test');
+    expect(out.sessionId).toBe('900-h2-123');
+    expect(out.conversationId).toBe('con_abc');
+    expect(out.userQuery).toContain('[handoff-run continuation]');
+    expect(out.pageContext).toEqual({ url: 'https://pinned.example' });
+    expect(out.handoffRunId).toBe('run-1');
+    // the source message is untouched (pure)
+    expect(turn1Msg.skills).toHaveLength(1);
+    expect(turn1Msg.shotOnly).toBe(true);
+  });
+
+  it("tolerates an empty message", () => {
+    const out = continuationPayload(undefined, { sessionId: 's', runId: 'r' });
+    expect(out.sessionId).toBe('s');
+    expect(out.handoffRunId).toBe('r');
+    expect(SEND_ONCE_FIELDS.every((f) => out[f] === undefined)).toBe(true);
   });
 });

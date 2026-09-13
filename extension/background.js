@@ -38,6 +38,7 @@ import {
   checkBoundary as handoffCheckBoundary,
   buildContinuationTurn,
   handoffInstructions,
+  continuationPayload as handoffContinuationPayload,
   DEFAULT_BUDGET,
 } from './lib/handoff.js';
 import {
@@ -2241,8 +2242,7 @@ async function handoffChainNextTurn(runId) {
   try {
     pageContext = await getActiveTabContext(run.tabId, msg.effectiveTier || 1, msg.modeId);
   } catch { /* capture failed — Zo can still pull (read_page) */ }
-  const turnMsg = {
-    ...msg,
+  const turnMsg = handoffContinuationPayload(msg, {
     sessionId: `${msg.sessionId}-h${run.usage.turns + 1}-${Date.now() % 100000}`,
     // Thread continuity: turn 1's conversation_id echo (the ambient global,
     // just updated by the previous turn's header) — without this every
@@ -2252,8 +2252,8 @@ async function handoffChainNextTurn(runId) {
     // thread; re-sending them (marker included) confuses marker routing.
     userQuery: buildContinuationTurn(run),
     pageContext,
-    handoffRunId: runId,
-  };
+    runId,
+  });
   askZoStream(port, turnMsg).catch(async () => {
     // Stream failed mid-run — blocked, not paused: the run cannot proceed
     // unattended and the user (who walked away by design) must be told. The

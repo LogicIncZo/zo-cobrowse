@@ -219,6 +219,28 @@ export function buildContinuationTurn(run, opts = {}) {
   ].filter((l) => l !== null).join('\n');
 }
 
+/** Fields that are send-once by contract: they ride the ASK_ZO that carried
+ * the pick and must never replay on a continuation turn (#159) — replaying
+ * them re-runs skills the user picked once and re-bills stale tab excerpts. */
+export const SEND_ONCE_FIELDS = ['skills', 'workspaceFiles', 'tabContexts', 'shotOnly'];
+
+/** Build a continuation turn's payload from turn 1's ASK_ZO message: drop the
+ * send-once attachments, keep everything identity/thread-related (mode,
+ * tier, model, chat/thread ids), then re-stamp the turn's own fields. Pure —
+ * the background calls this so the loop cannot drift from the contract. */
+export function continuationPayload(msg, { sessionId, conversationId, userQuery, pageContext, runId } = {}) {
+  const out = {};
+  for (const [k, v] of Object.entries(msg || {})) {
+    if (!SEND_ONCE_FIELDS.includes(k)) out[k] = v;
+  }
+  out.sessionId = sessionId;
+  out.conversationId = conversationId;
+  out.userQuery = userQuery;
+  out.pageContext = pageContext;
+  out.handoffRunId = runId;
+  return out;
+}
+
 /** One-line status for the panel's progress chip. */
 export function runProgress(run, now = Date.now()) {
   const mins = Math.max(0, Math.round((now - run.usage.startedAt) / 60000));
