@@ -3,6 +3,9 @@
 //   • a picked skill chip rides the NEXT ask as a `## Skills to Run` section
 //     and clears after exactly one send (send-once — no residue)
 //   • a picked workspace-file chip rides as `## Referenced Files`, also once
+// #167: both assertions wait for the ask to be recorded before grading it
+// (an earlier race graded turn 1's body / a not-yet-recorded body — the
+// "residue" the finding reported)
 
 import { test, expect } from "@playwright/test";
 import {
@@ -28,7 +31,7 @@ test.beforeEach(async () => {
   await clearRecordedRequests();
 });
 
-test.fixme("skill chip is send-once: rides one ask, then clears", async () => {
+test("skill chip is send-once: rides one ask, then clears", async () => {
   // finding: qa-pickers-skills-section-residue — the ## Skills to Run section
   // re-appears on the follow-up ask; unfixme when that finding is fixed.
   await h.panel.locator("#query-input").click();
@@ -39,6 +42,9 @@ test.fixme("skill chip is send-once: rides one ask, then clears", async () => {
   await expect(h.panel.locator("#picker-chips .picker-chip").first()).toBeVisible();
 
   await sendQuery(h.panel, "run the picked skill once");
+  await expect
+    .poll(async () => (await recordedAsks()).length, { timeout: 10_000 })
+    .toBeGreaterThanOrEqual(1);
   await waitForTurnComplete(h.panel);
   expect(JSON.stringify(await lastAskBody())).toContain("## Skills to Run");
   await expect(h.panel.locator("#picker-chips .picker-chip")).toHaveCount(0);
@@ -49,8 +55,12 @@ test.fixme("skill chip is send-once: rides one ask, then clears", async () => {
   if (await bar.isVisible()) await h.panel.locator("#skip-btn").click();
   await expect(bar).toBeHidden();
 
-  // Follow-up ask must NOT carry the section again.
+  // Follow-up ask must NOT carry the section again. Wait for THIS turn's ask
+  // to land before asserting — reading lastAskBody() too early grades turn 1.
   await sendQuery(h.panel, "and now without it");
+  await expect
+    .poll(async () => (await recordedAsks()).length, { timeout: 10_000 })
+    .toBeGreaterThanOrEqual(2);
   await waitForTurnComplete(h.panel);
   expect(JSON.stringify(await lastAskBody())).not.toContain("## Skills to Run");
 });
@@ -66,6 +76,9 @@ test("file chip is send-once: rides one ask as ## Referenced Files", async () =>
   await expect(h.panel.locator("#picker-chips .picker-chip").first()).toBeVisible();
 
   await sendQuery(h.panel, "read the referenced file once");
+  await expect
+    .poll(async () => (await recordedAsks()).length, { timeout: 10_000 })
+    .toBeGreaterThanOrEqual(1);
   await waitForTurnComplete(h.panel);
   expect(JSON.stringify(await lastAskBody())).toContain("## Referenced Files");
   await expect(h.panel.locator("#picker-chips .picker-chip")).toHaveCount(0);

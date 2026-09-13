@@ -1488,7 +1488,7 @@ describe("handoff run-state isolation (#165) — the runId never leaves the run'
     const titleA = String(convA?.title || convA?.messages?.[0]?.text || "");
     expect(titleA.length).toBeGreaterThan(0);
     const aTab = [...panelWin.document.querySelectorAll("#chat-tabs .chat-tab")]
-      .find((t: any) => (t.textContent || "").startsWith(titleA.slice(0, 60))) as any;
+      .find((t: any) => (t.textContent || "").includes(titleA.slice(0, 60))) as any;
     expect(aTab).toBeTruthy();
     aTab.click();
     await new Promise((r) => setTimeout(r, 300));
@@ -1545,11 +1545,11 @@ describe("handoff survives a backgrounded chat (#162)", () => {
     await new Promise((r) => setTimeout(r, 300));
     const bLabel = activeTabLabel();
     expect(bLabel.length).toBeGreaterThan(0);
-    expect(bLabel.startsWith(titleA.slice(0, 40))).toBe(false);
-    const aTab = tabList().find((t) => (t.textContent || "").startsWith(titleA.slice(0, 40)));
+    expect(bLabel.includes(titleA.slice(0, 40))).toBe(false);
+    const aTab = tabList().find((t) => (t.textContent || "").includes(titleA.slice(0, 40)));
     expect(aTab).toBeTruthy();
     aTab.click();
-    await waitUntil(() => activeTabLabel().startsWith(titleA.slice(0, 40)), 5000);
+    await waitUntil(() => activeTabLabel().includes(titleA.slice(0, 40)), 5000);
 
     bus.storage.session._store["cobrowse_handoff_runs"] = {
       "run-162-bg": {
@@ -1612,7 +1612,7 @@ describe("handoff survives a backgrounded chat (#162)", () => {
     expect(bTab).toBeTruthy();
     bTab.click();
     await waitUntil(() => activeTabLabel().trim() === bLabel, 5000);
-    expect(activeTabLabel().startsWith(titleA.slice(0, 40))).toBe(false);
+    expect(activeTabLabel().includes(titleA.slice(0, 40))).toBe(false);
 
     // The user also switches their BROWSER tab: the panel adopts that tab as
     // currentContext (display-only). The run's turn must NOT act on it.
@@ -1720,4 +1720,274 @@ describe("handoff actions stay on the run's pinned tab (#161)", () => {
     const panelTab = (bus.tabs as any)._tabs.find((t: any) => t.id === TAB_ID);
     expect(panelTab.url).toBe("https://example.test/form-page");
   }, 30000);
+});
+
+describe("parked handoff actions reach the review card (#163)", () => {
+  const envelope163 = (obj: unknown) => sseResponse(zoSseText({ text: JSON.stringify(obj) }));
+
+  it("a boundary-parked action lands in the Run All review card", async () => {
+    const RUN_TAB = 45;
+    bus.tabs.registerTab({ id: RUN_TAB, url: "https://pinned163.example/checkout", title: "Checkout 163", active: false });
+    const chatId = (bus.storage.local._store.cobrowse_open_tabs || {}).activeId
+      || Object.keys(bus.storage.local._store.cobrowse_convos || {})[0];
+    expect(chatId).toBeTruthy();
+
+    bus.storage.session._store["cobrowse_handoff_runs"] = {
+      "run-163-p": {
+        runId: "run-163-p", chatId, goal: "buy the thing",
+        status: "paused", boundaryMode: "readonly",
+        budget: { maxTurns: 6, maxNavigations: 12, maxMinutes: 15 },
+        usage: { turns: 1, navigations: 0, startedAt: Date.now() - 30_000 },
+        pagesVisited: [], parkLog: [], tabId: RUN_TAB,
+        createdAt: Date.now() - 60_000, updatedAt: Date.now() - 20_000,
+      },
+    };
+    await bus.runtime.sendMessage({
+      type: "HANDOFF_UPDATE",
+      run: bus.storage.session._store["cobrowse_handoff_runs"]["run-163-p"],
+    });
+    await waitUntil(() => {
+      const btns = [...panelWin.document.querySelectorAll("#messages .msg-system button")];
+      return btns.some((b: any) => (b.textContent || "").includes("Resume"));
+    }, 5000);
+
+    let asks = 0;
+    fm.handle((url, _init, req) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      const input = String((req as any)?.body?.input || "");
+      if (!input.includes("[handoff-run continuation]")) return sseResponse(zoSseText({ text: "ok" }));
+      asks++;
+      if (asks === 1) return envelope163({ actions: [{ type: "click", selector: "#buy" }] });
+      return envelope163({ actions: [{ type: "done", response: "Cart ready" }] });
+    });
+
+    ([...panelWin.document.querySelectorAll("#messages .msg-system button")] as any[])
+      .find((b: any) => (b.textContent || "").includes("Resume")).click();
+
+    const bar = () => panelWin.document.querySelector("#actions-bar") as any;
+    const rows = () => [...panelWin.document.querySelectorAll("#messages .handoff-batch-row")].map((r: any) => String(r.textContent || ""));
+    // The boundary refusal is parked: the row says so, and the actions the
+    // user must perform themselves are queued in the review card (pre-fix
+    // nothing offered a way to run them).
+    await waitUntil(() => rows().some((t) => t.includes("parked")), 10_000);
+    expect(bar()?.className || "").not.toContain("hidden");
+    const card = panelWin.document.querySelector("#actions-reasoning") as any;
+    expect(String(card?.textContent || "")).toContain("run these yourself");
+  }, 30000);
+});
+
+describe("run-tab marker (#166)", () => {
+  const envelope166 = (obj: unknown) => sseResponse(zoSseText({ text: JSON.stringify(obj) }));
+
+  it("the run's chat tab carries 🤖 while it works and drops it when done", async () => {
+    const RUN_TAB = 46;
+    bus.tabs.registerTab({ id: RUN_TAB, url: "https://pinned166.example/step", title: "Run 166", active: false });
+    const chatIdA = (bus.storage.local._store.cobrowse_open_tabs || {}).activeId
+      || Object.keys(bus.storage.local._store.cobrowse_convos || {})[0];
+    expect(chatIdA).toBeTruthy();
+    const titleA = String(
+      bus.storage.local._store.cobrowse_convos[chatIdA]?.title
+      || bus.storage.local._store.cobrowse_convos[chatIdA]?.messages?.find((m: any) => m.role === "user")?.text
+      || "");
+    expect(titleA.length).toBeGreaterThan(0);
+    const tabList = () => [...panelWin.document.querySelectorAll("#chat-tabs .chat-tab")] as any[];
+    const activeTabLabel = () => String(panelWin.document.querySelector("#chat-tabs .chat-tab-active")?.textContent || "");
+
+    // The tab bar only renders with >1 open chat — open a second, then come
+    // back to the run's chat.
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await new Promise((r) => setTimeout(r, 300));
+    const aTab = tabList().find((t) => (t.textContent || "").includes(titleA.slice(0, 40)));
+    expect(aTab).toBeTruthy();
+    aTab.click();
+    await waitUntil(() => activeTabLabel().includes(titleA.slice(0, 40)), 5000);
+
+    bus.storage.session._store["cobrowse_handoff_runs"] = {
+      "run-166": {
+        runId: "run-166", chatId: chatIdA, goal: "walk the checkout",
+        status: "paused", boundaryMode: "readonly",
+        budget: { maxTurns: 6, maxNavigations: 12, maxMinutes: 15 },
+        usage: { turns: 1, navigations: 0, startedAt: Date.now() - 30_000 },
+        pagesVisited: [], parkLog: [], tabId: RUN_TAB,
+        createdAt: Date.now() - 60_000, updatedAt: Date.now() - 20_000,
+      },
+    };
+    await bus.runtime.sendMessage({
+      type: "HANDOFF_UPDATE",
+      run: bus.storage.session._store["cobrowse_handoff_runs"]["run-166"],
+    });
+    await waitUntil(() => {
+      const btns = [...panelWin.document.querySelectorAll("#messages .msg-system button")];
+      return btns.some((b: any) => (b.textContent || "").includes("Resume"));
+    }, 5000);
+
+    // Turn 1 is HELD, so the run stays live while we look at the tab bar.
+    const gate166 = deferredSse();
+    let asks = 0;
+    fm.handle((url, _init, req) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      const input = String((req as any)?.body?.input || "");
+      if (!input.includes("[handoff-run continuation]")) return sseResponse(zoSseText({ text: "ok" }));
+      asks++;
+      if (asks === 1) return gate166.response;
+      return envelope166({ actions: [{ type: "done", response: "Walkthrough finished" }] });
+    });
+
+    ([...panelWin.document.querySelectorAll("#messages .msg-system button")] as any[])
+      .find((b: any) => (b.textContent || "").includes("Resume")).click();
+
+    await waitUntil(() => tabList().some((t) => String(t.textContent || "").includes("🤖")), 10_000);
+    const runTabEl = tabList().find((t) => String(t.textContent || "").includes(titleA.slice(0, 40)));
+    expect(String(runTabEl?.textContent || "")).toContain("🤖");
+    const other = tabList().find((t) => !String(t.textContent || "").includes(titleA.slice(0, 40)));
+    expect(String(other?.textContent || "")).not.toContain("🤖");
+
+    // Release turn 1; the run finishes and the marker clears.
+    gate166.push(zoSseText({ text: JSON.stringify({ actions: [{ type: "done", response: "Walkthrough finished" }] }) }));
+    gate166.end();
+    await waitUntil(() => {
+      const st = bus.storage.session._store["cobrowse_handoff_runs"]["run-166"];
+      return st && st.status === "done";
+    }, 10_000);
+    await waitUntil(() => tabList().every((t) => !String(t.textContent || "").includes("🤖")), 10_000);
+  }, 30000);
+});
+
+describe("closing a background tab mid-stream (#168)", () => {
+  it("the closed chat's stream still lands its answer in that conversation", async () => {
+    const d = deferredSse();
+    fm.handle((url: string) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      return d.response;
+    });
+
+    const box = armAskCapture();
+    await typeAndSend("keep streaming after close");
+    await waitUntil(() => box.msg != null, 8000);
+
+    // Open a second chat — the first keeps streaming in the background — then
+    // close the streaming chat's tab (the documented ✕ affordance).
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await new Promise((r) => setTimeout(r, 200));
+    // The backgrounded streaming chat is the tab carrying the pulsing dot
+    // (#135) — that is the one whose ✕ we click.
+    const streamingTab = panelWin.document.querySelector("#chat-tabs .chat-tab .chat-tab-stream-dot")?.closest(".chat-tab") as any;
+    expect(streamingTab).toBeTruthy();
+    (streamingTab.querySelector(".chat-tab-close") as any).click();
+    await new Promise((r) => setTimeout(r, 150));
+
+    // Closing a BACKGROUND tab must not orphan the stream: the answer still
+    // lands in the closed chat's conversation (history is the oracle).
+    d.push(sseEvent("PartStartEvent", { index: 1, part: { part_kind: "text", content: "Landed " } }));
+    d.push(sseEvent("PartDeltaEvent", { delta: { part_delta_kind: "text", content_delta: "in history." } }));
+    d.push(sseEvent("completed", {}));
+
+    await waitUntil(() => {
+      const convs: any[] = Object.values(bus.storage.local._store.cobrowse_convos || {});
+      const a: any = convs.find((c: any) =>
+        (c.messages || []).some((m: any) => m.role === "user" && m.text === "keep streaming after close"));
+      return !!a && (a.messages || []).some(
+        (m: any) => m.role === "assistant" && String(m.text || "").includes("in history."));
+    }, 8000);
+  }, 20000);
+});
+
+describe("switching back to a streaming chat (#169)", () => {
+  it("restores the action-envelope placeholder while the turn is still streaming", async () => {
+    // The reported case: an ACTION turn (cobrowse envelope). Leaving and
+    // returning mid-stream left a blank bubble with no live progress — the
+    // "Preparing actions…" state was only ever created on the first chunk.
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await waitUntil(() => panelWin.document.querySelector("#messages .msg-system") != null, 5000);
+
+    const d = deferredSse();
+    fm.handle((url: string) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      return d.response;
+    });
+
+    const box = armAskCapture();
+    await typeAndSend("Click the submit button");
+    await waitUntil(() => box.msg != null, 8000);
+
+    d.push(sseEvent("PartStartEvent", { index: 1, part: { part_kind: "text", content: '{"reasoning":"Working","actions":[' } }));
+    await waitUntil(
+      () => (panelWin.document.querySelector("#messages .msg-assistant .msg-body")?.textContent || "").includes("Preparing actions"),
+      8000,
+    );
+
+    // Leave for a second chat and come straight back to the streaming one.
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await new Promise((r) => setTimeout(r, 250));
+    const streamTab = panelWin.document.querySelector("#chat-tabs .chat-tab .chat-tab-stream-dot")?.closest(".chat-tab") as any;
+    expect(streamTab).toBeTruthy();
+    streamTab.click();
+    await new Promise((r) => setTimeout(r, 250));
+
+    // The live "Preparing actions…" state must be restored, not blanked.
+    await waitUntil(
+      () => (panelWin.document.querySelector("#messages .msg-assistant .msg-body")?.textContent || "").includes("Preparing actions"),
+      8000,
+    );
+
+    d.push(sseEvent("PartDeltaEvent", { delta: { part_delta_kind: "text", content_delta: '{"type":"done","response":"Submitted."}]}' } }));
+    d.push(sseEvent("completed", {}));
+    await waitUntil(
+      () => (panelWin.document.querySelector("#messages .msg-assistant .msg-body")?.textContent || "").includes("Submitted."),
+      8000,
+    );
+  }, 25000);
+
+  it("re-creates the live bubble and keeps appending deltas to it", async () => {
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await waitUntil(() => panelWin.document.querySelector("#messages .msg-system") != null, 5000);
+
+    const d = deferredSse();
+    fm.handle((url: string) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      return d.response;
+    });
+
+    const box = armAskCapture();
+    await typeAndSend("live bubble on switch back");
+    await waitUntil(() => box.msg != null, 8000);
+
+    // Give chat A visible live progress before we leave it: the first text
+    // event creates the bubble, a delta adds a streaming span (the stream
+    // contract — one event alone does not render progress).
+    d.push(sseEvent("PartStartEvent", { index: 1, part: { part_kind: "text", content: "Hello " } }));
+    await waitUntil(() => panelWin.document.querySelector("#messages .msg-assistant") != null, 8000);
+    d.push(sseEvent("PartDeltaEvent", { delta: { part_delta_kind: "text", content_delta: "there " } }));
+    await waitUntil(
+      () => panelWin.document.querySelectorAll("#messages .msg-assistant .msg-streaming-text").length >= 1,
+      8000,
+    );
+
+    // Open a second chat (A keeps accumulating in the background), then switch
+    // back to A via its pulsing tab.
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await new Promise((r) => setTimeout(r, 250));
+    const streamTab = panelWin.document.querySelector("#chat-tabs .chat-tab .chat-tab-stream-dot")?.closest(".chat-tab") as any;
+    expect(streamTab).toBeTruthy();
+    streamTab.click();
+    await new Promise((r) => setTimeout(r, 250));
+
+    // The live bubble is restored from the accumulated session state...
+    const liveBody = () => String(panelWin.document.querySelector("#messages .msg-assistant .msg-body")?.textContent || "");
+    await waitUntil(() => liveBody().includes("Hello"), 8000);
+    // ...and subsequent deltas keep appending to it (not a one-shot replay).
+    d.push(sseEvent("PartDeltaEvent", { delta: { part_delta_kind: "text", content_delta: "world" } }));
+    await waitUntil(() => liveBody().includes("world"), 8000);
+
+    d.push(sseEvent("completed", {}));
+    await waitUntil(
+      () => String(panelWin.document.querySelector("#messages .msg-assistant .msg-body")?.textContent || "").includes("Hello there world"),
+      8000,
+    );
+  }, 25000);
 });
