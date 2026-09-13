@@ -1894,3 +1894,100 @@ describe("closing a background tab mid-stream (#168)", () => {
     }, 8000);
   }, 20000);
 });
+
+describe("switching back to a streaming chat (#169)", () => {
+  it("restores the action-envelope placeholder while the turn is still streaming", async () => {
+    // The reported case: an ACTION turn (cobrowse envelope). Leaving and
+    // returning mid-stream left a blank bubble with no live progress — the
+    // "Preparing actions…" state was only ever created on the first chunk.
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await waitUntil(() => panelWin.document.querySelector("#messages .msg-system") != null, 5000);
+
+    const d = deferredSse();
+    fm.handle((url: string) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      return d.response;
+    });
+
+    const box = armAskCapture();
+    await typeAndSend("Click the submit button");
+    await waitUntil(() => box.msg != null, 8000);
+
+    d.push(sseEvent("PartStartEvent", { index: 1, part: { part_kind: "text", content: '{"reasoning":"Working","actions":[' } }));
+    await waitUntil(
+      () => (panelWin.document.querySelector("#messages .msg-assistant .msg-body")?.textContent || "").includes("Preparing actions"),
+      8000,
+    );
+
+    // Leave for a second chat and come straight back to the streaming one.
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await new Promise((r) => setTimeout(r, 250));
+    const streamTab = panelWin.document.querySelector("#chat-tabs .chat-tab .chat-tab-stream-dot")?.closest(".chat-tab") as any;
+    expect(streamTab).toBeTruthy();
+    streamTab.click();
+    await new Promise((r) => setTimeout(r, 250));
+
+    // The live "Preparing actions…" state must be restored, not blanked.
+    await waitUntil(
+      () => (panelWin.document.querySelector("#messages .msg-assistant .msg-body")?.textContent || "").includes("Preparing actions"),
+      8000,
+    );
+
+    d.push(sseEvent("PartDeltaEvent", { delta: { part_delta_kind: "text", content_delta: '{"type":"done","response":"Submitted."}]}' } }));
+    d.push(sseEvent("completed", {}));
+    await waitUntil(
+      () => (panelWin.document.querySelector("#messages .msg-assistant .msg-body")?.textContent || "").includes("Submitted."),
+      8000,
+    );
+  }, 25000);
+
+  it("re-creates the live bubble and keeps appending deltas to it", async () => {
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await waitUntil(() => panelWin.document.querySelector("#messages .msg-system") != null, 5000);
+
+    const d = deferredSse();
+    fm.handle((url: string) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      return d.response;
+    });
+
+    const box = armAskCapture();
+    await typeAndSend("live bubble on switch back");
+    await waitUntil(() => box.msg != null, 8000);
+
+    // Give chat A visible live progress before we leave it: the first text
+    // event creates the bubble, a delta adds a streaming span (the stream
+    // contract — one event alone does not render progress).
+    d.push(sseEvent("PartStartEvent", { index: 1, part: { part_kind: "text", content: "Hello " } }));
+    await waitUntil(() => panelWin.document.querySelector("#messages .msg-assistant") != null, 8000);
+    d.push(sseEvent("PartDeltaEvent", { delta: { part_delta_kind: "text", content_delta: "there " } }));
+    await waitUntil(
+      () => panelWin.document.querySelectorAll("#messages .msg-assistant .msg-streaming-text").length >= 1,
+      8000,
+    );
+
+    // Open a second chat (A keeps accumulating in the background), then switch
+    // back to A via its pulsing tab.
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await new Promise((r) => setTimeout(r, 250));
+    const streamTab = panelWin.document.querySelector("#chat-tabs .chat-tab .chat-tab-stream-dot")?.closest(".chat-tab") as any;
+    expect(streamTab).toBeTruthy();
+    streamTab.click();
+    await new Promise((r) => setTimeout(r, 250));
+
+    // The live bubble is restored from the accumulated session state...
+    const liveBody = () => String(panelWin.document.querySelector("#messages .msg-assistant .msg-body")?.textContent || "");
+    await waitUntil(() => liveBody().includes("Hello"), 8000);
+    // ...and subsequent deltas keep appending to it (not a one-shot replay).
+    d.push(sseEvent("PartDeltaEvent", { delta: { part_delta_kind: "text", content_delta: "world" } }));
+    await waitUntil(() => liveBody().includes("world"), 8000);
+
+    d.push(sseEvent("completed", {}));
+    await waitUntil(
+      () => String(panelWin.document.querySelector("#messages .msg-assistant .msg-body")?.textContent || "").includes("Hello there world"),
+      8000,
+    );
+  }, 25000);
+});

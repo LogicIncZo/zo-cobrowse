@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.2.8.15] — 2026-09-13
+
+### Fixed — stabilization bash point release
+- **Returning to a streaming action turn restores its live progress (#169).**
+  The bubble re-created on switch-back only replayed prose, so a cobrowse
+  action turn — whose accumulated text is the JSON envelope — rendered a blank
+  bubble that never updated until `STREAM_DONE`. It now re-creates the same
+  tagged "Preparing actions…" placeholder the first chunk creates.
+
 ## [0.2.8.14] — 2026-09-13
 
 ### Fixed — stabilization bash point release
