@@ -93,7 +93,10 @@ export function createRun(opts) {
 }
 
 const TRANSITIONS = {
-  priming: ['start', 'abort'],
+  // #165: priming is pausable — a handoff turn that falls back to
+  // non-streaming (or an SW restart before turn 1 lands) must be able to
+  // pause the run instead of stranding it in priming forever.
+  priming: ['start', 'pause', 'abort'],
   running: ['pause', 'block', 'complete', 'abort'],
   paused: ['resume', 'abort'],
   blocked: ['resume', 'abort'],

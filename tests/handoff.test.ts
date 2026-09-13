@@ -55,6 +55,18 @@ describe("handoff — transition", () => {
     expect(() => HandoffRun.parse(r)).not.toThrow();
   });
 
+  it("priming is pausable (#165) — a stranded priming run can pause + resume", () => {
+    let r = mkRun();
+    const res = transition(r, "pause", { now: NOW, reason: "streaming unavailable" });
+    expect(res.ok).toBe(true);
+    r = (res as any).run;
+    expect(r.status).toBe("paused");
+    expect(r.stopReason).toBe("streaming unavailable");
+    r = (transition(r, "resume", { now: NOW }) as any).run;
+    expect(r.status).toBe("running");
+    expect(() => HandoffRun.parse(r)).not.toThrow();
+  });
+
   it("pause/resume round-trips; block records the reason", () => {
     let r = mkRun();
     r = (transition(r, "start", { now: NOW }) as any).run;
