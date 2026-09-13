@@ -1854,3 +1854,43 @@ describe("run-tab marker (#166)", () => {
     await waitUntil(() => tabList().every((t) => !String(t.textContent || "").includes("🤖")), 10_000);
   }, 30000);
 });
+
+describe("closing a background tab mid-stream (#168)", () => {
+  it("the closed chat's stream still lands its answer in that conversation", async () => {
+    const d = deferredSse();
+    fm.handle((url: string) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      return d.response;
+    });
+
+    const box = armAskCapture();
+    await typeAndSend("keep streaming after close");
+    await waitUntil(() => box.msg != null, 8000);
+
+    // Open a second chat — the first keeps streaming in the background — then
+    // close the streaming chat's tab (the documented ✕ affordance).
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await new Promise((r) => setTimeout(r, 200));
+    // The backgrounded streaming chat is the tab carrying the pulsing dot
+    // (#135) — that is the one whose ✕ we click.
+    const streamingTab = panelWin.document.querySelector("#chat-tabs .chat-tab .chat-tab-stream-dot")?.closest(".chat-tab") as any;
+    expect(streamingTab).toBeTruthy();
+    (streamingTab.querySelector(".chat-tab-close") as any).click();
+    await new Promise((r) => setTimeout(r, 150));
+
+    // Closing a BACKGROUND tab must not orphan the stream: the answer still
+    // lands in the closed chat's conversation (history is the oracle).
+    d.push(sseEvent("PartStartEvent", { index: 1, part: { part_kind: "text", content: "Landed " } }));
+    d.push(sseEvent("PartDeltaEvent", { delta: { part_delta_kind: "text", content_delta: "in history." } }));
+    d.push(sseEvent("completed", {}));
+
+    await waitUntil(() => {
+      const convs: any[] = Object.values(bus.storage.local._store.cobrowse_convos || {});
+      const a: any = convs.find((c: any) =>
+        (c.messages || []).some((m: any) => m.role === "user" && m.text === "keep streaming after close"));
+      return !!a && (a.messages || []).some(
+        (m: any) => m.role === "assistant" && String(m.text || "").includes("in history."));
+    }, 8000);
+  }, 20000);
+});
