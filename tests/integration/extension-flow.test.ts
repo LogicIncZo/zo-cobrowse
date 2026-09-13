@@ -1721,3 +1721,58 @@ describe("handoff actions stay on the run's pinned tab (#161)", () => {
     expect(panelTab.url).toBe("https://example.test/form-page");
   }, 30000);
 });
+
+describe("parked handoff actions reach the review card (#163)", () => {
+  const envelope163 = (obj: unknown) => sseResponse(zoSseText({ text: JSON.stringify(obj) }));
+
+  it("a boundary-parked action lands in the Run All review card", async () => {
+    const RUN_TAB = 45;
+    bus.tabs.registerTab({ id: RUN_TAB, url: "https://pinned163.example/checkout", title: "Checkout 163", active: false });
+    const chatId = (bus.storage.local._store.cobrowse_open_tabs || {}).activeId
+      || Object.keys(bus.storage.local._store.cobrowse_convos || {})[0];
+    expect(chatId).toBeTruthy();
+
+    bus.storage.session._store["cobrowse_handoff_runs"] = {
+      "run-163-p": {
+        runId: "run-163-p", chatId, goal: "buy the thing",
+        status: "paused", boundaryMode: "readonly",
+        budget: { maxTurns: 6, maxNavigations: 12, maxMinutes: 15 },
+        usage: { turns: 1, navigations: 0, startedAt: Date.now() - 30_000 },
+        pagesVisited: [], parkLog: [], tabId: RUN_TAB,
+        createdAt: Date.now() - 60_000, updatedAt: Date.now() - 20_000,
+      },
+    };
+    await bus.runtime.sendMessage({
+      type: "HANDOFF_UPDATE",
+      run: bus.storage.session._store["cobrowse_handoff_runs"]["run-163-p"],
+    });
+    await waitUntil(() => {
+      const btns = [...panelWin.document.querySelectorAll("#messages .msg-system button")];
+      return btns.some((b: any) => (b.textContent || "").includes("Resume"));
+    }, 5000);
+
+    let asks = 0;
+    fm.handle((url, _init, req) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      const input = String((req as any)?.body?.input || "");
+      if (!input.includes("[handoff-run continuation]")) return sseResponse(zoSseText({ text: "ok" }));
+      asks++;
+      if (asks === 1) return envelope163({ actions: [{ type: "click", selector: "#buy" }] });
+      return envelope163({ actions: [{ type: "done", response: "Cart ready" }] });
+    });
+
+    ([...panelWin.document.querySelectorAll("#messages .msg-system button")] as any[])
+      .find((b: any) => (b.textContent || "").includes("Resume")).click();
+
+    const bar = () => panelWin.document.querySelector("#actions-bar") as any;
+    const rows = () => [...panelWin.document.querySelectorAll("#messages .handoff-batch-row")].map((r: any) => String(r.textContent || ""));
+    // The boundary refusal is parked: the row says so, and the actions the
+    // user must perform themselves are queued in the review card (pre-fix
+    // nothing offered a way to run them).
+    await waitUntil(() => rows().some((t) => t.includes("parked")), 10_000);
+    expect(bar()?.className || "").not.toContain("hidden");
+    const card = panelWin.document.querySelector("#actions-reasoning") as any;
+    expect(String(card?.textContent || "")).toContain("run these yourself");
+  }, 30000);
+});

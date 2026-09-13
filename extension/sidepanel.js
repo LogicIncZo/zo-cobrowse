@@ -4595,6 +4595,10 @@ function handleStreamActions(actions, reasoning) {
 
 // ── Handoff run UX (Lane E) ─────────────────────────────────────────────────
 
+/** Review-card note for actions a handoff boundary — or the sensitive-submit
+ * backstop while a run is active — refused. The user performs them (#163). */
+const PARKED_REASONING = 'Parked by the handoff — review and run these yourself.';
+
 /** The slim run-status line above the composer area (progress + stop). */
 function renderHandoffLine(run) {
   if (!msgsEl) return;
@@ -4667,14 +4671,29 @@ async function executeHandoffBatch(actions, { backgrounded = false } = {}) {
       url,
     });
   } catch { /* background gone — the orphan-pause sweep handles the run */ }
+  const results = Array.isArray(res?.results) ? res.results : [];
+  // #163: a parked action is not a dead end — the spec has the user perform
+  // boundary refusals themselves, from the #26 review card. Register them
+  // there (Run All / Skip); the batch rows stay the turn's record.
+  const parkedActions = results.filter((r) => r?.handoffParked && r.action).map((r) => r.action);
+  if (parkedActions.length) {
+    if (backgrounded) {
+      const conv = conversations[run.chatId];
+      if (conv) conv.pendingActions = { actions: parkedActions, reasoning: PARKED_REASONING };
+    } else {
+      pendingActions = parkedActions;
+      pendingActionsReasoning = PARKED_REASONING;
+      actionsReasoning.textContent = `🧠 ${PARKED_REASONING}`;
+      actionsBar.classList.remove('hidden');
+    }
+  }
   if (backgrounded) {
     const conv = conversations[run.chatId];
     if (conv) {
-      const results = Array.isArray(res?.results) ? res.results : [];
       const ran = actions.filter((a) => a.type !== 'done')
         .map((a) => (a.type === 'navigate' ? `→ ${safeText(a.url)}` : `→ ${safeText(a.type)} ${safeText(a.selector || '')}`));
-      const parked = results.filter((r) => r?.handoffParked).length;
-      const failed = results.filter((r) => r && r.ok === false).length;
+      const parked = parkedActions.length;
+      const failed = results.filter((r) => r && r.ok === false && !r.handoffParked).length;
       conv.messages.push({
         role: 'system',
         text: `🤖 Executed in background — ${ran.join(', ') || 'no actions'}`
@@ -4688,7 +4707,6 @@ async function executeHandoffBatch(actions, { backgrounded = false } = {}) {
     }
     return;
   }
-  const results = Array.isArray(res?.results) ? res.results : [];
   results.forEach((r, i) => {
     const row = list.children[i];
     if (!row) return;
