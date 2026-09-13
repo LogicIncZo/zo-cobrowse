@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { readFileSync } from "fs";
 import { resolve } from "path";
-import * as vm from "node:vm";
+import { runInSandbox } from "./helpers/vm-sandbox";
 import { normalizeActions } from "../extension/lib/modes.js";
 import { parseZoOutput, repairJson, stripCodeFence } from "../extension/lib/parse-output.js";
 import { ParseResultSchema, expectChannel } from "./schemas/parse-output.js";
@@ -43,8 +43,7 @@ function loadHelpers() {
   // Slice from the extraction comment header through the end of safeText.
   const slice = bgSource.slice(start, end);
   const sandbox: any = {};
-  vm.createContext(sandbox);
-  vm.runInContext(slice, sandbox);
+  runInSandbox(slice, sandbox);
   if (typeof sandbox.extractStreamContent !== "function") {
     throw new Error("failed to load extractStreamContent from background.js");
   }
@@ -442,8 +441,7 @@ describe("finishStream preserves reasoning into STREAM_DONE", () => {
       sessionEventShapes: null,
       emitStreamDiagnostic: () => {},
     };
-    vm.createContext(sandbox);
-    vm.runInContext(safeSlice + "\n" + fsSlice, sandbox);
+    runInSandbox(safeSlice + "\n" + fsSlice, sandbox);
     if (typeof sandbox.finishStream !== "function") {
       throw new Error("failed to load finishStream from background.js");
     }
@@ -495,8 +493,7 @@ describe("finishStream preserves reasoning into STREAM_DONE", () => {
       parseZoOutput,
       stripCodeFence,
     };
-    vm.createContext(sandbox);
-    vm.runInContext(
+    runInSandbox(
       bgSource.slice(spStart, spEnd) + "\n" +
       bgSource.slice(safeStart, safeEnd) + "\n" +
       bgSource.slice(fsStart, fsEnd),
