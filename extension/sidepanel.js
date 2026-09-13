@@ -1987,7 +1987,9 @@ function renderActionTimeline() {
     card.innerHTML =
       `<span class="action-icon">${meta.icon}</span>` +
       `<span class="action-label">${meta.label}</span>` +
-      `<span class="action-detail">${actionDetail(g.action)}</span>` +
+      // #155: actionDetail() echoes model/page-derived strings (selectors,
+      // URLs, fill values) — escape before they reach innerHTML.
+      `<span class="action-detail">${escapeHtml(actionDetail(g.action))}</span>` +
       (g.count > 1 ? `<span class="action-count">× ${g.count}</span>` : '') +
       `<span class="action-status">pending</span>`;
     timeline.appendChild(card);
