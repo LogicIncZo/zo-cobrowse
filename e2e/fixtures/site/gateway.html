@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>MockPay Gateway</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; }
+    button { font-size: 1rem; padding: .5rem 1rem; }
+    #reg-number { font-weight: 700; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>MockPay Gateway</h1>
+    <!-- Recipes #220 e2e: the fake SBI-style gateway. The human checkpoint
+         ends when the user clicks Pay — the redirect lands on a page whose
+         URL carries paid=1 (the checkpoint's resumeOn) and shows the
+         registration number the run extracts as evidence. -->
+    <div id="pay-panel">
+      <p>Amount due: ₹10</p>
+      <button id="pay-btn" type="button">Pay ₹10</button>
+    </div>
+    <div id="payment-done" hidden>
+      <p>Payment received.</p>
+      <div id="reg-number">REG-2026-E2E-777</div>
+    </div>
+  </main>
+  <script>
+    document.getElementById("pay-btn").addEventListener("click", () => {
+      setTimeout(() => {
+        location.href = "gateway.html?paid=1";
+      }, 300);
+    });
+    if (location.search.includes("paid=1")) {
+      document.getElementById("pay-panel").hidden = true;
+      document.getElementById("payment-done").hidden = false;
+    }
+  </script>
+</body>
+</html>

@@ -80,6 +80,17 @@ export const GetFormAction = z.object({
   type: z.literal("get_form"),
 });
 
+// Player-only action (#220): the recipes player executes one Recipe step via
+// the DOM executors. `step` is a recipes-schema step object (tests/schemas/
+// recipes.ts); `dataB64` carries the attach file's bytes. Never prompted to
+// Zo — it exists in this contract so the executor-coverage tests can demand
+// handler cases in both executors.
+export const RecipeStepAction = z.object({
+  type: z.literal("recipe_step"),
+  step: z.record(z.unknown()),
+  dataB64: z.string().optional(),
+});
+
 export const Action = z.discriminatedUnion("type", [
   NavigateAction,
   ClickAction,
@@ -93,6 +104,7 @@ export const Action = z.discriminatedUnion("type", [
   ReadPageAction,
   GetDomAction,
   GetFormAction,
+  RecipeStepAction,
 ]);
 
 export const ActionArray = z.array(Action);
@@ -114,4 +126,5 @@ export const ACTION_TYPES = [
   "get_dom",
   "get_form",
   "read_file",
+  "recipe_step",
 ] as const;

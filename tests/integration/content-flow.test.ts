@@ -272,6 +272,9 @@ describe("content.js — write-assist widget", () => {
       runtime: {
         onMessage: new FakeEvent(),
         sendMessage: (msg: any) => {
+          // #220: the recipe recorder peeks once per page load — answered
+          // here (disarmed) and excluded from the widget's send log.
+          if (msg?.type === "RECIPE_RECORD_PEEK") return Promise.resolve({ ok: true, armed: false });
           sent.push(msg);
           const respond = opts.respond || (() => ({ ok: true, text: "IMPROVED RESULT" }));
           return Promise.resolve(respond(msg));

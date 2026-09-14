@@ -78,10 +78,21 @@ import {
   skillsListCommand,
   dirListCommand,
   safeWorkspacePath,
+  shellQuote,
   extractMarkedStdout,
   parseSkillsBundle,
   parseLsEntries,
 } from './lib/pickers.js';
+import {
+  validateRecipe,
+  substituteParams,
+  bumpVersion,
+  healPrompt,
+  parseRecipeHealResponse,
+  assembleDraftRecipe,
+  generateRecipePrompt,
+  parseGeneratedRecipe,
+} from './lib/recipes.js';
 import { createSessionCache } from './lib/sw-cache.js';
 import { createDebugLog } from './lib/debug-log.js';
 
@@ -506,6 +517,53 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     case 'HANDOFF_STATUS': {
       handoffGet(request.runId ? { runId: request.runId } : { chatId: request.chatId }).then((run) => sendResponse({ ok: true, run }));
+      return true;
+    }
+    case 'RECIPE_START': {
+      // #220: {chatId, tabId?, source:{workspacePath|localName}, paramValues?}
+      // → {ok, run} | {ok:false, needsParams, params}. The player is
+      // background-resident and deterministic — the panel only displays.
+      recipeStart(request).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
+      return true;
+    }
+    case 'RECIPE_RESUME': {
+      // {runId, force?} — verify the pending human checkpoint's postcondition
+      // (force = manual fallback) and continue playback.
+      recipeResume(request).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
+      return true;
+    }
+    case 'RECIPE_STOP': {
+      // {runId, reason?} — abort a live run (chat-tab close uses this too).
+      recipeStop(request).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
+      return true;
+    }
+    case 'RECIPE_STATUS': {
+      recipeGet(request.runId ? { runId: request.runId } : { chatId: request.chatId }).then((run) => sendResponse({ ok: true, run }));
+      return true;
+    }
+    case 'RECIPE_LIST': {
+      // `!recipe list` — the local learned-recipes library + any live run.
+      recipeList().then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
+      return true;
+    }
+    case 'RECIPE_RECORD_START': {
+      // #220 recorder: arm a session (content scripts arm per navigation).
+      recipeRecordStart(request).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
+      return true;
+    }
+    case 'RECIPE_RECORD_PEEK': {
+      // Content scripts ask on every page load so the recorder re-arms.
+      recipeRecordPeek().then(sendResponse).catch(() => sendResponse({ ok: false }));
+      return true;
+    }
+    case 'RECIPE_OBS': {
+      // One observation record from the content recorder.
+      recipeRecordObserve(request.obs).then(sendResponse).catch(() => sendResponse({ ok: false }));
+      return true;
+    }
+    case 'RECIPE_RECORD_STOP': {
+      // Assemble + clean + validate + save the learned recipe.
+      recipeRecordStop().then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
       return true;
     }
     case 'ENHANCE_TEXT': {
@@ -2369,6 +2427,601 @@ async function handoffChainNextTurn(runId) {
   });
 }
 
+// ---- Recipes: deterministic player (#220) ---------------------------------
+// Plays a saved Recipe step by step with NO LLM turn. Same lifecycle contract
+// as the handoff loop: event-driven, never SW-resident — each step is one
+// short async continuation, run state persists to storage.session before and
+// after every step, and an MV3 worker restart PAUSES the run (never strands
+// it; `waiting_human` checkpoints survive — the user is off paying anyway).
+// Design: docs/superpowers/specs/2026-09-14-recipes-design.md
+
+const recipeStore = {
+  key: 'cobrowse_recipe_runs',
+  async load() {
+    const o = await chrome.storage.session.get(this.key);
+    return (o && o[this.key]) || {};
+  },
+  async save(runs) {
+    await chrome.storage.session.set({ [this.key]: runs });
+  },
+};
+
+// Learned + healed recipes (draft artifacts), keyed by name. storage.local —
+// they are user artifacts meant to survive the browser, but they are NOT
+// settings (never synced).
+const recipeLibrary = {
+  key: 'cobrowse_recipes',
+  async load() {
+    const o = await chrome.storage.local.get(this.key);
+    return (o && o[this.key]) || {};
+  },
+  async save(lib) {
+    await chrome.storage.local.set({ [this.key]: lib });
+  },
+};
+
+async function recipeNotify(run) {
+  // Snapshot: runtime messages are structured-cloned in real Chrome — send a
+  // frozen copy so a live run object mutating between saves can't rewrite
+  // what earlier pushes already delivered.
+  let snapshot = run;
+  try { snapshot = JSON.parse(JSON.stringify(run)); } catch { /* send as-is */ }
+  try { await chrome.runtime.sendMessage({ type: 'RECIPE_UPDATE', run: snapshot }); } catch { /* no panel open */ }
+}
+
+async function recipePut(run) {
+  const runs = await recipeStore.load();
+  runs[run.runId] = run;
+  await recipeStore.save(runs);
+  await recipeNotify(run);
+  return run;
+}
+
+async function recipeGet({ runId, chatId } = {}) {
+  const runs = await recipeStore.load();
+  if (runId) return runs[runId] || null;
+  if (chatId) {
+    return Object.values(runs).find((r) => r.chatId === chatId && !['done', 'aborted'].includes(r.status)) || null;
+  }
+  return null;
+}
+
+// One-shot notification at the moments a possibly-away user is needed or the
+// run finished — mirrors handoffMaybeNotify.
+function recipeMaybeNotify(run) {
+  if (!['waiting_human', 'blocked', 'done'].includes(run.status)) return;
+  const titles = { waiting_human: 'Recipe needs you', blocked: 'Recipe run blocked', done: 'Recipe finished' };
+  try {
+    chrome.notifications.create(`recipe-${run.runId}`, {
+      type: 'basic',
+      iconUrl: 'icons/icon128.png',
+      title: titles[run.status],
+      message: `${safeText(run.name).slice(0, 120)}${run.stopReason || run.humanTitle ? ' — ' + safeText(run.stopReason || run.humanTitle).slice(0, 120) : ''}`,
+    });
+  } catch { /* notifications unavailable */ }
+}
+
+// SW restart: a running/healing run lost its in-flight continuation. Pause it
+// honestly — resume replays the CURRENT step (auto steps are re-runnable).
+// waiting_human checkpoints are NOT swept: the parked state is durable.
+(function recipePauseOrphans() {
+  recipeStore.load().then(async (runs) => {
+    let dirty = false;
+    for (const run of Object.values(runs)) {
+      if (run.status === 'running' || run.status === 'healing') {
+        run.status = 'paused';
+        run.stopReason = 'extension restarted — resume to continue';
+        run.updatedAt = Date.now();
+        dirty = true;
+      }
+    }
+    if (dirty) await recipeStore.save(runs);
+  }).catch(() => { /* storage unavailable — nothing to sweep */ });
+})();
+
+// Load a recipe artifact from the workspace (MCP read_file) or the local
+// learned-recipes library.
+async function recipeLoad(source) {
+  if (source && source.localName) {
+    const lib = await recipeLibrary.load();
+    const recipe = lib[source.localName];
+    return recipe ? { ok: true, recipe } : { ok: false, error: `no saved recipe named "${source.localName}" (!recipe list shows what's saved)` };
+  }
+  const res = await readWorkspaceFile(String((source && source.workspacePath) || ''));
+  if (!res.ok) return { ok: false, error: res.error };
+  try {
+    return { ok: true, recipe: JSON.parse(res.content) };
+  } catch (e) {
+    return { ok: false, error: `recipe is not valid JSON: ${e.message}` };
+  }
+}
+
+async function recipeTabUrl(tabId) {
+  try { return (await chrome.tabs.get(tabId)).url || ''; } catch { return ''; }
+}
+
+// {{evidenceKey}} interpolation for the done message — params were already
+// substituted at start; evidence only exists at run time.
+function recipeInterpolateEvidence(text, evidence) {
+  return String(text || '').replace(/\{\{\s*([A-Za-z0-9_-]+)\s*\}\}/g, (m, key) => {
+    const hit = (evidence || []).find((e) => e.key === key);
+    return hit ? hit.value : m;
+  });
+}
+
+async function recipeStart(request) {
+  const loaded = await recipeLoad(request.source || {});
+  if (!loaded.ok) return { ok: false, error: loaded.error };
+  const recipe = loaded.recipe;
+  const verdict = validateRecipe(recipe);
+  if (!verdict.ok) {
+    return { ok: false, error: `invalid recipe: ${verdict.errors[0]}`, errors: verdict.errors };
+  }
+  const values = request.paramValues || {};
+  const missing = (recipe.params || []).filter((p) => p.required && values[p.name] === undefined && p.default === undefined);
+  if (missing.length) {
+    // The panel renders a params card and re-sends with paramValues.
+    return { ok: false, needsParams: true, params: recipe.params };
+  }
+  const sub = substituteParams(recipe, values);
+  if (!sub.ok) return { ok: false, error: sub.errors.join('; ') };
+
+  const now = Date.now();
+  const run = {
+    runId: `rec-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+    recipeId: recipe.id,
+    name: recipe.name,
+    origin: request.source.localName ? `local:${request.source.localName}` : String(request.source.workspacePath || 'recipe'),
+    version: recipe.version,
+    chatId: request.chatId,
+    status: 'running',
+    stepIndex: 0,
+    stepsTotal: sub.recipe.steps.length,
+    params: values,
+    evidence: [],
+    healCount: 0,
+    startedAt: now,
+    createdAt: now,
+    updatedAt: now,
+    // The substituted recipe rides the run so playback is deterministic and
+    // survives an SW restart without re-reading the workspace.
+    recipe: sub.recipe,
+  };
+  if (request.tabId) run.tabId = request.tabId;
+  await recipePut(run);
+  recipePlayStep(run.runId).catch((e) => console.debug('recipePlayStep:', e));
+  return { ok: true, run };
+}
+
+// Park a run as blocked — the deterministic loop cannot continue (cue miss,
+// backstop refusal, failed precondition). Terminal for this PR; the healer
+// takes cue-misses over in the next round.
+async function recipeBlock(runId, reason) {
+  const run = await recipeGet({ runId });
+  if (!run || ['done', 'aborted', 'blocked'].includes(run.status)) return run;
+  run.status = 'blocked';
+  run.stopReason = safeText(reason).slice(0, 200);
+  run.updatedAt = Date.now();
+  const saved = await recipePut(run);
+  recipeMaybeNotify(saved);
+  return saved;
+}
+
+async function recipeAdvance(runId) {
+  const run = await recipeGet({ runId });
+  if (!run || run.status !== 'running') return;
+  run.stepIndex += 1;
+  run.updatedAt = Date.now();
+  if (run.stepIndex >= run.stepsTotal) {
+    // Ran off the end without a done step — still a completion, honestly noted.
+    run.status = 'done';
+    run.stopReason = 'recipe finished (no done step)';
+    const saved = await recipePut(run);
+    recipeMaybeNotify(saved);
+    return;
+  }
+  await recipePut(run);
+  recipePlayStep(runId).catch((e) => console.debug('recipePlayStep:', e));
+}
+
+async function recipePlayStep(runId) {
+  const run = await recipeGet({ runId });
+  if (!run || run.status !== 'running') return;
+  const recipe = run.recipe;
+  const i = run.stepIndex;
+  const step = recipe.steps[i];
+  const prev = i > 0 ? recipe.steps[i - 1] : null;
+
+  // Runtime re-check of the E-INVARIANT — a patched/healed artifact can never
+  // smuggle an undeclared submit past validateRecipe's load-time check.
+  if (step.type === 'click' && step.submitish === true && (!prev || prev.type !== 'human')) {
+    await recipeBlock(runId, 'submitish click not immediately after a human step (invariant)');
+    return;
+  }
+
+  if (step.type === 'navigate') {
+    const before = await recipeTabUrl(run.tabId);
+    try {
+      await chrome.tabs.update(run.tabId, { url: step.url });
+    } catch (e) {
+      await recipeBlock(runId, `navigate failed: ${e.message}`);
+      return;
+    }
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
+      await sleep(300);
+      const url = await recipeTabUrl(run.tabId);
+      if (step.expectUrl ? url.includes(step.expectUrl) : (url && url !== before)) break;
+    }
+    const url = await recipeTabUrl(run.tabId);
+    if (step.expectUrl && !url.includes(step.expectUrl)) {
+      await recipeBlock(runId, `expectUrl failed — wanted "${step.expectUrl}", still on ${url || 'unknown page'}`);
+      return;
+    }
+    await recipeAdvance(runId);
+    return;
+  }
+
+  if (step.type === 'human') {
+    run.status = 'waiting_human';
+    run.humanTitle = step.title;
+    run.updatedAt = Date.now();
+    const saved = await recipePut(run);
+    recipeMaybeNotify(saved);
+    return;
+  }
+
+  if (step.type === 'done') {
+    run.status = 'done';
+    run.stopReason = recipeInterpolateEvidence(step.message, run.evidence) || 'recipe complete';
+    run.updatedAt = Date.now();
+    const saved = await recipePut(run);
+    recipeMaybeNotify(saved);
+    return;
+  }
+
+  // Auto steps (fill/click/check/attach/waitFor/extract) → the executor.
+  let dataB64;
+  if (step.type === 'attach') {
+    const file = await recipeFetchFileBase64(step.path);
+    if (!file.ok) {
+      await recipeBlock(runId, `attach: ${file.error}`);
+      return;
+    }
+    dataB64 = file.dataB64;
+  }
+
+  // Sensitive-page arming for click steps: payment submits are NEVER
+  // auto-clicked, declared or not — they park. The sensitive backstop inside
+  // executeActions stays armed for the same reason (SUBMIT_TEXT_RE probing).
+  let sensitive = false;
+  if (step.type === 'click') {
+    const pre = await captureFormFields(run.tabId);
+    if (pre) sensitive = isSensitiveForm(pre.formFields, pre.url).sensitive;
+    if (sensitive && step.submitish === true) {
+      await recipeBlock(runId, 'sensitive/payment page — the submit stays yours (declare it inside the human checkpoint)');
+      return;
+    }
+  }
+
+  const res = await executeActions([{ type: 'recipe_step', step, dataB64 }], run.tabId, { recipe: true, sensitive });
+  const r = (res.results && res.results[0]) || { ok: false, error: res.error || 'no result' };
+  if (!r.ok) {
+    if (r.cueMiss) {
+      // Cue-miss → exactly one re-ground turn (the healer) patches the cues,
+      // bumps the version, caches the healed copy, and retries. No heal
+      // budget left, or a failed heal → blocked.
+      await recipeHeal(runId, step, r);
+      return;
+    }
+    await recipeBlock(runId, `${step.type}: ${r.error}`);
+    return;
+  }
+  if (step.type === 'extract') {
+    const runNow = await recipeGet({ runId });
+    runNow.evidence.push({ key: step.evidenceKey, label: step.label, value: String(r.value ?? ''), ts: Date.now() });
+    runNow.updatedAt = Date.now();
+    await recipePut(runNow);
+  }
+  await recipeAdvance(runId);
+}
+
+// attach bytes come from the workspace over the MCP bash tool (`base64 -w0`) —
+// read_file is text-oriented and would corrupt binaries. ~1 MB cap (the RTI
+// worked example's limit).
+async function recipeFetchFileBase64(pathInput) {
+  if (!config.zoAccessToken) return { ok: false, error: 'Zo access token not configured.' };
+  const path = safeWorkspacePath(typeof pathInput === 'string' ? pathInput : '', WORKSPACE_ROOT);
+  if (!path) return { ok: false, error: `path must be inside ${WORKSPACE_ROOT}` };
+  try {
+    const result = await mcpToolCall('bash', { cmd: `base64 -w0 ${shellQuote(path)}` });
+    const raw = extractMarkedStdout(toolText(result)) || toolText(result);
+    const dataB64 = String(raw || '').replace(/\s+/g, '');
+    if (!dataB64) return { ok: false, error: 'empty base64 output' };
+    if (dataB64.length > 1_400_000) return { ok: false, error: 'file too large for attach (cap ~1 MB)' };
+    return { ok: true, dataB64 };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
+// RECIPE_RESUME: verify the pending checkpoint's postcondition (URL via a
+// cheap capture; cue via a bounded waitFor probe), then continue. force:true
+// is the manual fallback — the user asserts they're done, we record a warning.
+async function recipeResume({ runId, force } = {}) {
+  const run = await recipeGet({ runId });
+  if (!run) return { ok: false, error: 'no such recipe run' };
+  if (!['waiting_human', 'paused', 'blocked'].includes(run.status)) {
+    return { ok: false, error: `run is ${run.status}, not resumable` };
+  }
+  const step = run.recipe.steps[run.stepIndex];
+
+  if (run.status === 'waiting_human' && step && step.type === 'human') {
+    if (step.timeoutMinutes && !force && Date.now() - run.updatedAt > step.timeoutMinutes * 60000) {
+      return { ok: false, error: `checkpoint timed out (${step.timeoutMinutes} min) — resume with "skip check" to continue anyway`, run };
+    }
+    if (!force) {
+      if (step.resumeOn.url) {
+        const cap = await getActiveTabContext(run.tabId, 0, null).catch(() => null);
+        const url = (cap && cap.url) || '';
+        if (!url.includes(step.resumeOn.url)) {
+          return { ok: false, error: `resume condition not met — still on ${url || 'an unknown page'}`, run };
+        }
+      }
+      if (step.resumeOn.cue) {
+        const probe = await executeActions(
+          [{ type: 'recipe_step', step: { type: 'waitFor', cue: step.resumeOn.cue, timeoutMs: 2500 } }],
+          run.tabId, {},
+        );
+        if (!probe.ok) {
+          return { ok: false, error: 'resume condition not met — the expected element is not on the page', run };
+        }
+      }
+    }
+    run.stepIndex += 1;
+    run.humanTitle = undefined;
+  }
+
+  run.status = 'running';
+  run.stopReason = undefined;
+  run.updatedAt = Date.now();
+  await recipePut(run);
+  recipePlayStep(run.runId).catch((e) => console.debug('recipePlayStep:', e));
+  return { ok: true, run };
+}
+
+async function recipeStop({ runId, reason } = {}) {
+  const run = await recipeGet({ runId });
+  if (!run) return { ok: false, error: 'no such recipe run' };
+  if (['done', 'aborted'].includes(run.status)) {
+    return { ok: false, run, error: `run already ${run.status}` };
+  }
+  run.status = 'aborted';
+  run.stopReason = safeText(reason) || 'stopped by user';
+  run.updatedAt = Date.now();
+  const saved = await recipePut(run);
+  return { ok: true, run: saved };
+}
+
+async function recipeList() {
+  const lib = await recipeLibrary.load();
+  const runs = await recipeStore.load();
+  const live = Object.values(runs).find((r) => !['done', 'aborted'].includes(r.status));
+  return {
+    ok: true,
+    recipes: Object.values(lib).map((r) => ({ name: r.name, version: r.version, steps: r.steps.length, draft: !!r.draft, origin: r.origin })),
+    liveRun: live ? { runId: live.runId, name: live.name, status: live.status } : null,
+  };
+}
+
+// The healer (#220): on a cue miss, ONE re-ground turn — a redacted tier-2
+// capture + the failed cues + the page's near-miss candidates go to a one-shot
+// Zo call (generateMode pattern: plain JSON POST, no conversation_id, no
+// stream port). A parseable cue patch updates the run's copy, bumps the
+// version, caches the healed recipe in the local library, and retries the
+// step. Everything else blocks the run honestly.
+async function recipeHeal(runId, step, missResult) {
+  let run = await recipeGet({ runId });
+  if (!run || run.status !== 'running') return;
+  if ((run.healCount || 0) >= 1) {
+    await recipeBlock(runId, `cue miss — ${missResult.error} (heal budget spent)`);
+    return;
+  }
+  if (!config.zoAccessToken) {
+    await recipeBlock(runId, `cue miss — ${missResult.error} (no Zo token for the healer)`);
+    return;
+  }
+  run.status = 'healing';
+  run.updatedAt = Date.now();
+  await recipePut(run);
+
+  // Redaction: the healer gets field STRUCTURE (labels/questions/selectors),
+  // never live values — strip them defensively before anything leaves.
+  const cap = await getActiveTabContext(run.tabId, 2, null).catch(() => null);
+  const pageContext = cap && !cap.error ? {
+    url: cap.url,
+    title: cap.title,
+    formFields: (Array.isArray(cap.formFields) ? cap.formFields : []).map((f) => ({ ...f, value: undefined })),
+  } : null;
+
+  try {
+    const resp = await fetch(config.zoApiUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${config.zoAccessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        input: healPrompt(run.recipe, step, missResult, pageContext),
+        model_name: config.zoModel || undefined,
+      }),
+    });
+    if (!resp.ok) {
+      await recipeBlock(runId, `healer HTTP ${resp.status} — cue miss: ${missResult.error}`);
+      return;
+    }
+    const data = await resp.json().catch(() => ({}));
+    const parsed = parseRecipeHealResponse(String(data?.output ?? ''));
+    if (!parsed.ok) {
+      await recipeBlock(runId, `healer: ${parsed.error}`);
+      return;
+    }
+    run = await recipeGet({ runId });
+    if (!run || run.status !== 'healing') return;
+    run.recipe.steps[run.stepIndex].cues = parsed.cues;
+    run.version = bumpVersion(run.version, 'patch') || run.version;
+    run.healCount = (run.healCount || 0) + 1;
+    run.updatedAt = Date.now();
+    run.status = 'running';
+    const lib = await recipeLibrary.load();
+    lib[run.recipeId] = run.recipe; // healed copy cached under the recipe id
+    await recipeLibrary.save(lib);
+    await recipePut(run);
+    recipePlayStep(run.runId).catch((e) => console.debug('recipePlayStep:', e));
+  } catch (e) {
+    await recipeBlock(runId, `healer failed: ${e?.message || e}`);
+  }
+}
+
+// ---- Recipe recorder (#220): learn a recipe from a manual run --------------
+// `!recipe record` arms a session; the content recorder (armed per navigation
+// via RECIPE_RECORD_PEEK) streams observation records (RECIPE_OBS — sensitive
+// field values never leave the page). Stop assembles the deterministic draft,
+// runs a best-effort LLM cleanup whose output must pass validateRecipe (the
+// E-INVARIANT machine-checks the learned artifact), and saves it to the local
+// library under the session name — `!recipe run <name>` replays it.
+
+const recipeRecStore = {
+  key: 'cobrowse_recipe_recording',
+  async load() {
+    const o = await chrome.storage.session.get(this.key);
+    return (o && o[this.key]) || null;
+  },
+  async save(s) {
+    await chrome.storage.session.set({ [this.key]: s });
+  },
+  async clear() {
+    await chrome.storage.session.remove(this.key);
+  },
+};
+
+async function recipeRecordStart({ chatId, name } = {}) {
+  const existing = await recipeRecStore.load();
+  if (existing && existing.armed) {
+    return { ok: false, error: `already recording "${existing.name}" — stop it first (✕ on the recording line)` };
+  }
+  const session = {
+    armed: true,
+    name: safeText(name) || `recorded-${new Date().toISOString().slice(0, 10)}`,
+    chatId: chatId || '',
+    obs: [],
+    startedAt: Date.now(),
+  };
+  await recipeRecStore.save(session);
+  // Live tabs arm NOW — a fresh page arms via RECIPE_RECORD_PEEK instead.
+  recipeBroadcastRecordState(true).catch(() => {});
+  return { ok: true, name: session.name };
+}
+
+// Tell every content script the armed state changed (best-effort per tab).
+async function recipeBroadcastRecordState(armed) {
+  let tabs = [];
+  try { tabs = await chrome.tabs.query({}); } catch { return; }
+  await Promise.all(tabs.filter((t) => t.id != null).map((t) =>
+    chrome.tabs.sendMessage(t.id, { type: 'RECIPE_RECORD_STATE', armed }).catch(() => {}),
+  ));
+}
+
+async function recipeRecordPeek() {
+  const s = await recipeRecStore.load();
+  return { ok: true, armed: !!(s && s.armed), name: s ? s.name : undefined };
+}
+
+async function recipeRecordObserve(obs) {
+  const s = await recipeRecStore.load();
+  if (!s || !s.armed) return { ok: false, error: 'no recording armed' };
+  if (obs && typeof obs === 'object' && obs.op) {
+    s.obs.push(obs);
+    await recipeRecStore.save(s);
+  }
+  return { ok: true };
+}
+
+async function recipeRecordStop() {
+  const s = await recipeRecStore.load();
+  if (!s || !s.armed) return { ok: false, error: 'no recording armed' };
+  await recipeRecStore.clear();
+  recipeBroadcastRecordState(false).catch(() => {});
+  if (!s.obs.length) return { ok: false, error: 'nothing was recorded — click through a flow first' };
+
+  // 1) Deterministic draft (sensitive-page collapse + invariant authoring).
+  const assembled = assembleDraftRecipe(s.obs, s.name);
+  if (!assembled.ok) return { ok: false, error: assembled.errors?.[0] || 'could not assemble a draft' };
+  let recipe = assembled.recipe;
+  let llmCleaned = false;
+  let note;
+
+  // 2) Best-effort LLM cleanup — param defaults stripped from the prompt
+  // (recorded values stay local). A cleaned draft that fails validateRecipe
+  // is discarded for the deterministic one, never tolerated.
+  if (config.zoAccessToken) {
+    try {
+      const resp = await fetch(config.zoApiUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${config.zoAccessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          input: generateRecipePrompt(recipe),
+          model_name: config.zoModel || undefined,
+        }),
+      });
+      if (resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        const parsed = parseGeneratedRecipe(String(data?.output ?? ''));
+        if (parsed.ok) {
+          const merged = { ...recipe, params: parsed.recipe.params, steps: parsed.recipe.steps, updatedAt: Date.now() };
+          const verdict = validateRecipe(merged);
+          if (verdict.ok) {
+            recipe = merged;
+            llmCleaned = true;
+            note = parsed.note;
+          } else {
+            note = `LLM draft rejected (${verdict.errors[0]}) — kept the deterministic draft`;
+          }
+        } else {
+          note = `LLM cleanup unusable (${parsed.error}) — kept the deterministic draft`;
+        }
+      } else {
+        note = `LLM cleanup HTTP ${resp.status} — kept the deterministic draft`;
+      }
+    } catch (e) {
+      note = `LLM cleanup failed (${e?.message || e}) — kept the deterministic draft`;
+    }
+  }
+
+  // The gate, whichever draft survived.
+  const finalVerdict = validateRecipe(recipe);
+  if (!finalVerdict.ok) {
+    return { ok: false, error: `learned recipe failed validation: ${finalVerdict.errors[0]}` };
+  }
+
+  const lib = await recipeLibrary.load();
+  lib[s.name] = recipe;
+  await recipeLibrary.save(lib);
+  return {
+    ok: true,
+    name: s.name,
+    steps: recipe.steps.length,
+    params: recipe.params.length,
+    llmCleaned,
+    note,
+    warnings: finalVerdict.warnings,
+    recipe,
+  };
+}
+
 async function runExecuteActions(domActions, target, { confirmed, boundaryMode } = {}) {
   const hasFill = domActions.some((a) => a.type === 'fill_form' || a.type === 'fill');
   // Click-only batches capture too: on sensitive pages the submit backstop
@@ -2496,13 +3149,15 @@ async function executeActions(actions, tabId, opts = {}) {
     // Co-browse contract (user rule): once Zo has filled a form on this page,
     // it never clicks ANY action button (submit/OK/Next/Continue/Create/…) —
     // the user reviews and clicks. Links stay allowed (navigation ≠ form
-    // action). The entry clears when the tab navigates elsewhere.
+    // action). The entry clears when the tab navigates elsewhere. Recipe
+    // steps (opts.recipe, #220) are exempt: a declared click was authored
+    // deliberately — the sensitive-page probe below still guards submits.
     if (action.type === 'click' && filledPages.has(tabId)) {
       let currentUrl = '';
       try { currentUrl = (await chrome.tabs.get(tabId)).url || ''; } catch { /* tab gone */ }
       if (currentUrl && currentUrl !== filledPages.get(tabId)) {
         filledPages.delete(tabId); // navigated away - the contract is satisfied
-      } else if (currentUrl) {
+      } else if (currentUrl && !opts.recipe) {
         const probe = await probeClickTarget(tabId, action.selector);
         const isActionButton = probe && (
           probe.tag === 'button' ||
@@ -2725,6 +3380,139 @@ function executeDomAction(action) {
       case 'wait':
         setTimeout(() => resolve({ ok: true, type: 'wait' }), action.ms || 1000);
         break;
+      case 'recipe_step': {
+        // #220 twin of content.js#executeRecipeStep — inlined cue resolution
+        // (reuses the resolveFieldTarget copy above) because this function is
+        // serialized and cannot close over module scope.
+        const rStep = action.step || {};
+        const rOp = rStep.type;
+        const rClickableByText = (txt) => {
+          const norm = String(txt || '').toLowerCase().trim();
+          if (!norm) return null;
+          for (const c of document.querySelectorAll('a, button, [role=button], [onclick], input[type=submit], input[type=button], [type=submit]')) {
+            if ((c.textContent || '').trim().toLowerCase().includes(norm)) return c;
+          }
+          return null;
+        };
+        const rValidCss = (sel) => {
+          if (!sel || typeof sel !== 'string' || /:has-text|:text\(|:has\(/i.test(sel)) return false;
+          try { document.querySelector(sel); return true; } catch { return false; }
+        };
+        const rResolveCues = (cues) => {
+          const tried = [];
+          for (const c of cues || []) {
+            let el = null;
+            if (c.strategy === 'selector') {
+              if (rValidCss(c.value)) el = document.querySelector(c.value);
+            } else if (c.strategy === 'text') {
+              el = rClickableByText(c.value);
+            } else {
+              el = resolveFieldTarget(c.value, null) || rClickableByText(c.value);
+            }
+            if (el) return { el, tried };
+            tried.push(`${c.strategy}=${c.value}`);
+          }
+          return { el: null, tried };
+        };
+        const rCollectCandidates = () => {
+          const out = [];
+          for (const c of document.querySelectorAll('a, button, [role=button], input[type=submit], input[type=button]')) {
+            const text = ((c.textContent || '') || (c.value || '')).trim().slice(0, 60);
+            if (!text) continue;
+            out.push({ text });
+            if (out.length >= 12) return out;
+          }
+          for (const f of document.querySelectorAll('input, textarea, select')) {
+            if (f.type === 'hidden') continue;
+            out.push({ text: f.name || f.id || '' });
+            if (out.length >= 24) break;
+          }
+          return out;
+        };
+        if (rOp === 'waitFor') {
+          const deadline = Date.now() + Math.min(rStep.timeoutMs || 5000, 15000);
+          const poll = () => {
+            const { el, tried } = rResolveCues(rStep.cue ? [rStep.cue] : []);
+            if (el) { resolve({ ok: true, type: 'waitFor' }); return; }
+            if (Date.now() >= deadline) {
+              resolve({ ok: false, type: 'waitFor', cueMiss: true, tried, error: 'waitFor timed out' });
+              return;
+            }
+            setTimeout(poll, 200);
+          };
+          poll();
+          break;
+        }
+        if (rOp === 'navigate' || rOp === 'human' || rOp === 'done') {
+          resolve({ ok: true, type: rOp });
+          break;
+        }
+        const { el: rEl, tried: rTried } = rResolveCues(rStep.cues);
+        if (!rEl) {
+          resolve({ ok: false, type: rOp, cueMiss: true, tried: rTried, candidates: rCollectCandidates(), error: `no element matched cues: ${rTried.join('; ')}` });
+          break;
+        }
+        (async () => {
+          switch (rOp) {
+            case 'click':
+              rEl.scrollIntoView({ block: 'center' });
+              rEl.click();
+              return { ok: true, type: 'click' };
+            case 'fill': {
+              const setVal2 = (node, raw) => {
+                node.focus();
+                node.value = '';
+                node.value = raw;
+                if (node.tagName === 'SELECT' && node.selectedIndex === -1) {
+                  const want = String(raw == null ? '' : raw).trim().toLowerCase();
+                  if (want) {
+                    const opts = Array.from(node.options || []);
+                    const opt = opts.find((o) => (o.textContent || '').trim().toLowerCase() === want) ||
+                      opts.find((o) => (o.textContent || '').trim().toLowerCase().startsWith(want));
+                    if (opt) node.value = opt.value;
+                  }
+                }
+                node.dispatchEvent(new Event('input', { bubbles: true }));
+                node.dispatchEvent(new Event('change', { bubbles: true }));
+              };
+              setVal2(rEl, String(rStep.value == null ? '' : rStep.value));
+              return { ok: true, type: 'fill' };
+            }
+            case 'check': {
+              const want = rStep.checked !== false;
+              rEl.checked = want;
+              rEl.dispatchEvent(new Event('input', { bubbles: true }));
+              rEl.dispatchEvent(new Event('change', { bubbles: true }));
+              return { ok: true, type: 'check', checked: want };
+            }
+            case 'attach': {
+              if (rEl.tagName !== 'INPUT' || rEl.type !== 'file') {
+                return { ok: false, type: 'attach', error: 'cue resolved to a non-file input' };
+              }
+              const bin = atob(String(action.dataB64 || ''));
+              const bytes = new Uint8Array(bin.length);
+              for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+              const name = String(rStep.path || 'attachment').split('/').pop();
+              const dt = new DataTransfer();
+              dt.items.add(new File([bytes], name, { type: 'application/octet-stream' }));
+              rEl.files = dt.files;
+              rEl.dispatchEvent(new Event('input', { bubbles: true }));
+              rEl.dispatchEvent(new Event('change', { bubbles: true }));
+              return { ok: true, type: 'attach', file: name };
+            }
+            case 'extract':
+              return {
+                ok: true,
+                type: 'extract',
+                value: rStep.attribute ? rEl.getAttribute(rStep.attribute) : (rEl.textContent || '').trim(),
+              };
+          }
+          return { ok: false, type: rOp, error: `Unknown recipe step: ${rOp}` };
+        })()
+          .then((res) => resolve(rTried.length ? { ...res, tried: rTried } : res))
+          .catch(reject);
+        break;
+      }
       default:
         reject(new Error(`Unknown action: ${action.type}`));
     }

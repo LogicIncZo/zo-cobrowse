@@ -203,6 +203,30 @@ const server = http.createServer(async (req, res) => {
       return res.end();
     }
     if (body.method === "tools/call" && body.params?.name === "read_file") {
+      // #220: the recipes player loads its artifact from the workspace. Route
+      // by path; every other path keeps the #52 notes fixture.
+      const targetFile = String(body.params.arguments?.target_file || "");
+      if (targetFile.includes("recipes/e2e-filing.json")) {
+        const recipe = {
+          id: "rcp-e2e",
+          name: "E2E filing",
+          version: "1.0.0",
+          origin: targetFile,
+          createdAt: 0,
+          updatedAt: 0,
+          params: [{ name: "applicant", type: "string", required: true, question: "Who is filing?" }],
+          steps: [
+            { type: "navigate", url: `http://127.0.0.1:${PORT}/form.html`, expectUrl: "form.html" },
+            { type: "fill", cues: [{ strategy: "label", value: "Name" }, { strategy: "selector", value: "#name" }], value: "{{applicant}}" },
+            { type: "navigate", url: `http://127.0.0.1:${PORT}/gateway.html`, expectUrl: "gateway.html" },
+            { type: "human", title: "Pay ₹10 on the mock gateway", instructions: "Click Pay on the gateway page, then verify from the panel.", resumeOn: { url: "paid=1" } },
+            { type: "extract", cues: [{ strategy: "selector", value: "#reg-number" }], evidenceKey: "registration", label: "Registration number" },
+            { type: "done", message: "Filed {{applicant}} — registration {{registration}}" },
+          ],
+        };
+        const wrappedRecipe = JSON.stringify([JSON.stringify(recipe), `kind='file_ref' path='${targetFile}' media_type=None label=None`]);
+        return json({ jsonrpc: "2.0", id: body.id, result: { isError: false, content: [{ type: "text", text: wrappedRecipe }] } });
+      }
       // #52 pull loop: mirrors the LIVE read_file shape (probe-read-file.ts) —
       // a JSON array of [fileText, fileRefDescriptor]; the background unwraps it.
       const wrapped = JSON.stringify([
@@ -263,6 +287,23 @@ const server = http.createServer(async (req, res) => {
     requests.push({ ts: Date.now(), method: "POST", url: "/zo/ask", body });
 
     // Write-assist one-shot (feature/textarea-fill): the in-page widget's
+    // #220 recorder: the LLM cleanup pass for a recorded draft is a
+    // non-streaming one-shot (routes on its stable prompt marker). Returns a
+    // cleaned, parameterized recipe whose fill targets the fixture form.
+    if (String(body.input || "").includes("## Recipe Draft")) {
+      res.writeHead(200, { "content-type": "application/json", ...cors });
+      return res.end(JSON.stringify({
+        output: JSON.stringify({
+          params: [{ name: "applicant_name", type: "string", required: true, question: "Who is the applicant?" }],
+          steps: [
+            { type: "navigate", url: `http://127.0.0.1:${PORT}/form.html`, expectUrl: "form.html" },
+            { type: "fill", cues: [{ strategy: "label", value: "Name" }, { strategy: "selector", value: "#name" }], value: "{{applicant_name}}" },
+            { type: "done", message: "Learned flow complete for {{applicant_name}}" },
+          ],
+          note: "renamed the param, pinned the cues",
+        }),
+      }));
+    }
     // ENHANCE_TEXT handler calls /zo/ask NON-streaming and parses JSON
     // ({output}), so reply with a plain JSON body — not SSE. Routed on the
     // stable write-assist marker baked into the enhance prompt. The reply

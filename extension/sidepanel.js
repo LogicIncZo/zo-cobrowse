@@ -19,6 +19,7 @@ import { zoChatUrl, truncateId } from './lib/zo-links.js';
 import { WORKSPACE_ROOT, filterPickerEntries } from './lib/pickers.js';
 import { applyI18nDom } from './lib/i18n.js';
 import { handoffInstructions, runProgress } from './lib/handoff.js';
+import { recipeProgress } from './lib/recipes.js';
 import { conversationToMarkdown, exportFileName, pageContextToMarkdown, pageExportFileName } from './lib/export.js';
 import {
   openChatTab,
@@ -175,6 +176,10 @@ let activeHandoffRun = null;
 // `<runId>:<status>` for every terminal line already rendered — a repeat
 // HANDOFF_UPDATE for a finished run must not append a second one (#160).
 const terminalHandoffLines = new Set();
+// Recipes (#220): the live run this panel displays + terminal-line dedupe.
+let activeRecipeRun = null;
+const terminalRecipeLines = new Set();
+let recipeCheckpointEl = null;
 let currentContext = null;
 let actionRunning = false;
 let isHistoryView = false;
@@ -334,6 +339,45 @@ async function finishInit() {
             btn.textContent = '▶ Resume';
             btn.className = 'btn btn-ghost btn-sm';
             btn.addEventListener('click', () => resumeHandoffRun(run.runId));
+            body.appendChild(document.createElement('br'));
+            body.appendChild(btn);
+          }
+        }
+      }
+      // Recipes (#220): run-state pushes from the deterministic player.
+      if (msg.type === 'RECIPE_UPDATE' && msg.run) {
+        const run = msg.run;
+        if (activeRecipeRun && activeRecipeRun.runId !== run.runId) return; // another chat's run
+        if (run.status === 'running' || run.status === 'healing') {
+          if (!activeRecipeRun) activeRecipeRun = run;
+          renderRecipeLine(run);
+          removeRecipeCheckpoint();
+        } else if (run.status === 'waiting_human') {
+          activeRecipeRun = run;
+          renderRecipeLine(run);
+          renderRecipeCheckpoint(run);
+        } else {
+          // Terminal — render exactly once per run+status (mirrors #160).
+          const key = `${run.runId}:${run.status}`;
+          if (terminalRecipeLines.has(key)) return;
+          terminalRecipeLines.add(key);
+          activeRecipeRun = null;
+          removeRecipeLine();
+          removeRecipeCheckpoint();
+          renderChatTabs(); // drop the run marker from the chat tab
+          const icon = { done: '✅', paused: '⏸️', aborted: '🛑', blocked: '⛔' }[run.status] || 'ℹ️';
+          const reason = run.stopReason ? ` — ${safeText(run.stopReason)}` : '';
+          const evidence = (run.status === 'done' && (run.evidence || []).length)
+            ? `\n\n${run.evidence.map((e) => `- **${safeText(e.label)}:** ${safeText(e.value)}`).join('\n')}`
+            : '';
+          const line = addMessage('system', `${icon} Recipe ${run.status} — ${safeText(run.name)}${reason}${evidence}`);
+          if (run.status === 'paused' || run.status === 'blocked') {
+            const body = line.querySelector('.msg-body') || line;
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.textContent = '▶ Resume';
+            btn.className = 'btn btn-ghost btn-sm';
+            btn.addEventListener('click', () => resumeRecipeRun(run.runId));
             body.appendChild(document.createElement('br'));
             body.appendChild(btn);
           }
@@ -1160,11 +1204,13 @@ function renderChatTabs() {
   const streamingId = streamSession.active ? streamSession.chatId : null;
   // #166: the chat a live handoff run is driving carries the 🤖 run marker.
   const handoffId = activeHandoffRun?.chatId || null;
+  // #220: a live recipe run marks its chat the same way.
+  const recipeRunChatId = activeRecipeRun?.chatId || null;
   // #54: pinned first (display only — openIds keeps recency for eviction).
   for (const id of orderTabsPinnedFirst(tabsState.openIds, pinnedChatIds())) {
     const convo = conversations[id];
     if (!convo) continue;
-    const isRun = id === handoffId;
+    const isRun = id === handoffId || id === recipeRunChatId;
     const labelText = tabTitleFor(convo, { handoff: isRun });
     const tab = document.createElement('button');
     tab.type = 'button';
@@ -1222,6 +1268,12 @@ async function closeChatTabById(id) {
     const runId = activeHandoffRun.runId;
     activeHandoffRun = null;
     chrome.runtime.sendMessage({ type: 'HANDOFF_STOP', runId, reason: 'run tab closed' });
+  }
+  // Same contract for recipes (#220): closing the run's chat tab aborts it.
+  if (activeRecipeRun && activeRecipeRun.chatId === id) {
+    const runId = activeRecipeRun.runId;
+    activeRecipeRun = null;
+    chrome.runtime.sendMessage({ type: 'RECIPE_STOP', runId, reason: 'run tab closed' });
   }
   // #168: closing a BACKGROUND chat's tab must not orphan its stream — the
   // turn keeps accumulating into that conversation and lands in history (the
@@ -4795,6 +4847,175 @@ function removeHandoffLine() {
   msgsEl?.querySelector('.msg-handoff-line')?.remove();
 }
 
+// ---- Recipes (#220) panel surface -----------------------------------------
+
+/** Slim run-status line above the messages (progress + stop) — the recipe
+ * twin of renderHandoffLine. */
+function renderRecipeLine(run) {
+  if (!msgsEl) return;
+  let line = msgsEl.querySelector('.msg-recipe-line');
+  if (!line) {
+    line = document.createElement('div');
+    line.className = 'msg-system msg-recipe-line';
+    msgsEl.appendChild(line);
+  }
+  const stopBtn = document.createElement('button');
+  stopBtn.className = 'handoff-stop';
+  stopBtn.textContent = '✕ stop';
+  stopBtn.title = 'Abort this recipe run';
+  stopBtn.addEventListener('click', async () => {
+    stopBtn.disabled = true;
+    await chrome.runtime.sendMessage({ type: 'RECIPE_STOP', runId: run.runId, reason: 'stopped by user' }).catch(() => {});
+  });
+  line.replaceChildren(
+    Object.assign(document.createElement('span'), { textContent: `🧾 Recipe — ${recipeProgress(run)} · ${safeText(run.name).slice(0, 60)}` }),
+    stopBtn,
+  );
+  line.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function removeRecipeLine() {
+  msgsEl?.querySelector('.msg-recipe-line')?.remove();
+}
+
+/** Stop an armed recording and render the learn summary. Shared by the ⏺
+ * line's ✕ and `!recipe stop`. */
+async function stopRecipeRecordingAndReport() {
+  const resp = await chrome.runtime.sendMessage({ type: 'RECIPE_RECORD_STOP' }).catch(() => null);
+  removeRecipeRecordLine();
+  if (!resp?.ok) {
+    addMessage('error', resp?.error || 'Could not learn the recipe.');
+    return;
+  }
+  const cleaned = resp.llmCleaned ? `Cleaned by Zo${resp.note ? `: ${safeText(resp.note)}` : ''}.` : 'Kept the deterministic draft (LLM cleanup unavailable).';
+  addMessage('system', `🧠 Learned recipe "**${safeText(resp.name)}**" — ${resp.steps} steps, ${resp.params} params. ${cleaned}\n\nReplay it with \`!recipe run ${safeText(resp.name)}\`${(resp.warnings || []).length ? `\n\nWarnings: ${resp.warnings.map((w) => `- ${safeText(w)}`).join(' ')}` : ''}`);
+}
+
+/** The ⏺ recording indicator — ✕ stops, assembles the draft, learns. */
+function renderRecipeRecordLine(name) {
+  if (!msgsEl) return;
+  removeRecipeRecordLine();
+  const line = document.createElement('div');
+  line.className = 'msg-system msg-recipe-line msg-recipe-record-line';
+  const stopBtn = document.createElement('button');
+  stopBtn.className = 'handoff-stop';
+  stopBtn.textContent = '✕ stop';
+  stopBtn.title = 'Stop recording and learn the recipe';
+  stopBtn.addEventListener('click', () => stopRecipeRecordingAndReport());
+  line.replaceChildren(
+    Object.assign(document.createElement('span'), { textContent: `⏺ Recording recipe — ${safeText(name)} · click through your flow, then stop` }),
+    stopBtn,
+  );
+  msgsEl.appendChild(line);
+  line.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function removeRecipeRecordLine() {
+  msgsEl?.querySelector('.msg-recipe-record-line')?.remove();
+}
+
+/** The human-checkpoint card: what the user must do by hand, plus the two
+ * ways back in — verify the declared postcondition, or skip the check. */
+function renderRecipeCheckpoint(run) {
+  removeRecipeCheckpoint();
+  const step = run.recipe?.steps?.[run.stepIndex];
+  if (!step || step.type !== 'human') return;
+  const host = document.createElement('div');
+  host.className = 'msg form-review-card recipe-checkpoint-card';
+  const title = document.createElement('div');
+  title.className = 'form-review-title';
+  title.textContent = `Checkpoint — ${safeText(step.title)}`;
+  host.appendChild(title);
+  const body = document.createElement('div');
+  body.className = 'recipe-checkpoint-instructions';
+  body.textContent = safeText(step.instructions);
+  host.appendChild(body);
+  const verify = document.createElement('button');
+  verify.className = 'btn btn-primary form-review-confirm';
+  verify.textContent = 'Done — verify';
+  verify.addEventListener('click', () => resumeRecipeRun(run.runId, false));
+  const skip = document.createElement('button');
+  skip.className = 'btn btn-ghost form-review-cancel';
+  skip.textContent = 'Skip check';
+  skip.title = 'Continue without verifying the resume condition';
+  skip.addEventListener('click', () => resumeRecipeRun(run.runId, true));
+  const bar = document.createElement('div');
+  bar.className = 'form-review-actions';
+  bar.append(verify, skip);
+  host.appendChild(bar);
+  msgsEl?.appendChild(host);
+  recipeCheckpointEl = host;
+  host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function removeRecipeCheckpoint() {
+  recipeCheckpointEl?.remove();
+  recipeCheckpointEl = null;
+}
+
+/** The params card: one input per required recipe param; resolves with a
+ * {name: value} map, or null on cancel. Form-review-card styling. */
+function renderRecipeParamsCard(params) {
+  return new Promise((resolve) => {
+    const host = document.createElement('div');
+    host.className = 'msg form-review-card recipe-params-card';
+    const title = document.createElement('div');
+    title.className = 'form-review-title';
+    title.textContent = 'Recipe parameters';
+    host.appendChild(title);
+    const values = new Map();
+    for (const p of params || []) {
+      const line = document.createElement('label');
+      line.className = 'form-review-row';
+      line.textContent = `${safeText(p.question || p.name)} `;
+      const input = document.createElement('input');
+      input.dataset.target = p.name;
+      input.value = p.default != null ? String(p.default) : '';
+      input.placeholder = p.required ? 'required' : 'optional';
+      input.addEventListener('input', () => values.set(p.name, input.value));
+      line.appendChild(input);
+      host.appendChild(line);
+    }
+    const start = document.createElement('button');
+    start.className = 'btn btn-primary form-review-confirm';
+    start.textContent = 'Start run';
+    const cancel = document.createElement('button');
+    cancel.className = 'btn btn-ghost form-review-cancel';
+    cancel.textContent = 'Cancel';
+    const bar = document.createElement('div');
+    bar.className = 'form-review-actions';
+    bar.append(start, cancel);
+    host.appendChild(bar);
+    msgsEl?.appendChild(host);
+    host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    start.addEventListener('click', () => {
+      host.remove();
+      const out = {};
+      for (const p of params || []) {
+        const v = values.get(p.name);
+        if (v != null && v !== '') out[p.name] = v;
+      }
+      resolve(out);
+    });
+    cancel.addEventListener('click', () => {
+      host.remove();
+      resolve(null);
+    });
+  });
+}
+
+/** Resume a waiting_human / paused / blocked run. A refused verify (e.g. the
+ * postcondition isn't met yet) surfaces as a system note — the card stays. */
+async function resumeRecipeRun(runId, force = false) {
+  const res = await chrome.runtime.sendMessage({ type: 'RECIPE_RESUME', runId, force }).catch(() => null);
+  if (!res?.ok) {
+    addMessage('system', `⚠️ ${safeText(res?.error || 'Could not resume the recipe run.')}`);
+    return;
+  }
+  removeRecipeCheckpoint();
+}
+
+
 /** Execute one handoff turn's actions as a single batch. Results render
  * compactly; the run's own HANDOFF_UPDATE push reports loop state.
  * backgrounded:true (run's chat switched away, #162) skips the DOM entirely —
@@ -5037,6 +5258,91 @@ sendQuery = async function() {
       renderChatTabs(); // mark the run's chat tab (#166)
       effectiveQuery = `${bang.query}\n\n${handoffInstructions(start.run)}`;
       tempMode = 'cobrowse';
+    }
+    if (bang.isRecipe) {
+      // #220: recipes are played by the BACKGROUND deterministically — the
+      // panel only starts/stops and renders pushes. Fully handled here; no
+      // chat turn is sent.
+      addMessage('user', query);
+      const reenable = () => { input.disabled = false; sendBtn.disabled = false; input.focus(); };
+      if (bang.sub === 'record') {
+        // #220 recorder: arm a session; the user clicks through the flow, the
+        // ✕ on the recording line assembles + learns the recipe.
+        const recName = bang.target || '';
+        const resp = await chrome.runtime.sendMessage({
+          type: 'RECIPE_RECORD_START',
+          chatId: activeId,
+          name: recName,
+        }).catch(() => null);
+        if (!resp?.ok) {
+          addMessage('error', resp?.error || 'Could not start the recording.');
+        } else {
+          renderRecipeRecordLine(resp.name);
+          addMessage('system', `⏺ Recording "**${safeText(resp.name)}**" — click through the flow now (multi-page works; sensitive pages become human checkpoints). Press ✕ when done to learn the recipe.`);
+        }
+        reenable();
+        return;
+      }
+      if (bang.sub === 'list') {
+        const resp = await chrome.runtime.sendMessage({ type: 'RECIPE_LIST' }).catch(() => null);
+        if (!resp?.ok) addMessage('error', resp?.error || 'Could not list recipes.');
+        else if (!(resp.recipes || []).length) addMessage('system', 'No saved recipes yet. Author JSON at `/home/workspace/recipes/`, or run one with `!recipe run <path>`.');
+        else {
+          const lines = resp.recipes.map((r) => `- **${safeText(r.name)}** v${safeText(r.version)} — ${r.steps} steps${r.draft ? ' · draft' : ''}`);
+          const live = resp.liveRun ? `\n\nLive run: ${safeText(resp.liveRun.name)} (${safeText(resp.liveRun.status)})` : '';
+          addMessage('system', `Saved recipes:\n\n${lines.join('\n')}${live}`);
+        }
+        reenable();
+        return;
+      }
+      if (bang.sub === 'stop') {
+        const rec = await chrome.runtime.sendMessage({ type: 'RECIPE_RECORD_PEEK' }).catch(() => null);
+        if (rec?.armed) {
+          await stopRecipeRecordingAndReport();
+          reenable();
+          return;
+        }
+        const st = await chrome.runtime.sendMessage({ type: 'RECIPE_STATUS', chatId: activeId }).catch(() => null);
+        if (!st?.run) {
+          addMessage('system', 'No live recipe run in this chat.');
+        } else {
+          const resp = await chrome.runtime.sendMessage({ type: 'RECIPE_STOP', runId: st.run.runId, reason: 'stopped by user' }).catch(() => null);
+          if (resp?.ok) addMessage('system', `🛑 Recipe run stopped — ${safeText(st.run.name)}`);
+          else addMessage('error', resp?.error || 'Could not stop the run.');
+        }
+        reenable();
+        return;
+      }
+      // sub === 'run'
+      const source = (bang.target.includes('/') || bang.target.endsWith('.json'))
+        ? { workspacePath: bang.target }
+        : { localName: bang.target };
+      const startRecipe = (paramValues) => chrome.runtime.sendMessage({
+        type: 'RECIPE_START',
+        chatId: activeId,
+        tabId: currentContext?.tabId,
+        source,
+        ...(paramValues ? { paramValues } : {}),
+      }).catch(() => null);
+      let start = await startRecipe();
+      if (start?.needsParams) {
+        const values = await renderRecipeParamsCard(start.params || []);
+        if (!values) {
+          addMessage('system', 'Recipe run cancelled.');
+          reenable();
+          return;
+        }
+        start = await startRecipe(values);
+      }
+      if (!start?.ok || !start.run) {
+        addMessage('error', start?.error || 'Could not start the recipe run.');
+      } else {
+        activeRecipeRun = start.run;
+        renderChatTabs(); // the run's chat tab carries the run marker
+        addMessage('system', `🧾 Recipe started — ${safeText(start.run.name)} (v${safeText(start.run.version)})`);
+      }
+      reenable();
+      return;
     }
     if (bang.isDuckdb) {
       addMessage('user', query);
