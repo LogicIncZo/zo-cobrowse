@@ -43,6 +43,7 @@ import {
 } from './lib/handoff.js';
 import {
   buildEnhancePrompt,
+  buildEnhanceFollowUpPrompt,
   parseEnhanceResponse,
 } from './lib/write-assist.js';
 import {
@@ -952,6 +953,20 @@ async function getTabContexts(tabIds, activeTabId) {
 
 /** Persistent port connections from sidepanel for streaming Zo responses. */
 chrome.runtime.onConnect.addListener((port) => {
+  // #53 write-assist popover stream — its own port name and lifecycle, so the
+  // panel's cobrowse-stream machinery (sessionId routing, pull loop) stays out.
+  if (port.name === 'cobrowse-wa-stream') {
+    port.onDisconnect.addListener(() => { port._dead = true; });
+    port.onMessage.addListener(async (msg) => {
+      if (msg.type !== 'WA_ENHANCE') return;
+      try {
+        await enhanceStream(port, msg);
+      } catch (err) {
+        safePost(port, { type: 'WA_ERROR', error: `Failed: ${err.message}` });
+      }
+    });
+    return;
+  }
   if (port.name !== 'cobrowse-stream') return;
 
   // Track disconnects so streaming code can stop posting to a dead port
@@ -2817,6 +2832,142 @@ async function enhanceText(request) {
     return { ok: false, error: `Enhance failed: ${err.message}` };
   } finally {
     clearTimeout(timer);
+  }
+}
+
+/**
+ * #53 write-assist popover STREAM: a thin SSE reader over /zo/ask that feeds
+ * the popover live deltas. Deliberately NOT _askZoStreamImpl — that path's
+ * sessionId routing, pull loop, and panel-coupled finishStream are all wrong
+ * for a page-embedded popover. Emits on the port:
+ *   WA_DELTA {delta, raw}  — incremental text piece + accumulated raw stream
+ *   WA_DONE  {text, conversationId?} — full parsed tag content + thread echo
+ *   WA_ERROR {error}
+ * `msg.conversationId` (when present) threads a follow-up chip turn onto the
+ * popover's short-lived Zo thread. Cancellation is the port dying: the
+ * disconnect listener aborts the fetch.
+ */
+async function enhanceStream(port, msg) {
+  if (config.enableWriteAssist === false) {
+    safePost(port, { type: 'WA_ERROR', error: 'Write assist is disabled in the extension options.' });
+    return;
+  }
+  if (!config.zoAccessToken) {
+    safePost(port, { type: 'WA_ERROR', error: 'No access token configured. Save one in the extension options.' });
+    return;
+  }
+  const req = msg || {};
+  const threadId = typeof req.conversationId === 'string' ? req.conversationId : '';
+  const prompt = threadId && req.priorText
+    ? buildEnhanceFollowUpPrompt({
+        priorText: req.priorText,
+        instruction: req.instruction,
+        field: req.field,
+        page: req.page,
+        acceptsMarkdown: !!(req.field && req.field.markdown),
+      })
+    : buildEnhancePrompt({
+        text: req.text,
+        instruction: req.instruction,
+        field: req.field,
+        page: req.page,
+        acceptsMarkdown: !!(req.field && req.field.markdown),
+      });
+  const controller = new AbortController();
+  const onDisconnect = () => controller.abort();
+  port.onDisconnect.addListener(onDisconnect);
+  const timer = setTimeout(() => controller.abort(), 60000);
+  try {
+    const resp = await fetch(config.zoApiUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${config.zoAccessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        input: prompt,
+        model_name: config.zoModel || undefined,
+        conversation_id: threadId || undefined,
+        stream: true,
+      }),
+      signal: controller.signal,
+    });
+    if (!resp.ok || !resp.body) {
+      const body = await resp.text().catch(() => '');
+      safePost(port, { type: 'WA_ERROR', error: `Zo API error: ${resp.status} ${body.substring(0, 200)}`.trim() });
+      return;
+    }
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let currentEventType = '';
+    let raw = '';
+    let threadEcho = '';
+    let done = false;
+    while (!done) {
+      const read = await reader.read();
+      if (read.done) break;
+      buffer += decoder.decode(read.value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith(':')) continue;
+        if (trimmed.startsWith('event:')) { currentEventType = trimmed.slice(6).trim(); continue; }
+        const dataMatch = trimmed.match(/^data:\s?(.*)$/);
+        if (!dataMatch) continue;
+        const data = dataMatch[1].trim();
+        if (!data) continue;
+        if (currentEventType === 'completed' || currentEventType === 'End' || currentEventType === 'failed') {
+          if (currentEventType === 'failed') {
+            let errMsg = 'Stream failed';
+            try { const p2 = JSON.parse(data); errMsg = (p2 && (p2.error || p2.message)) || errMsg; } catch {}
+            safePost(port, { type: 'WA_ERROR', error: errMsg });
+            return;
+          }
+          // Thread echo: the terminal payload carries conversation_id when the
+          // server created a fresh thread. Absent = chips degrade to fresh
+          // threads (the prior text still rides the follow-up prompt).
+          try {
+            const p3 = JSON.parse(data);
+            if (p3 && typeof p3.conversation_id === 'string') threadEcho = p3.conversation_id;
+          } catch {}
+          done = true;
+          break;
+        }
+        // Text pieces only — thinking deltas are invisible to the popover and
+        // narration is dropped by the tag protocol at parse time anyway.
+        try {
+          const parsed = JSON.parse(data);
+          let piece = '';
+          if (currentEventType === 'PartStartEvent') {
+            const part = parsed.part || {};
+            if ((part.part_kind || '') === 'text') piece = safeText(part.content || '');
+          } else if (currentEventType === 'PartDeltaEvent') {
+            const delta = parsed.delta || {};
+            if ((delta.part_delta_kind || '') === 'text') piece = safeText(delta.content_delta || '');
+          } else {
+            piece = extractStreamContent(parsed) || '';
+          }
+          if (piece) {
+            raw += piece;
+            safePost(port, { type: 'WA_DELTA', delta: piece, raw });
+          }
+        } catch { /* non-JSON line — ignore */ }
+      }
+    }
+    const { text } = parseEnhanceResponse(raw);
+    if (!text) {
+      safePost(port, { type: 'WA_ERROR', error: 'Zo returned an empty response.' });
+      return;
+    }
+    safePost(port, { type: 'WA_DONE', text, conversationId: threadEcho || undefined });
+  } catch (err) {
+    if (err && err.name === 'AbortError') return; // cancelled via port.disconnect / timeout
+    safePost(port, { type: 'WA_ERROR', error: `Enhance failed: ${err.message}` });
+  } finally {
+    clearTimeout(timer);
+    port.onDisconnect.removeListener(onDisconnect);
   }
 }
 

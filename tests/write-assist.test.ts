@@ -3,7 +3,9 @@ import {
   WRITE_ASSIST_MARKER,
   isEnhanceableField,
   buildEnhancePrompt,
+  buildEnhanceFollowUpPrompt,
   parseEnhanceResponse,
+  parseEnhanceDelta,
 } from "../extension/lib/write-assist";
 import {
   EnhancePromptSchema,
@@ -151,5 +153,61 @@ describe("parseEnhanceResponse", () => {
     expect(parseEnhanceResponse(null).text).toBe("");
     expect(parseEnhanceResponse(undefined).text).toBe("");
     expect(parseEnhanceResponse("").text).toBe("");
+  });
+});
+
+describe("parseEnhanceDelta (#53 streaming)", () => {
+  it("renders nothing until the open tag arrives — narration never leaks", () => {
+    expect(parseEnhanceDelta("")).toBe("");
+    expect(parseEnhanceDelta("Let me ground this in the data model.")).toBe("");
+    expect(parseEnhanceDelta("Let me think. The user wants a polish")).toBe("");
+  });
+
+  it("streams partial content inside the tags", () => {
+    expect(parseEnhanceDelta("narration<write-assist>I led the migr")).toBe("I led the migr");
+    expect(parseEnhanceDelta("<write-assist>Full first line\nsecond on")).toBe("Full first line\nsecond on");
+  });
+
+  it("trims at the close tag once it arrives", () => {
+    expect(parseEnhanceDelta("<write-assist>Done text</write-assist>")).toBe("Done text");
+    expect(parseEnhanceDelta("<write-assist>Done text</write-assist> and trailing noise")).toBe("Done text");
+  });
+
+  it("strips one leading newline but preserves the streaming tail", () => {
+    expect(parseEnhanceDelta("<write-assist>\nstarts clean")).toBe("starts clean");
+    const partial = parseEnhanceDelta("<write-assist>half a wor");
+    expect(partial.endsWith("wor")).toBe(true); // no trimEnd mid-stream
+  });
+
+  it("full-response parsing is unchanged (completion regression)", () => {
+    const raw = "warm-up narration\n<write-assist>The polished result</write-assist>";
+    expect(parseEnhanceResponse(raw).text).toBe("The polished result");
+    // ...and the delta view of the same final raw matches the parsed text
+    expect(parseEnhanceDelta(raw)).toBe("The polished result");
+  });
+});
+
+describe("buildEnhanceFollowUpPrompt (#53 chips)", () => {
+  it("frames the turn as a revision of the prior draft with the tag protocol", () => {
+    const p = buildEnhanceFollowUpPrompt({
+      priorText: "Shorter draft here",
+      instruction: "make it shorter",
+      field: { label: "Project", maxLength: null },
+      page: { url: "https://x.test", title: "X" },
+      acceptsMarkdown: false,
+    });
+    expect(p).toContain("FOLLOW-UP iteration");
+    expect(p).toContain("make it shorter");
+    expect(p).toContain("Shorter draft here");
+    expect(p).toContain(`<${WRITE_ASSIST_MARKER}>`);
+    expect(p).toContain("no markdown");
+    // no-tools rule carried over
+    expect(p).toContain("do not use tools");
+  });
+
+  it("empty instruction still yields a sane polish request", () => {
+    const p = buildEnhanceFollowUpPrompt({ priorText: "draft" });
+    expect(p).toContain("polish the draft");
+    expect(p).toContain("draft");
   });
 });

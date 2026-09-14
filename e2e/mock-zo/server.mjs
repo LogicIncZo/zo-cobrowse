@@ -265,6 +265,21 @@ const server = http.createServer(async (req, res) => {
     // follows the prompt's tag protocol with narration outside the tags —
     // the widget must preview ONLY the tag content.
     if (String(body.input || "").includes("write-assist")) {
+      // #53 streaming popover: the port path posts stream:true and reads real
+      // SSE — narration outside the tags streams too (the popover must drop
+      // it); the completed event echoes the thread for the follow-up chips.
+      if (body.stream) {
+        const revised = String(body.input || "").includes("FOLLOW-UP iteration")
+          ? "SHORTENED: led the DuckDB migration; p95 cut in half."
+          : "I led the migration of 40 dashboards to DuckDB, unifying our analytics stack and cutting p95 query times roughly in half.";
+        const blocks = [];
+        blocks.push(`event: PartStartEvent\ndata: ${JSON.stringify({ index: 1, part: { part_kind: "text", content: "Thinking out loud about the rewrite. " } })}\n`);
+        for (const piece of ["<write-assist>", revised, "</write-assist>"]) {
+          blocks.push(`event: PartDeltaEvent\ndata: ${JSON.stringify({ index: 1, delta: { part_delta_kind: "text", content_delta: piece } })}\n`);
+        }
+        blocks.push(`event: completed\ndata: ${JSON.stringify({ status: "succeeded", conversation_id: "e2e-wa-thread" })}\n`);
+        return streamSse(res, blocks, { delayMs: 40 });
+      }
       res.writeHead(200, { "content-type": "application/json", ...cors });
       return res.end(JSON.stringify({
         output: "Let me quickly ground this in the data model before expanding.\n" +

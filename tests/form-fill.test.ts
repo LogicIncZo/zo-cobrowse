@@ -61,6 +61,8 @@ function loadRealRunner(win: Window): { executeAction: Exe; waitForElement: (sel
     prologue +
     extractFn("isValidCssSelector") + "\n" +
     extractFn("resolveClickTarget") + "\n" +
+    extractFn("fireValueEvents") + "\n" +
+    extractFn("writeFieldValue") + "\n" + // #53: setFieldValue delegates here
     extractFn("setFieldValue") + "\n" +
     extractFn("waitForElement") + "\n" +
     extractFn("executeAction") + "\n" +
