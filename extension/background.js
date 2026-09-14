@@ -2046,10 +2046,11 @@ async function listWorkspaceDir(pathInput) {
  * Paths are validated + confined to /home/workspace (safeWorkspacePath) before
  * the tool sees them. Args shape is pinned by the drift baseline
  * (scripts/zo-drift/baseline/mcp-tools.json: required `target_file`, optional
- * line-range flags we don't need — whole file). Unlike `bash`, the result is
- * not a Python-repr CmdResult: the file text arrives as the content-block
- * text, extracted by toolText. Never throws — callers get {ok, path, content}
- * or {ok:false, error}.
+ * line-range flags we don't need — whole file). Response shape is
+ * live-verified (probe-read-file.ts): a JSON array [fileText, fileRefLine],
+ * NOT a bash-style Python-repr CmdResult and NOT plain text. Missing files
+ * come back isError:true → mcpToolCall throws → {ok:false}. Never throws —
+ * callers get {ok, path, content} or {ok:false, error}.
  */
 async function readWorkspaceFile(pathInput) {
   if (!config.zoAccessToken) return { ok: false, error: 'Zo access token not configured.' };
@@ -2059,7 +2060,16 @@ async function readWorkspaceFile(pathInput) {
   }
   try {
     const result = await mcpToolCall('read_file', { target_file: path });
-    const content = toolText(result);
+    const raw = toolText(result);
+    // Live-verified 2026-09-14 (tests/test-prompts/probe-read-file.ts): the
+    // tool returns a JSON ARRAY — [0] is the file text, [1] a `kind='file_ref'`
+    // descriptor line. Unwrap when it parses so the follow-up carries the
+    // clean file text, not the wrapper; non-array/plain text falls through.
+    let content = raw;
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && typeof parsed[0] === 'string') content = parsed[0];
+    } catch { /* not JSON — use as-is */ }
     if (!content || !content.trim()) {
       return { ok: false, error: 'File is empty or unreadable.' };
     }

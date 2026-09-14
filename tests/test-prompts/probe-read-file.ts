@@ -1,6 +1,12 @@
 // One-off live probe for #52 — confirm the MCP read_file tool's response shape
 // (plain text vs bash-style Python-repr wrapper) before wiring the pull action.
 // bun tests/test-prompts/probe-read-file.ts  (uses ZO_API_KEY from .env)
+//
+// FINDINGS (live 2026-09-14, post key rotation):
+//   * success -> content[0].text is a JSON ARRAY: [0] = file text (trailing
+//     newline included), [1] = "kind='file_ref' path=... media_type=None label=None".
+//   * missing file -> isError:true + "Error: ... File not found / code: read_failed".
+//   * bash tool confirmed unchanged (Python-repr CmdResult + markers).
 import { readFileSync } from 'node:fs';
 
 const env = readFileSync(new URL('../../.env', import.meta.url), 'utf8');
