@@ -113,4 +113,5 @@ export const ACTION_TYPES = [
   "read_page",
   "get_dom",
   "get_form",
+  "read_file",
 ] as const;

@@ -167,12 +167,14 @@ describe("context-only pull actions (#24)", () => {
       { type: "read_page" },
       { type: "get_dom" },
       { type: "get_form" },
+      { type: "read_file", path: "/home/workspace/n.md" },
     ]);
     expect(out).toEqual([
       { type: "read_tab", ref: "T1" },
       { type: "read_page" },
       { type: "get_dom" },
       { type: "get_form" },
+      { type: "read_file", path: "/home/workspace/n.md" },
     ]);
   });
 
@@ -180,20 +182,24 @@ describe("context-only pull actions (#24)", () => {
     const out = normalizeActions([
       { read_tab: { ref: "T2" } },
       { get_form: {} },
+      { read_file: { path: "/home/workspace/n.md" } },
     ]);
     expect(out).toEqual([
       { type: "read_tab", ref: "T2" },
       { type: "get_form" },
+      { type: "read_file", path: "/home/workspace/n.md" },
     ]);
   });
 
   it("survive normalization in the singular {action:…} form", () => {
     const out = normalizeActions([{ action: "read_page" }]);
     expect(out).toEqual([{ type: "read_page" }]);
+    const rf = normalizeActions([{ action: "read_file", path: "/home/workspace/n.md" }]);
+    expect(rf).toEqual([{ type: "read_file", path: "/home/workspace/n.md" }]);
   });
 
   it("are recognized by isContextAction (executor filter)", () => {
-    for (const type of ["read_tab", "read_page", "get_dom", "get_form"]) {
+    for (const type of ["read_tab", "read_page", "get_dom", "get_form", "read_file"]) {
       expect(isContextAction({ type })).toBe(true);
     }
     expect(isContextAction({ type: "click" })).toBe(false);

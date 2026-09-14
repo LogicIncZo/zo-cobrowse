@@ -1721,6 +1721,38 @@ async function finishStreamWithPullLoop(port, sid, output, extra, loop) {
     return;
   }
 
+  // Workspace-file pull (#52): read_file. No tab, no capture — the file text
+  // comes from the MCP `read_file` tool, confined to /home/workspace by
+  // safeWorkspacePath. Send-once per path (`file:<path>` in the per-chat
+  // tabsSent state, under the 'file' key — no tab id exists to key on); a
+  // failed read is NOT marked sent so Zo can retry it after correcting course.
+  if (req.type === 'read_file') {
+    const chatId = loop.msg?.chatId;
+    const state = await loadConversationState(chatId);
+    const rawPath = typeof req.path === 'string' ? req.path : '';
+    const path = safeWorkspacePath(rawPath, WORKSPACE_ROOT);
+    const hash = pullHash('read_file', path || rawPath);
+    const alreadySent = isTabSentAt(state, 'file', hash);
+    let res = null;
+    if (!path) {
+      res = { ok: false, error: `Path must be an absolute path inside ${WORKSPACE_ROOT}.` };
+    } else if (!alreadySent) {
+      res = await readWorkspaceFile(path);
+    }
+    const fu = buildPullFollowUp(
+      'read_file',
+      { path: path || rawPath },
+      res && res.ok ? { content: res.content } : null,
+      alreadySent && !res ? { reason: 'duplicate' } : {}
+    );
+    if (res && res.ok && !alreadySent) {
+      await saveConversationState(chatId, noteTabSent(state, 'file', hash));
+    }
+    emitPullTrace(port, sid, req, { title: path || rawPath }, fu, loop.cyclesUsed);
+    await _askZoStreamImpl(port, { ...loop.msg, sessionId: sid, _followUpInput: fu.input, _loop: loop });
+    return;
+  }
+
   // Active-page pull: read_page / get_dom / get_form. The acting tab is the
   // active web tab (same resolution as send-time capture — ASK_ZO streams
   // arrive from the sidepanel with no usable sender tab).
@@ -1757,15 +1789,20 @@ function pullTargetFor(req, loop, capture) {
   return { title: pc.title || '', url: pc.url || '' };
 }
 
-/** Tool-trace card for one pull cycle (the sidepanel's STREAM_TOOL channel). */
-function emitPullTrace(port, sid, req, target, fu) {
-  const callId = `pull-${sid}-${req.type}${req.ref ? '-' + req.ref : ''}`;
+/** Tool-trace card for one pull cycle (the sidepanel's STREAM_TOOL channel).
+ *  `n` (the loop cycle number) only read_file uses — distinct paths pulled in
+ *  one turn must not share a callId, or the result phase updates the wrong card. */
+function emitPullTrace(port, sid, req, target, fu, n) {
+  const fileBase = req.type === 'read_file' && req.path
+    ? String(req.path).split('/').filter(Boolean).pop()
+    : '';
+  const callId = `pull-${sid}-${req.type}${req.ref ? '-' + req.ref : ''}${req.type === 'read_file' ? `-${Number.isInteger(n) ? n : 'x'}` : ''}`;
   safePost(port, {
     sessionId: sid,
     type: 'STREAM_TOOL',
     phase: 'call',
     callId,
-    toolName: req.ref ? `read_tab ${req.ref}` : req.type,
+    toolName: req.ref ? `read_tab ${req.ref}` : fileBase ? `read_file ${fileBase}` : req.type,
     args: safeText((target && (target.host || target.title)) || ''),
   });
   safePost(port, {
@@ -1979,6 +2016,34 @@ async function listWorkspaceDir(pathInput) {
     const entries = parseLsEntries(stdout, path);
     dirCache.set(path, { entries, fetchedAt: Date.now() });
     return { ok: true, path, entries };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
+/**
+ * #52 read_file pull source: one MCP `read_file` call for a workspace file.
+ * Paths are validated + confined to /home/workspace (safeWorkspacePath) before
+ * the tool sees them. Args shape is pinned by the drift baseline
+ * (scripts/zo-drift/baseline/mcp-tools.json: required `target_file`, optional
+ * line-range flags we don't need — whole file). Unlike `bash`, the result is
+ * not a Python-repr CmdResult: the file text arrives as the content-block
+ * text, extracted by toolText. Never throws — callers get {ok, path, content}
+ * or {ok:false, error}.
+ */
+async function readWorkspaceFile(pathInput) {
+  if (!config.zoAccessToken) return { ok: false, error: 'Zo access token not configured.' };
+  const path = safeWorkspacePath(typeof pathInput === 'string' ? pathInput : '', WORKSPACE_ROOT);
+  if (!path) {
+    return { ok: false, error: `Path must be an absolute path inside ${WORKSPACE_ROOT}.` };
+  }
+  try {
+    const result = await mcpToolCall('read_file', { target_file: path });
+    const content = toolText(result);
+    if (!content || !content.trim()) {
+      return { ok: false, error: 'File is empty or unreadable.' };
+    }
+    return { ok: true, path, content };
   } catch (err) {
     return { ok: false, error: err?.message || String(err) };
   }

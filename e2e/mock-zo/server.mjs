@@ -85,7 +85,9 @@ function userRequest(input) {
 
 function pickScenario(input) {
   // A pull follow-up is NOT a new user turn — route by its auto-fetched
-  // header, not the (absent) ## User Request section.
+  // header, not the (absent) ## User Request section. The file pull (#52)
+  // has its own follow-up (the generic one fills the form fixture).
+  if (String(input || "").includes("## Auto-fetched: file")) return "pull-file-followup";
   if (String(input || "").includes("## Auto-fetched:")) return "pull-followup";
   // Lane E: handoff runs route on their markers, BEFORE user-keyword routing —
   // a handoff goal may legitimately contain words like "extract" or "click".
@@ -100,6 +102,7 @@ function pickScenario(input) {
   if (String(input || "").includes("flaky")) return "flaky";
   const q = userRequest(input);
   if (q.includes("schema")) return "pull-form";
+  if (q.includes("workspace file")) return "pull-file";
   if (q.includes("code sample")) return "code-sample";
   if (q.includes("checkout")) return "fill-form";
   if (q.includes("classic form")) return "classic-form";
@@ -198,6 +201,11 @@ const server = http.createServer(async (req, res) => {
     if (body.method === "notifications/initialized") {
       res.writeHead(202, cors);
       return res.end();
+    }
+    if (body.method === "tools/call" && body.params?.name === "read_file") {
+      // #52 pull loop: file text arrives as plain content-block text (the
+      // Python-repr CmdResult wrapper is a `bash`-tool artifact only).
+      return json({ jsonrpc: "2.0", id: body.id, result: { isError: false, content: [{ type: "text", text: "e2e-file-content-52: the fixture workspace notes." }] } });
     }
     if (body.method === "tools/call" && body.params?.name === "bash") {
       const cmd = String(body.params.arguments?.cmd || "");
@@ -326,6 +334,24 @@ const server = http.createServer(async (req, res) => {
       const envelope = JSON.stringify({
         reasoning: "I need the complete form schema first.",
         actions: [{ type: "get_form" }],
+      });
+      return streamSse(res, [textStart(envelope), completed()], { delayMs: 40 });
+    }
+    if (scenario === "pull-file") {
+      // #52: Zo asks for a referenced workspace file before answering.
+      const envelope = JSON.stringify({
+        reasoning: "I need the workspace notes first.",
+        actions: [{ type: "read_file", path: "/home/workspace/notes/e2e-summary.md" }],
+      });
+      return streamSse(res, [textStart(envelope), completed()], { delayMs: 40 });
+    }
+    if (scenario === "pull-file-followup") {
+      // The auto-fetched file content arrived — answer from it.
+      const envelope = JSON.stringify({
+        reasoning: "File content received.",
+        actions: [
+          { type: "done", response: "Your workspace notes say: e2e-file-content-52 (summarized)." },
+        ],
       });
       return streamSse(res, [textStart(envelope), completed()], { delayMs: 40 });
     }

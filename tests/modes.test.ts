@@ -116,7 +116,7 @@ describe("BUILTIN_MODES — tier invariants", () => {
 
 describe("ACTION_SCHEMA_COMPACT", () => {
   it("mentions every action type from the action protocol", () => {
-    for (const action of ["click", "fill", "fill_form", "extract", "navigate", "scroll", "wait", "done", "read_tab", "read_page", "get_dom", "get_form"]) {
+    for (const action of ["click", "fill", "fill_form", "extract", "navigate", "scroll", "wait", "done", "read_tab", "read_page", "get_dom", "get_form", "read_file"]) {
       expect(ACTION_SCHEMA_COMPACT).toContain(action);
     }
   });

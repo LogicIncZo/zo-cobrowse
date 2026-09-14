@@ -6,7 +6,7 @@ import { ACTION_TYPES } from "./schemas/actions";
 // Context-only actions are consumed by the background stream loop and never
 // reach a DOM executor; navigate/done are handled at the executeActions level
 // in background.js, not inside its executeDomAction switch.
-const CONTEXT_ONLY = new Set(["read_tab", "read_page", "get_dom", "get_form"]);
+const CONTEXT_ONLY = new Set(["read_tab", "read_page", "get_dom", "get_form", "read_file"]);
 const BACKGROUND_ABOVE_SWITCH = new Set(["navigate", "done"]);
 // fill_form executors landed with form-fill Task 3; the set stays for the
 // next schema-first action type.

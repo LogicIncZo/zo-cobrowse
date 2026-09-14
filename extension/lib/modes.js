@@ -25,7 +25,8 @@ export const ACTION_SCHEMA_COMPACT =
   ' | read_tab{ref} — request full content of a referenced tab (context only)' +
   ' | read_page — fetch full text of the current page (context only)' +
   ' | get_dom — fetch all interactive elements of the current page (context only)' +
-  ' | get_form — fetch all form fields of the current page (context only). ';
+  ' | get_form — fetch all form fields of the current page (context only)' +
+  ' | read_file{path} — fetch the full text of a workspace file by its absolute /home/workspace path (context only). ';
 
 /**
  * Fallback instructions for Modes that don't define their own.
@@ -244,7 +245,7 @@ export const ACTION_TYPE_NAMES = ['click', 'fill', 'fill_form', 'extract', 'navi
  * a canonical `{type:'read_tab',ref}` from Zo survives parsing (it used to be
  * silently stripped before extractPullRequests could see it).
  */
-export const CONTEXT_ACTION_NAMES = ['read_tab', 'read_page', 'get_dom', 'get_form'];
+export const CONTEXT_ACTION_NAMES = ['read_tab', 'read_page', 'get_dom', 'get_form', 'read_file'];
 
 /** True for context-only pull actions — filtered wherever actions execute. */
 export function isContextAction(a) {

@@ -585,3 +585,126 @@ describe("debug diagnostics (#67)", () => {
     await bus.storage.sync.set({ debugMode: false });
   });
 });
+
+describe("pull loop — read_file (#52)", () => {
+  const FILE_PATH = "/home/workspace/notes/rti.md";
+  const FILE_CONTENT = "RTI guide: fee is Rs.10. Application format enclosed.";
+  let readFileCalls = 0;
+  let askBase = 0; // fm.requests accumulates across the file — index asks relatively
+
+  /** Handler routing /mcp read_file + a sequence of /zo/ask SSE responses. */
+  function installReadFileFlow(askResponses: string[]) {
+    let ask = 0;
+    readFileCalls = 0;
+    askBase = fm.requests.filter((r) => r.url.includes("/zo/ask")).length;
+    fm.handle((url, _init, req) => {
+      if (url.endsWith("/mcp")) {
+        if (req.body.method === "initialize") {
+          return jsonResponse(
+            { jsonrpc: "2.0", id: req.body.id, result: { protocolVersion: "2024-11-05", capabilities: {}, serverInfo: { name: "zo-tools", version: "1" } } },
+            { headers: { "mcp-session-id": "sess-readfile" } },
+          );
+        }
+        if (req.body.method === "notifications/initialized") return textResponse("", 202);
+        if (req.body.method === "tools/call" && req.body.params?.name === "read_file") {
+          readFileCalls++;
+          if (req.body.params.arguments?.target_file === FILE_PATH) {
+            return jsonResponse({ jsonrpc: "2.0", id: req.body.id, result: { isError: false, content: [{ type: "text", text: FILE_CONTENT }] } });
+          }
+          return jsonResponse({ jsonrpc: "2.0", id: req.body.id, result: { isError: true, content: [{ type: "text", text: "File not found" }] } });
+        }
+        return jsonResponse({ jsonrpc: "2.0", id: req.body.id, error: { code: -32601, message: "nope" } });
+      }
+      const sse = askResponses[Math.min(ask, askResponses.length - 1)];
+      ask++;
+      return sseResponse(sse);
+    });
+  }
+
+  it("streamed read_file → MCP call → follow-up renders in the same bubble (one user turn)", async () => {
+    installReadFileFlow([
+      zoSseText({ text: JSON.stringify({ actions: [{ type: "read_file", path: FILE_PATH }] }) }),
+      zoSseText({ text: "The guide says the fee is Rs.10." }),
+    ]);
+    const rec = connectRecorder();
+    rec.post({ sessionId: 51, type: "ASK_ZO", userQuery: "summarize my RTI notes", modeId: "cobrowse", chatId: "chat-rf-1" });
+    await waitUntil(() => rec.seen.some((m) => m.type === "STREAM_DONE"));
+
+    // The MCP read_file went out with the workspace-confined path
+    const mcpCalls = fm.requests.filter((r) => r.url.endsWith("/mcp") && r.body.method === "tools/call" && r.body.params?.name === "read_file");
+    expect(mcpCalls.length).toBe(1);
+    expect(mcpCalls[0].body.params.name).toBe("read_file");
+    expect(mcpCalls[0].body.params.arguments.target_file).toBe(FILE_PATH);
+
+    // TWO /zo/ask calls for ONE user turn — the second carries the fenced content
+    const asks = fm.requests.filter((r) => r.url.includes("/zo/ask")).slice(askBase);
+    expect(asks.length).toBe(2);
+    expect(asks[1].body.input).toContain("## Auto-fetched: file rti.md");
+    expect(asks[1].body.input).toContain(FILE_CONTENT);
+
+    // Trace card pair for the pull, distinct toolName incl. basename
+    const toolCall = rec.seen.find((m) => m.type === "STREAM_TOOL" && m.phase === "call");
+    expect(toolCall.toolName).toBe("read_file rti.md");
+    const toolResult = rec.seen.find((m) => m.type === "STREAM_TOOL" && m.phase === "result");
+    expect(toolResult.callId).toBe(toolCall.callId);
+    expect(toolResult.outcome).toBe("ok");
+
+    // Same-session continuation: the final answer landed on the original stream
+    const done = rec.seen.find((m) => m.type === "STREAM_DONE");
+    expect(done.fullText).toBe("The guide says the fee is Rs.10.");
+    expect(rec.seen.every((m) => m.sessionId === 51)).toBe(true);
+  });
+
+  it("the same path requested twice in one turn is pulled ONCE — the retry is a duplicate follow-up", async () => {
+    installReadFileFlow([
+      zoSseText({ text: JSON.stringify({ actions: [{ type: "read_file", path: FILE_PATH }] }) }),
+      // Zo asks again for the same file in its continuation…
+      zoSseText({ text: JSON.stringify({ actions: [{ type: "read_file", path: FILE_PATH }] }) }),
+      // …and gets the pointer-only follow-up, then finishes.
+      zoSseText({ text: "Done summarizing." }),
+    ]);
+    const rec = connectRecorder();
+    rec.post({ sessionId: 52, type: "ASK_ZO", userQuery: "again", modeId: "cobrowse", chatId: "chat-rf-2" });
+    await waitUntil(() => rec.seen.some((m) => m.type === "STREAM_DONE" ));
+
+    expect(readFileCalls).toBe(1); // the MCP tool ran once
+    const asks = fm.requests.filter((r) => r.url.includes("/zo/ask")).slice(askBase);
+    expect(asks.length).toBe(3);
+    expect(asks[2].body.input).toContain("already provided above");
+  });
+
+  it("traversal paths never reach the MCP tool — honest unavailable follow-up instead", async () => {
+    installReadFileFlow([
+      zoSseText({ text: JSON.stringify({ actions: [{ type: "read_file", path: "/home/workspace/../../etc/passwd" }] }) }),
+      zoSseText({ text: "Understood — continuing without it." }),
+    ]);
+    const rec = connectRecorder();
+    rec.post({ sessionId: 53, type: "ASK_ZO", userQuery: "sneaky", modeId: "cobrowse", chatId: "chat-rf-3" });
+    await waitUntil(() => rec.seen.some((m) => m.type === "STREAM_DONE"));
+
+    expect(readFileCalls).toBe(0); // nothing escaped to the wire
+    const asks = fm.requests.filter((r) => r.url.includes("/zo/ask")).slice(askBase);
+    expect(asks[1].body.input).toContain("/home/workspace/../../etc/passwd");
+    expect(asks[1].body.input).toContain("could not be read");
+    const toolResult = rec.seen.find((m) => m.type === "STREAM_TOOL" && m.phase === "result");
+    expect(toolResult.outcome).toBe("error");
+  });
+
+  it("an MCP tool error degrades to an unavailable follow-up and does NOT mark the file sent", async () => {
+    installReadFileFlow([
+      zoSseText({ text: JSON.stringify({ actions: [{ type: "read_file", path: "/home/workspace/missing.md" }] }) }),
+      zoSseText({ text: JSON.stringify({ actions: [{ type: "read_file", path: "/home/workspace/missing.md" }] }) }),
+      zoSseText({ text: "Moved on." }),
+    ]);
+    const rec = connectRecorder();
+    rec.post({ sessionId: 54, type: "ASK_ZO", userQuery: "retry", modeId: "cobrowse", chatId: "chat-rf-4" });
+    await waitUntil(() => rec.seen.some((m) => m.type === "STREAM_DONE"));
+
+    // First read failed honestly; the retry was NOT deduped away — the tool
+    // ran again (a transient MCP failure must not poison the send-once state).
+    expect(readFileCalls).toBe(2);
+    const asks = fm.requests.filter((r) => r.url.includes("/zo/ask")).slice(askBase);
+    expect(asks[1].body.input).toContain("could not be read");
+    expect(asks[2].body.input).toContain("could not be read");
+  });
+});
