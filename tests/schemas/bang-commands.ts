@@ -60,10 +60,19 @@ const Handoff = z.object({
   query: z.string().min(1), // the goal
 });
 
+// !export [page|pdf|<path>] — export conversation/page/pdf or save to workspace
+const ExportCmd = z.object({
+  handled: z.literal(true),
+  kind: z.literal("export"),
+  exportTarget: z.enum(["conversation", "page", "pdf", "workspace"]),
+  exportPath: z.string().optional(),
+});
+
 export const BangCommandResultSchema = z.discriminatedUnion("kind", [
   Passthrough,
   InlineReply,
   Save,
+  ExportCmd,
   Automation,
   DuckdbQuery,
   ExpandedQuery,
@@ -90,4 +99,5 @@ export const BANG_COMMAND_NAMES = [
   "dom",
   "ctx",
   "handoff",
+  "export",
 ] as const;

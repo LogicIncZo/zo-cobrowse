@@ -174,6 +174,38 @@ describe("parseBangCommand — schema conformance", () => {
   });
 });
 
+describe("!export (#51)", () => {
+  it("bare !export targets the conversation", () => {
+    expect(parse("!export")).toEqual({ handled: true, kind: "export", exportTarget: "conversation" });
+    expect(parse("!export  ")).toEqual({ handled: true, kind: "export", exportTarget: "conversation" }); // trailing ws ok, leading is a different query
+  });
+
+  it("!export page / !export pdf target the page and reader view", () => {
+    expect(parse("!export page")).toEqual({ handled: true, kind: "export", exportTarget: "page" });
+    expect(parse("!export pdf")).toEqual({ handled: true, kind: "export", exportTarget: "pdf" });
+    expect(parse("!export reader")).toEqual({ handled: true, kind: "export", exportTarget: "pdf" });
+  });
+
+  it("!export <path> targets the workspace with the path preserved", () => {
+    expect(parse("!export Documents/research/rti.md")).toEqual({
+      handled: true, kind: "export", exportTarget: "workspace", exportPath: "Documents/research/rti.md",
+    });
+    expect(parse("!export notes/rti-guide.md")).toEqual({
+      handled: true, kind: "export", exportTarget: "workspace", exportPath: "notes/rti-guide.md",
+    });
+  });
+
+  it("case-insensitive targets, and the result is always schema-valid", () => {
+    expect(parse("!export PAGE")).toEqual({ handled: true, kind: "export", exportTarget: "page" });
+    expect(parse("!export PDF")).toEqual({ handled: true, kind: "export", exportTarget: "pdf" });
+  });
+
+  it("!help mentions the export line", () => {
+    const r = parse("!help");
+    if ("inlineReply" in r) expect(r.inlineReply).toContain("!export");
+  });
+});
+
 describe("BANG_COMMANDS — registry integrity", () => {
   it("every command has label + desc + buildQuery function", () => {
     for (const [name, def] of Object.entries(BANG_COMMANDS)) {

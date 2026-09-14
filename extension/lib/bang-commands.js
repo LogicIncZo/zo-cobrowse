@@ -76,10 +76,29 @@ export function parseBangCommand(rawQuery) {
     lines.push('• `!context <question>` — Attach this page (text + elements) for one turn, then answer');
     lines.push('• `!handoff <goal>` — Delegate a goal to Zo as an unattended read-only run');
     lines.push('• `!save [path]` — Save this page to your Zo workspace as markdown');
+    lines.push('• `!export [page|pdf|path]` — Export this chat as Markdown, the page as a note, a reader-view PDF, or save the chat to your workspace');
     lines.push('• `!auto <instruction>` — Create a scheduled Zo automation');
     lines.push('• `!query <question>` — Natural-language DuckDB query on your data');
     lines.push('• `!help` — Show this list');
     return { handled: true, kind: 'inline', inlineReply: lines.join('\n') };
+  }
+
+  // !export — get content OUT of the panel (#51). Bare = the conversation as
+  // Markdown (same serializer as the history ⬇); `page` = the captured page
+  // context as a note; `pdf` = a reader-view print window; anything else =
+  // a workspace path → SAVE_CONVERSATION (agent-write, like !save).
+  if (name === 'export') {
+    const target = args.toLowerCase();
+    if (!args) {
+      return { handled: true, kind: 'export', exportTarget: 'conversation' };
+    }
+    if (target === 'page') {
+      return { handled: true, kind: 'export', exportTarget: 'page' };
+    }
+    if (target === 'pdf' || target === 'reader') {
+      return { handled: true, kind: 'export', exportTarget: 'pdf' };
+    }
+    return { handled: true, kind: 'export', exportTarget: 'workspace', exportPath: args };
   }
 
   // !save — save page to Zo workspace as markdown
