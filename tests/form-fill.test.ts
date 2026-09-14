@@ -60,6 +60,7 @@ function loadRealRunner(win: Window): { executeAction: Exe; waitForElement: (sel
   runInSandbox(
     prologue +
     extractFn("isValidCssSelector") + "\n" +
+    extractFn("resolveClickableByText") + "\n" + // #220: resolveClickTarget's text-match half
     extractFn("resolveClickTarget") + "\n" +
     extractFn("fireValueEvents") + "\n" +
     extractFn("writeFieldValue") + "\n" + // #53: setFieldValue delegates here

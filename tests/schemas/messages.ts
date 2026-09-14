@@ -34,6 +34,11 @@ export const MESSAGE_TYPES = [
   "HANDOFF_RESUME",
   "HANDOFF_STOP",
   "HANDOFF_STATUS",
+  "RECIPE_START",
+  "RECIPE_RESUME",
+  "RECIPE_STOP",
+  "RECIPE_STATUS",
+  "RECIPE_LIST",
 ] as const;
 
 export const MessageType = z.enum(MESSAGE_TYPES);
@@ -41,7 +46,7 @@ export const MessageType = z.enum(MESSAGE_TYPES);
 // Background → panel PUSHES (chrome.runtime.sendMessage from the background).
 // These never appear in background.js's request switch, so they live outside
 // MESSAGE_TYPES — the contract test would otherwise demand a handler case.
-export const BACKGROUND_PUSH_TYPES = ["HANDOFF_UPDATE"] as const;
+export const BACKGROUND_PUSH_TYPES = ["HANDOFF_UPDATE", "RECIPE_UPDATE"] as const;
 
 export const BackgroundPushMessage = z.object({
   type: z.enum(BACKGROUND_PUSH_TYPES),

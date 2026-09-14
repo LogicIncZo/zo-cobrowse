@@ -239,6 +239,17 @@
     catch { return false; }
   }
 
+  /** Clickable-element text match shared by resolveClickTarget (Playwright
+   *  :has-text fallback) and the recipes cue ladder ('text' strategy). */
+  function resolveClickableByText(txt) {
+    const norm = String(txt || '').toLowerCase().trim();
+    if (!norm) return null;
+    for (const el of document.querySelectorAll('a, button, [role=button], [onclick], input[type=submit], input[type=button], [type=submit]')) {
+      if ((el.textContent || '').trim().toLowerCase().includes(norm)) return el;
+    }
+    return null;
+  }
+
   /** Resolve a click target: pure CSS selector preferred, but fall back to
    *  text matching when Zo emits Playwright-style :has-text("…") selectors.
    *  Returns an element or null. */
@@ -249,13 +260,7 @@
     // Extract text from Playwright :has-text("…") / :text("…").
     const m = selector.match(/:has-text\(\s*["']([^"']+)["']\s*\)|:text\(\s*["']([^"']+)["']\s*\)/i);
     const txt = m ? (m[1] || m[2]) : null;
-    if (txt) {
-      const norm = txt.toLowerCase().trim();
-      for (const el of document.querySelectorAll('a, button, [role=button], [onclick], input[type=submit], input[type=button], [type=submit]')) {
-        if ((el.textContent || '').trim().toLowerCase().includes(norm)) return el;
-      }
-    }
-    return null;
+    return txt ? resolveClickableByText(txt) : null;
   }
 
   /** Fire the synthetic input/change pair every write lands with. */
@@ -312,6 +317,125 @@
   function setFieldValue(el, val) {
     writeFieldValue(el, val, { select: true });
   }
+
+  // ---- Recipe steps (#220) -------------------------------------------------
+  // The deterministic player's in-page half: resolve a step's cue ARRAY via
+  // the same ladders form-fill uses, then apply the op. Cue-miss returns a
+  // STRUCTURED result ({cueMiss, tried, candidates}) — never a throw — so the
+  // background healer can re-ground from the near-misses.
+
+  /** Try a step's cues in declared order. 'selector' → CSS; 'text' →
+   *  clickable text match; the human cues (label/aria/placeholder/question)
+   *  → the field ladder, falling back to clickable text (labels also name
+   *  buttons on some forms). Returns {el, tried} — tried lists the cues that
+   *  missed, in order, for the miss report. */
+  function resolveRecipeCues(cues) {
+    const tried = [];
+    for (const c of cues || []) {
+      let el = null;
+      if (c.strategy === 'selector') {
+        if (isValidCssSelector(c.value)) el = document.querySelector(c.value);
+      } else if (c.strategy === 'text') {
+        el = resolveClickableByText(c.value);
+      } else {
+        el = resolveFieldTarget(c.value, null) || resolveClickableByText(c.value);
+      }
+      if (el) return { el, tried };
+      tried.push(`${c.strategy}=${c.value}`);
+    }
+    return { el: null, tried };
+  }
+
+  /** Near-miss inventory for a cue-miss report: visible clickables (text +
+   *  selector) first, then form fields with their question cues — what the
+   *  healer compares the failed cues against. Caps keep prompts small. */
+  function collectCueCandidates() {
+    const out = [];
+    for (const el of document.querySelectorAll('a, button, [role=button], input[type=submit], input[type=button]')) {
+      const text = ((el.textContent || '') || (el.value || '')).trim().slice(0, 60);
+      if (!text) continue;
+      out.push({ text, selector: buildSelector(el) });
+      if (out.length >= 12) return out;
+    }
+    for (const f of document.querySelectorAll('input, textarea, select')) {
+      if (f.type === 'hidden') continue;
+      const text = nearestQuestion(f) || f.name || f.id || '';
+      if (!text) continue;
+      out.push({ text, selector: buildSelector(f) });
+      if (out.length >= 24) break;
+    }
+    return out;
+  }
+
+  /** Execute one Recipe step. dataB64 carries the attach file's bytes
+   *  (background fetches base64 via the workspace MCP); everything else is
+   *  DOM-local. navigate/human/done are background-side — a forwarded step
+   *  no-ops with success so a fallback path never reports a false failure. */
+  async function executeRecipeStep(step, dataB64) {
+    const op = step && step.type;
+    if (op === 'waitFor') {
+      const deadline = Date.now() + Math.min(step.timeoutMs || 5000, 15000);
+      const cue = step.cue ? [step.cue] : [];
+      while (Date.now() < deadline) {
+        const { el } = resolveRecipeCues(cue);
+        if (el) return { ok: true, type: 'waitFor' };
+        await sleep(200);
+      }
+      return { ok: false, type: 'waitFor', cueMiss: true, tried: cue.map((c) => `${c.strategy}=${c.value}`), error: 'waitFor timed out' };
+    }
+    if (op === 'navigate' || op === 'human' || op === 'done') {
+      return { ok: true, type: op };
+    }
+    const { el, tried } = resolveRecipeCues(step.cues);
+    if (!el) {
+      return { ok: false, type: op, cueMiss: true, tried, candidates: collectCueCandidates(), error: `no element matched cues: ${tried.join('; ')}` };
+    }
+    const res = await applyRecipeOp(el, step, dataB64);
+    // Surface the cue fallthrough on success too — shows which cues missed
+    // before the hit (debug + heuristic-quality signal).
+    return tried.length ? { ...res, tried } : res;
+  }
+
+  async function applyRecipeOp(el, step, dataB64) {
+    const op = step.type;
+    switch (op) {
+      case 'click':
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        await sleep(300);
+        el.click();
+        return { ok: true, type: 'click' };
+      case 'fill':
+        setFieldValue(el, String(step.value == null ? '' : step.value));
+        return { ok: true, type: 'fill' };
+      case 'check': {
+        const want = step.checked !== false;
+        el.checked = want;
+        fireValueEvents(el);
+        return { ok: true, type: 'check', checked: want };
+      }
+      case 'attach': {
+        if (el.tagName !== 'INPUT' || el.type !== 'file') {
+          return { ok: false, type: 'attach', error: 'cue resolved to a non-file input' };
+        }
+        const bin = atob(String(dataB64 || ''));
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const name = String(step.path || 'attachment').split('/').pop();
+        const file = new File([bytes], name, { type: 'application/octet-stream' });
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        el.files = dt.files;
+        fireValueEvents(el);
+        return { ok: true, type: 'attach', file: name };
+      }
+      case 'extract': {
+        const val = step.attribute ? el.getAttribute(step.attribute) : (el.textContent || '').trim();
+        return { ok: true, type: 'extract', value: val || '' };
+      }
+    }
+    return { ok: false, type: op, error: `Unknown recipe step: ${op}` };
+  }
+
 
   /** Execute a single action */
   async function executeAction(action) {
@@ -372,6 +496,10 @@
       case 'done':
         // Terminal action — no DOM work, just signal completion.
         return { ok: true, type: 'done', response: action.response || '' };
+      case 'recipe_step':
+        // #220: one Recipe step (cue resolution + op). step = the recipes
+        // schema step object; dataB64 = attach file bytes. Structured results.
+        return executeRecipeStep(action.step, action.dataB64);
       default:
         return { ok: false, error: `Unknown action type: ${action.type}` };
     }

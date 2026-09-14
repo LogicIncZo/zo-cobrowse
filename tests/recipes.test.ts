@@ -204,6 +204,13 @@ describe("substituteParams", () => {
     expect(unknown.errors.some((e) => e.includes("nmae"))).toBe(true);
   });
 
+  it("leaves {{evidenceKey}} refs intact — they resolve at run time, not start", () => {
+    const r = validRecipe();
+    const res = substituteParams(r, { applicant: "Ada" });
+    expect(res.ok).toBe(true);
+    expect((res.recipe.steps[5] as any).message).toBe("Filed: {{registration}}");
+  });
+
   it("does not mutate the input recipe", () => {
     const r = validRecipe({ params });
     const before = JSON.stringify(r);

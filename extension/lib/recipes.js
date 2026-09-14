@@ -222,7 +222,9 @@ export function substituteParams(recipe, values) {
   for (const step of out.steps) {
     for (const field of PARAM_FIELDS[step.type] || []) {
       if (typeof step[field] === 'string') {
-        step[field] = step[field].replace(PARAM_REF_RE, (_, name) => effective[name] ?? '');
+        // Only rewrite DECLARED params — {{evidenceKey}} refs (validateRecipe
+        // accepts them) must survive for the player's done-time interpolation.
+        step[field] = step[field].replace(PARAM_REF_RE, (m, name) => (name in effective ? effective[name] : m));
       }
     }
   }
