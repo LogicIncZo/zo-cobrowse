@@ -49,11 +49,31 @@ export const NavigateStep = z.object({
   url: z.string().min(1),
   expectUrl: z.string().optional(),
 });
-export const FillStep = z.object({
-  type: z.literal("fill"),
-  cues: z.array(Cue).min(1),
-  value: z.string(), // may be empty (clearing); may contain {{param}}
-});
+// Generate-at-runtime source (#228): the player drafts the value with a
+// one-shot Zo call when the step plays. `prompt`/`contextFile` may carry
+// {{param}} refs (resolved at run start); `review: true` parks the run with
+// an editable preview card before the text is written.
+export const GenerateSource = z
+  .object({
+    prompt: z.string().min(1),
+    maxChars: z.number().int().positive().optional(),
+    contextFile: z.string().optional(),
+    review: z.boolean().optional(),
+  });
+export type GenerateSource = z.infer<typeof GenerateSource>;
+
+export const FillStep = z
+  .object({
+    type: z.literal("fill"),
+    cues: z.array(Cue).min(1),
+    value: z.string().optional(), // static/templated — XOR with generate
+    generate: GenerateSource.optional(),
+    evidenceKey: z.string().optional(), // #228: record the generated text as evidence
+    label: z.string().optional(),
+  })
+  .refine((s) => (s.generate ? s.value === undefined : typeof s.value === "string"), {
+    message: "fill takes either value or generate, not both",
+  });
 export const ClickStep = z.object({
   type: z.literal("click"),
   cues: z.array(Cue).min(1),
@@ -184,6 +204,10 @@ export const RecipeRun = z.object({
   healCount: z.number().int().nonnegative(),
   stopReason: z.string().optional(),
   humanTitle: z.string().optional(), // title of the pending human checkpoint
+  // #228: a generated fill awaiting the user's review (generate.review true).
+  // The player parks waiting_human with the draft here; RECIPE_RESUME carries
+  // the possibly-edited text (or discard) to continue.
+  pendingReview: z.object({ text: z.string() }).optional(),
   // The driven tab (stamped by background at RECIPE_START); optional so the
   // pure helpers stay tab-agnostic.
   tabId: z.number().optional(),

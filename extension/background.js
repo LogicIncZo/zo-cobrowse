@@ -92,6 +92,7 @@ import {
   assembleDraftRecipe,
   generateRecipePrompt,
   parseGeneratedRecipe,
+  generateValuePrompt,
 } from './lib/recipes.js';
 import { createSessionCache } from './lib/sw-cache.js';
 import { createDebugLog } from './lib/debug-log.js';
@@ -2691,6 +2692,12 @@ async function recipePlayStep(runId) {
     dataB64 = file.dataB64;
   }
 
+  // #228: generate-at-runtime fill — the value is drafted when the step plays.
+  if (step.type === 'fill' && step.generate) {
+    await recipeGenerateFill(runId, step);
+    return;
+  }
+
   // Sensitive-page arming for click steps: payment submits are NEVER
   // auto-clicked, declared or not — they park. The sensitive backstop inside
   // executeActions stays armed for the same reason (SUBMIT_TEXT_RE probing).
@@ -2748,12 +2755,40 @@ async function recipeFetchFileBase64(pathInput) {
 // RECIPE_RESUME: verify the pending checkpoint's postcondition (URL via a
 // cheap capture; cue via a bounded waitFor probe), then continue. force:true
 // is the manual fallback — the user asserts they're done, we record a warning.
-async function recipeResume({ runId, force } = {}) {
+async function recipeResume(request = {}) {
+  const { runId, force } = request;
   const run = await recipeGet({ runId });
   if (!run) return { ok: false, error: 'no such recipe run' };
   if (!['waiting_human', 'paused', 'blocked'].includes(run.status)) {
     return { ok: false, error: `run is ${run.status}, not resumable` };
   }
+
+  // #228: a pending generated-text review resolves here — Fill (with the
+  // possibly-edited text) or Discard. Discarding parks the run blocked; a
+  // later resume replays the step and generates a fresh draft.
+  if (run.status === 'waiting_human' && run.pendingReview) {
+    if (request.discard) {
+      run.status = 'blocked';
+      run.stopReason = 'generated text discarded';
+      run.pendingReview = undefined;
+      run.updatedAt = Date.now();
+      const saved = await recipePut(run);
+      recipeMaybeNotify(saved);
+      return { ok: true, run: saved };
+    }
+    const finalText = typeof request.reviewText === 'string' && request.reviewText.trim()
+      ? request.reviewText
+      : run.pendingReview.text;
+    const step = run.recipe.steps[run.stepIndex];
+    run.pendingReview = undefined;
+    run.humanTitle = undefined;
+    run.status = 'running';
+    run.updatedAt = Date.now();
+    await recipePut(run);
+    recipeFillValue(run.runId, step, finalText).catch((e) => console.debug('recipeFillValue:', e));
+    return { ok: true, run };
+  }
+
   const step = run.recipe.steps[run.stepIndex];
 
   if (run.status === 'waiting_human' && step && step.type === 'human') {
@@ -3020,6 +3055,100 @@ async function recipeRecordStop() {
     warnings: finalVerdict.warnings,
     recipe,
   };
+}
+
+// #228: draft a fill value with ONE one-shot Zo call (no tools, no browsing —
+// same shape as the healer). Optional `contextFile` rides along as fenced
+// source material from the workspace. `maxChars` is a hard cap: over-length
+// output parks the run rather than silently clipping. `review: true` parks
+// the run with an editable preview card before anything is written.
+async function recipeGenerateFill(runId, step) {
+  let run = await recipeGet({ runId });
+  if (!run || run.status !== 'running') return;
+  if (!config.zoAccessToken) {
+    await recipeBlock(runId, 'generate fill needs a Zo token — configure one in settings');
+    return;
+  }
+
+  let contextBlock = '';
+  if (step.generate.contextFile) {
+    const file = await readWorkspaceFile(step.generate.contextFile);
+    if (!file.ok) {
+      await recipeBlock(runId, `generate contextFile unreadable: ${file.error}`);
+      return;
+    }
+    const body = file.content.slice(0, 12000);
+    contextBlock = `\n\nSource material from the workspace (${step.generate.contextFile}):\n\n\`\`\`text\n${body}\n\`\`\``;
+  }
+
+  try {
+    const resp = await fetch(config.zoApiUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${config.zoAccessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        input: generateValuePrompt(step) + contextBlock,
+        model_name: config.zoModel || undefined,
+      }),
+    });
+    if (!resp.ok) {
+      await recipeBlock(runId, `generate HTTP ${resp.status}`);
+      return;
+    }
+    const data = await resp.json().catch(() => ({}));
+    const text = String(data?.output ?? '').trim();
+    if (!text) {
+      await recipeBlock(runId, 'generate returned an empty value');
+      return;
+    }
+    const cap = step.generate.maxChars;
+    if (cap && text.length > cap) {
+      await recipeBlock(runId, `generated text is over the field cap (${text.length} > ${cap} chars) — tighten the prompt or raise maxChars`);
+      return;
+    }
+    if (step.generate.review === true) {
+      run = await recipeGet({ runId });
+      if (!run || run.status !== 'running') return;
+      run.status = 'waiting_human';
+      run.humanTitle = 'Review generated text';
+      run.pendingReview = { text };
+      run.updatedAt = Date.now();
+      const saved = await recipePut(run);
+      recipeMaybeNotify(saved);
+      return;
+    }
+    await recipeFillValue(runId, step, text);
+  } catch (e) {
+    await recipeBlock(runId, `generate failed: ${e?.message || e}`);
+  }
+}
+
+// Write the (generated or review-edited) value through the executor as a
+// plain fill; record it as evidence when the step declares an evidenceKey.
+async function recipeFillValue(runId, step, text) {
+  const run = await recipeGet({ runId });
+  if (!run || run.status !== 'running') return;
+  const concrete = { ...step, value: text };
+  delete concrete.generate;
+  const res = await executeActions([{ type: 'recipe_step', step: concrete }], run.tabId, { recipe: true });
+  const r = (res.results && res.results[0]) || { ok: false, error: res.error || 'no result' };
+  if (!r.ok) {
+    if (r.cueMiss) {
+      await recipeHeal(runId, step, r); // cue repair still applies to generate fills
+      return;
+    }
+    await recipeBlock(runId, `fill: ${r.error}`);
+    return;
+  }
+  if (step.evidenceKey) {
+    const runNow = await recipeGet({ runId });
+    runNow.evidence.push({ key: step.evidenceKey, label: step.label || 'Generated text', value: text, ts: Date.now() });
+    runNow.updatedAt = Date.now();
+    await recipePut(runNow);
+  }
+  await recipeAdvance(runId);
 }
 
 async function runExecuteActions(domActions, target, { confirmed, boundaryMode } = {}) {

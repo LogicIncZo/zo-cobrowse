@@ -112,6 +112,14 @@ beforeAll(async () => {
     }
     if (body.method === "notifications/initialized") return textResponse("", 202);
     if (body.method === "tools/call" && body.params?.name === "read_file") {
+      // Route by path: the #228 source-notes path returns plain notes text.
+      const targetFile = String(body.params.arguments?.target_file || "");
+      if (targetFile.includes("notes/source.md")) {
+        return jsonResponse({
+          jsonrpc: "2.0", id: body.id,
+          result: { isError: false, content: [{ type: "text", text: JSON.stringify(["INTEGRATION-SOURCE-CONTENT: draft notes.", "file_ref"]) }] },
+        });
+      }
       const wsRecipe = makeRecipe({ id: "rcp-ws", name: "Workspace recipe", origin: "/home/workspace/recipes/rti.json" });
       // Live shape (2026-09-14): a JSON array [fileText, fileRefLine].
       return jsonResponse({
@@ -505,5 +513,124 @@ describe("recipe recorder — learn from a manual run (#220)", () => {
     expect(ok.ok).toBe(true);
     const done = await settle(waiting.runId, ["done"]);
     expect(done.status).toBe("done");
+  });
+});
+
+describe("recipe generate-at-runtime fills (#228)", () => {
+  it("generates the value when the step plays, fills it, and records evidence", async () => {
+    bus.storage.local._store.cobrowse_recipes.geny = makeRecipe({
+      id: "rcp-gen", name: "Generated",
+      params: [{ name: "department", type: "string", required: true, question: "Which department?" }],
+      steps: [
+        {
+          type: "fill", cues: [{ strategy: "question", value: "Applicant name" }],
+          evidenceKey: "application_text", label: "Application text",
+          generate: { prompt: "Draft an RTI application to {{department}}.", maxChars: 3000 },
+        },
+        { type: "done", message: "Filed with: {{application_text}}" },
+      ],
+    });
+    executedSteps.length = 0;
+    executeBehavior = (action) => ({ ok: true, type: action.step?.type ?? action.type });
+    askResponder = () => jsonResponse({ output: "To the PIO, I request the annual report." });
+    const res = await start({ localName: "geny" }, { department: "Urban Development" });
+    expect(res.ok).toBe(true);
+    const run = await settle(res.run.runId, ["done"]);
+    expect(run.status).toBe("done");
+    // The EXECUTED fill carried the generated value — the recipe's prompt did not.
+    const fill = executedSteps.find((s) => s.type === "fill");
+    expect(fill.value).toBe("To the PIO, I request the annual report.");
+    expect(fill.generate).toBeUndefined();
+    // Evidence recorded + interpolated into the done message.
+    expect(run.evidence[0]).toMatchObject({ key: "application_text", value: "To the PIO, I request the annual report." });
+    expect(run.stopReason).toBe("Filed with: To the PIO, I request the annual report.");
+    // The one-shot prompt carried the substituted parameter.
+    const genAsk = [...fm.to("/zo/ask")].reverse().find((a: any) => String(a.body?.input || "").includes("## Recipe Field Draft"));
+    expect(String(genAsk.body.input)).toContain("Urban Development");
+    expect(String(genAsk.body.input)).toContain("3000");
+    askResponder = null;
+  });
+
+  it("contextFile source material rides along from the workspace", async () => {
+    bus.storage.local._store.cobrowse_recipes.genfile = makeRecipe({
+      id: "rcp-genf", name: "Generated from file",
+      steps: [
+        { type: "fill", cues: [{ strategy: "selector", value: "#fullname" }], generate: { prompt: "Summarize into the field.", contextFile: "/home/workspace/notes/source.md" } },
+        { type: "done" },
+      ],
+    });
+    executeBehavior = (action) => ({ ok: true, type: action.step?.type ?? action.type });
+    askResponder = () => jsonResponse({ output: "summary text" });
+    const res = await start({ localName: "genfile" });
+    const run = await settle(res.run.runId, ["done"]);
+    expect(run.status).toBe("done");
+    // The workspace file's content rode along as fenced source material.
+    const genAsk = [...fm.to("/zo/ask")].reverse().find((a: any) => String(a.body?.input || "").includes("## Recipe Field Draft"));
+    const prompt = String(genAsk.body.input);
+    expect(prompt).toContain("Source material from the workspace");
+    expect(prompt).toContain("INTEGRATION-SOURCE-CONTENT");
+    askResponder = null;
+  });
+
+  it("over-length output parks the run instead of clipping", async () => {
+    bus.storage.local._store.cobrowse_recipes.genlong = makeRecipe({
+      id: "rcp-genl", name: "Over cap",
+      steps: [
+        { type: "fill", cues: [{ strategy: "selector", value: "#x" }], generate: { prompt: "Write a lot", maxChars: 10 } },
+        { type: "done" },
+      ],
+    });
+    askResponder = () => jsonResponse({ output: "this is way more than ten characters long" });
+    const res = await start({ localName: "genlong" });
+    const blocked = await settle(res.run.runId, ["blocked"]);
+    expect(blocked.status).toBe("blocked");
+    expect(blocked.stopReason).toContain("over the field cap");
+    askResponder = null;
+  });
+
+  it("review:true parks with the draft; Fill uses the edited text; Discard blocks, resume regenerates", { timeout: 30_000 }, async () => {
+    bus.storage.local._store.cobrowse_recipes.genrev = makeRecipe({
+      id: "rcp-genr", name: "Reviewed",
+      steps: [
+        { type: "fill", cues: [{ strategy: "question", value: "Applicant name" }], evidenceKey: "draft", generate: { prompt: "Draft it", review: true } },
+        { type: "done", message: "used {{draft}}" },
+      ],
+    });
+    executedSteps.length = 0;
+    executeBehavior = (action) => ({ ok: true, type: action.step?.type ?? action.type });
+    let genCount = 0;
+    askResponder = () => { genCount += 1; return jsonResponse({ output: `DRAFT ${genCount}` }); };
+    const res = await start({ localName: "genrev" });
+    const waiting = await settle(res.run.runId, ["waiting_human"]);
+    expect(waiting.status).toBe("waiting_human");
+    expect(waiting.pendingReview.text).toBe("DRAFT 1");
+
+    // Edit + Fill — the edited text is what lands in the field.
+    const ok = await bus.runtime.sendMessage({ type: "RECIPE_RESUME", runId: waiting.runId, reviewText: "Edited by me" });
+    expect(ok.ok).toBe(true);
+    const done = await settle(waiting.runId, ["done"]);
+    expect(done.status).toBe("done");
+    const fill = executedSteps.find((s) => s.type === "fill");
+    expect(fill.value).toBe("Edited by me");
+    expect(done.evidence[0].value).toBe("Edited by me");
+
+    // Discard path: regenerate → discard → blocked → resume regenerates fresh.
+    const res2 = await start({ localName: "genrev" });
+    const waiting2 = await settle(res2.run.runId, ["waiting_human"]);
+    await bus.runtime.sendMessage({ type: "RECIPE_RESUME", runId: waiting2.runId, discard: true });
+    const blocked = await settle(waiting2.runId, ["blocked"]);
+    expect(blocked.status).toBe("blocked");
+    expect(blocked.stopReason).toContain("discarded");
+    const ok2 = await bus.runtime.sendMessage({ type: "RECIPE_RESUME", runId: waiting2.runId });
+    expect(ok2.ok).toBe(true);
+    // A regenerated draft is review:true again — it parks for a fresh look.
+    const waiting3 = await settle(waiting2.runId, ["waiting_human"]);
+    expect(waiting3.pendingReview?.text).toBe("DRAFT 3");
+    const ok3 = await bus.runtime.sendMessage({ type: "RECIPE_RESUME", runId: waiting2.runId, reviewText: "Final text" });
+    expect(ok3.ok).toBe(true);
+    const done2 = await settle(waiting2.runId, ["done"]);
+    expect(done2.status).toBe("done");
+    expect(genCount).toBe(3); // DRAFT 1, DRAFT 2 (discarded run), DRAFT 3 (regenerated)
+    askResponder = null;
   });
 });

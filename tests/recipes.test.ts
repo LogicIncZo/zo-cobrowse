@@ -393,3 +393,89 @@ describe("generateRecipePrompt / parseGeneratedRecipe", () => {
     expect(parseGeneratedRecipe("nothing here").ok).toBe(false);
   });
 });
+
+// ---- generate-at-runtime fill values (#228) --------------------------------
+
+import { generateValuePrompt } from "../extension/lib/recipes.js";
+
+describe("validateRecipe — generate fills", () => {
+  const genStep = {
+    type: "fill",
+    cues: [cue("question", "RTI Application text")],
+    generate: { prompt: "Draft an RTI application to {{department}}." },
+  };
+
+  it("accepts a fill with generate and no value", () => {
+    const r = validRecipe({
+      params: [
+        { name: "applicant", type: "string", required: true, question: "Who?" },
+        { name: "department", type: "string", required: true, question: "Which department?" },
+      ],
+    });
+    (r.steps as any[])[3] = { ...genStep, cues: [{ strategy: "question", value: "Applicant name" }] };
+    const v = validateRecipe(r);
+    expect(v.errors).toEqual([]);
+  });
+
+  it("rejects value AND generate together, and generate without a prompt", () => {
+    const r = validRecipe();
+    (r.steps as any[])[3] = { type: "fill", cues: [{ strategy: "selector", value: "#x" }], value: "static", generate: { prompt: "p" } };
+    expect(validateRecipe(r).errors.some((e) => e.includes("either value or generate"))).toBe(true);
+
+    const r2 = validRecipe();
+    (r2.steps as any[])[3] = { type: "fill", cues: [{ strategy: "selector", value: "#x" }], generate: {} };
+    expect(validateRecipe(r2).errors.some((e) => e.includes("prompt"))).toBe(true);
+  });
+
+  it("validates maxChars and {{param}} refs inside the prompt + contextFile", () => {
+    const r = validRecipe();
+    (r.steps as any[])[3] = {
+      type: "fill", cues: [{ strategy: "selector", value: "#x" }],
+      generate: { prompt: "Use {{department}} and {{bogus}}", maxChars: -5, contextFile: "notes/{{fy}}.md" },
+    };
+    const v = validateRecipe(r);
+    expect(v.ok).toBe(false);
+    expect(v.errors.some((e) => e.includes("maxChars"))).toBe(true);
+    expect(v.errors.some((e) => e.includes("bogus"))).toBe(true);
+    // department + fy are unknown too (no params declared beyond applicant)…
+    expect(v.errors.some((e) => e.includes("department"))).toBe(true);
+  });
+
+  it("substitutes params inside generate.prompt and generate.contextFile", () => {
+    const r = validRecipe({
+      params: [
+        { name: "applicant", type: "string", required: true, question: "Who?" },
+        { name: "department", type: "string", required: true, question: "Which department?" },
+        { name: "fy", type: "string", required: false, question: "FY", default: "2025-26" },
+      ],
+    });
+    (r.steps as any[])[3] = {
+      type: "fill", cues: [{ strategy: "selector", value: "#x" }],
+      generate: { prompt: "Draft for {{department}}, FY {{fy}}.", contextFile: "notes/{{fy}}.md", maxChars: 2900 },
+    };
+    const res = substituteParams(r, { applicant: "Ada", department: "Urban Development" });
+    expect(res.ok).toBe(true);
+    const gen = (res.recipe.steps[3] as any).generate;
+    expect(gen.prompt).toContain("Urban Development");
+    expect(gen.prompt).toContain("FY 2025-26");
+    expect(gen.contextFile).toBe("notes/2025-26.md");
+  });
+});
+
+describe("generateValuePrompt", () => {
+  it("frames the field-drafting task with the cap and a text-only reply protocol", () => {
+    const p = generateValuePrompt({
+      type: "fill", cues: [], value: undefined,
+      generate: { prompt: "Draft an RTI application to the PIO.", maxChars: 2900 },
+    } as any);
+    expect(p).toContain("Draft an RTI application to the PIO.");
+    expect(p).toContain("2900");
+    expect(p).toContain("Respond with only the field text");
+  });
+
+  it("omits the cap line when maxChars is absent", () => {
+    const p = generateValuePrompt({ type: "fill", cues: [], generate: { prompt: "Say hello" } } as any);
+    expect(p).toContain("Say hello");
+    expect(p).not.toContain("characters");
+  });
+});
