@@ -12,7 +12,7 @@ import { describe, it, expect, beforeAll } from "bun:test";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 import { Window } from "happy-dom";
-import { createTabTarget, stubNonZeroRects, FakeEvent } from "../helpers/chrome-mock.ts";
+import { createTabTarget, stubNonZeroRects, FakeEvent, FakePort } from "../helpers/chrome-mock.ts";
 
 /** Point bare browser globals at a happy-dom window + tab target (defineProperty: Bun owns some). */
 function setPageGlobals(win: any, chromeObj: any) {
@@ -582,5 +582,215 @@ describe("content.js — dead-page guard", () => {
     loadContentScript(deadWin, deadTarget.chrome);
     const resp = await deadTarget.dispatch({ type: "CAPTURE_CONTEXT", tier: 2 });
     expect(resp).toEqual({ error: "Extension context unavailable" });
+  });
+});
+
+describe("write-assist round 3 — streaming popover (#53)", () => {
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  // Local copies of the widget fixtures (makeWindow/shadow are scoped to the
+  // round-1 describe above).
+  function makeWindow() {
+    const win: any = new Window({ url: "https://jobs.example.test/apply" });
+    win.document.write(`<!DOCTYPE html><html><head><title>Job Application</title></head><body>
+      <label for="proj">Describe your project</label>
+      <textarea id="proj" name="proj" placeholder="Tell us about a project" maxlength="500">Led migration of 40 dashboards to DuckDB</textarea>
+    </body></html>`);
+    stubNonZeroRects(win);
+    return win;
+  }
+  function shadow(win: any) {
+    const host = win.document.getElementById("zo-write-assist-host");
+    return host ? host.shadowRoot : null;
+  }
+
+  /** Widget chrome with a port factory: the test plays the background side
+   *  of each cobrowse-wa-stream pair. */
+  function makeStreamingWidgetChrome(opts: {
+    enabled?: boolean;
+    onPort?: (listener: any, caller: any) => void;
+  } = {}) {
+    const sent: any[] = [];
+    const store: Record<string, any> = { enableWriteAssist: opts.enabled !== false };
+    const ports: any[] = [];
+    const chromeObj: any = {
+      runtime: {
+        onMessage: new FakeEvent(),
+        sendMessage: (msg: any) => {
+          sent.push(msg);
+          return Promise.resolve({ ok: true, text: "IMPROVED RESULT" });
+        },
+        connect: (info?: any) => {
+          const [caller, listener] = FakePort.pair(info?.name || "");
+          ports.push(caller);
+          if (opts.onPort) opts.onPort(listener, caller);
+          return caller;
+        },
+        getURL: (p: string) => `chrome-extension://test/${p}`,
+      },
+      storage: {
+        sync: {
+          get: (keys: any, cb?: Function) => {
+            const result: Record<string, any> = {};
+            if (keys && typeof keys === "object" && !Array.isArray(keys)) {
+              for (const [k, def] of Object.entries(keys)) result[k] = k in store ? store[k] : def;
+            }
+            if (cb) cb(result);
+            return Promise.resolve(result);
+          },
+        },
+        onChanged: { addListener: () => {}, removeListener: () => {} },
+      },
+    };
+    return { chromeObj, sent, ports };
+  }
+
+  async function openPopoverForResult(win: any, chromeObj: any) {
+    const ta = win.document.querySelector("#proj");
+    ta.focus();
+    await tick();
+    const root = shadow(win);
+    root.querySelector(".zo-wa-icon").click();
+    await tick();
+    const pop = root.querySelector(".zo-wa-pop");
+    [...pop.querySelectorAll("button")].find((b: any) => b.textContent === "Enhance").click();
+    await tick();
+    return { pop, ta, root };
+  }
+
+  it("renders >=3 incremental deltas in the result view; narration never shows", async () => {
+    // Step-driven delivery (deferredSse philosophy): the test pushes each
+    // delta explicitly and samples the DOM between steps — no real timers.
+    let driver: any = null;
+    const { chromeObj } = makeStreamingWidgetChrome({
+      onPort: (listener) => {
+        listener.onMessage.addListener((m: any) => {
+          if (m.type !== "WA_ENHANCE") return;
+          driver = (msg: any) => listener.postMessage(msg);
+        });
+      },
+    });
+    const win = makeWindow();
+    loadContentScript(win, chromeObj);
+    await tick();
+    const { pop } = await openPopoverForResult(win, chromeObj);
+    await tick();
+    expect(driver).toBeTruthy();
+
+    const raws = [
+      "Let me think about it. ",
+      "Let me think about it. <write-assist>",
+      "Let me think about it. <write-assist>First line. ",
+      "Let me think about it. <write-assist>First line. Second line. ",
+      "Let me think about it. <write-assist>First line. Second line. Third line.",
+    ];
+    const seenAt: string[] = [];
+    for (const raw of raws) {
+      driver({ type: "WA_DELTA", delta: raw, raw });
+      await tick();
+      const body = pop.querySelector(".zo-wa-result");
+      if (body) seenAt.push(body.textContent);
+    }
+    // Narration (before the open tag) never renders, including in the
+    // pre-tag states.
+    for (const v of seenAt) expect(v.includes("Let me think")).toBe(false);
+    // The three in-tag partials each rendered — >=3 incremental updates.
+    const nonEmpty = new Set(seenAt.filter((v) => v.length > 0));
+    expect(nonEmpty.size).toBe(3);
+
+    driver({ type: "WA_DONE", text: "First line. Second line. Third line." });
+    await tick();
+    const body = pop.querySelector(".zo-wa-result");
+    expect(body.textContent).toBe("First line. Second line. Third line.");
+    expect([...pop.querySelectorAll("button")].some((b: any) => b.textContent === "Accept")).toBe(true);
+    expect([...pop.querySelectorAll("button")].some((b: any) => b.textContent === "Shorter")).toBe(true);
+  });
+
+  it("the Shorter chip sends a threaded follow-up (conversationId + priorText) and Accept fills the field", async () => {
+    const requests: any[] = [];
+    let lastListener: any = null;
+    const { chromeObj, sent } = makeStreamingWidgetChrome({
+      onPort: (listener) => {
+        lastListener = listener;
+        listener.onMessage.addListener((m: any) => {
+          if (m.type !== "WA_ENHANCE") return;
+          requests.push(m);
+          setTimeout(() => listener.postMessage({ type: "WA_DELTA", delta: "<write-assist>", raw: "<write-assist>" }), 2);
+          setTimeout(() => listener.postMessage({
+            type: "WA_DONE",
+            text: m.priorText ? "SHORT VERSION" : "LONG FIRST PASS",
+            conversationId: "conv_wa_42",
+          }), 6);
+        });
+      },
+    });
+    const win = makeWindow();
+    loadContentScript(win, chromeObj);
+    await tick();
+    const { pop, ta } = await openPopoverForResult(win, chromeObj);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(requests[0].conversationId).toBeUndefined();
+    expect(requests[0].priorText).toBeUndefined();
+
+    // Click Shorter → the second request rides the thread + carries the prior.
+    [...pop.querySelectorAll("button")].find((b: any) => b.textContent === "Shorter").click();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(requests.length).toBe(2);
+    expect(requests[1].conversationId).toBe("conv_wa_42");
+    expect(requests[1].priorText).toBe("LONG FIRST PASS");
+    expect(requests[1].instruction).toBe("make it shorter");
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Accept fills the field via the unified pipeline; NO EXECUTE_ACTIONS ever
+    // leaves this path (the #26 no-submit backstop cannot fire from here).
+    [...pop.querySelectorAll("button")].find((b: any) => b.textContent === "Accept").click();
+    await tick();
+    expect(ta.value).toBe("SHORT VERSION");
+    expect(sent.filter((m: any) => m.type === "EXECUTE_ACTIONS")).toHaveLength(0);
+  });
+
+  it("cancel mid-stream disconnects the port and closes cleanly", async () => {
+    let driver: any = null;
+    let disconnects = 0;
+    const { chromeObj } = makeStreamingWidgetChrome({
+      onPort: (listener) => {
+        // The content side holds `caller`; its disconnect() fires the
+        // LISTENER's onDisconnect (peer semantics).
+        listener.onDisconnect.addListener(() => disconnects++);
+        listener.onMessage.addListener((m: any) => {
+          if (m.type !== "WA_ENHANCE") return;
+          driver = (msg: any) => listener.postMessage(msg);
+        });
+      },
+    });
+    const win = makeWindow();
+    loadContentScript(win, chromeObj);
+    await tick();
+    const { pop } = await openPopoverForResult(win, chromeObj);
+    await tick();
+    driver({ type: "WA_DELTA", delta: "<write-assist>partial", raw: "<write-assist>partial" });
+    await tick();
+    const body = pop.querySelector(".zo-wa-result");
+    expect(body.textContent).toBe("partial");
+    // Cancel (the streaming footer's button) → port teardown + reset.
+    [...pop.querySelectorAll("button")].find((b: any) => b.textContent === "Cancel").click();
+    await tick();
+    expect(disconnects).toBe(1);
+    // waClose hides the popover (the last render stays in the hidden host —
+    // the next waShowCompose resets the view); the popover must not be visible.
+    expect(pop.hidden).toBe(true);
+  });
+
+  it("a runtime without connect falls back to the threadless one-shot (regression)", async () => {
+    const { chromeObj, sent } = makeStreamingWidgetChrome(); // connect removed below
+    delete chromeObj.runtime.connect; // older runtimes
+    const win = makeWindow();
+    loadContentScript(win, chromeObj);
+    await tick();
+    const { pop } = await openPopoverForResult(win, chromeObj);
+    await tick();
+    await tick();
+    expect(sent.some((m: any) => m.type === "ENHANCE_TEXT")).toBe(true);
+    expect(pop.querySelector(".zo-wa-result").textContent).toBe("IMPROVED RESULT");
   });
 });

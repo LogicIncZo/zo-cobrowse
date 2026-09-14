@@ -26,6 +26,7 @@ import {
   jsonResponse,
   textResponse,
 } from "../helpers/zo-fetch-mock.ts";
+import { WaStreamEvent } from "../schemas/messages";
 
 const CONTENT_SRC = readFileSync(resolve(import.meta.dir, "../../extension/content.js"), "utf-8");
 
@@ -706,6 +707,78 @@ describe("pull loop — read_file (#52)", () => {
     const asks = fm.requests.filter((r) => r.url.includes("/zo/ask")).slice(askBase);
     expect(asks[1].body.input).toContain("could not be read");
     expect(asks[2].body.input).toContain("could not be read");
+  });
+});
+
+describe("write-assist stream port (#53)", () => {
+  /** Chunked SSE fixture: narration, then tagged content in 3 pieces. */
+  function waSse() {
+    // sseResponse takes a single string — join the event blocks here.
+    return sseResponse([
+      sseEvent("PartStartEvent", { index: 1, part: { part_kind: "text", content: "Let me think. " } }),
+      sseEvent("PartDeltaEvent", { index: 1, delta: { part_delta_kind: "text", content_delta: "<write-assist>" } }),
+      sseEvent("PartDeltaEvent", { index: 1, delta: { part_delta_kind: "text", content_delta: "I led " } }),
+      sseEvent("PartDeltaEvent", { index: 1, delta: { part_delta_kind: "text", content_delta: "the migration of 40 dashboards." } }),
+      sseEvent("PartDeltaEvent", { index: 1, delta: { part_delta_kind: "text", content_delta: "</write-assist>" } }),
+      sseEvent("completed", { status: "succeeded" }),
+    ].join("\n"));
+  }
+
+  function connectWa(): { port: any; seen: any[] } {
+    const port = bus.runtime.connect({ name: "cobrowse-wa-stream" });
+    const seen: any[] = [];
+    port.onMessage.addListener((m: any) => seen.push(m));
+    return { port, seen };
+  }
+
+  it("streams WA_DELTA pieces and finishes with the parsed tag text (narration dropped)", async () => {
+    fm.handle((url) => (url.includes("/zo/ask") ? waSse() : jsonResponse({})));
+    const { port, seen } = connectWa();
+    port.postMessage({ type: "WA_ENHANCE", text: "draft text", instruction: "", field: {}, page: {} });
+    await waitUntil(() => seen.some((m) => m.type === "WA_DONE"), 5000);
+
+    const deltas = seen.filter((m) => m.type === "WA_DELTA");
+    expect(deltas.length).toBeGreaterThanOrEqual(3); // incremental, not one blob
+    expect(deltas[0].delta).toBe("Let me think. ");
+    expect(deltas[deltas.length - 1].raw).toContain("</write-assist>");
+    for (const m of seen) expect(() => WaStreamEvent.parse(m)).not.toThrow();
+
+    const done = seen.find((m) => m.type === "WA_DONE");
+    expect(done.text).toBe("I led the migration of 40 dashboards.");
+    // The ask went out as a streaming, threadless enhance.
+    const ask = fm.requests.filter((r) => r.url.includes("/zo/ask")).pop();
+    expect(ask.body.stream).toBe(true);
+    expect(ask.body.conversation_id).toBeUndefined();
+    expect(ask.body.input).toContain("write-assist");
+  });
+
+  it("a follow-up turn carries the thread + prior text and asks for a revision", async () => {
+    fm.handle((url) => (url.includes("/zo/ask") ? waSse() : jsonResponse({})));
+    const { port, seen } = connectWa();
+    port.postMessage({
+      type: "WA_ENHANCE",
+      text: "draft",
+      instruction: "make it shorter",
+      field: {},
+      page: {},
+      conversationId: "conv_wa_thread",
+      priorText: "The long prior draft",
+    });
+    await waitUntil(() => seen.some((m) => m.type === "WA_DONE"), 5000);
+    const ask = fm.requests.filter((r) => r.url.includes("/zo/ask")).pop();
+    expect(ask.body.conversation_id).toBe("conv_wa_thread");
+    expect(ask.body.input).toContain("FOLLOW-UP iteration");
+    expect(ask.body.input).toContain("The long prior draft");
+    expect(ask.body.input).toContain("make it shorter");
+  });
+
+  it("HTTP failure surfaces WA_ERROR on the port", async () => {
+    fm.handle((url) => (url.includes("/zo/ask") ? jsonResponse({}, { status: 500 }) : jsonResponse({})));
+    const { port, seen } = connectWa();
+    port.postMessage({ type: "WA_ENHANCE", text: "x", instruction: "", field: {}, page: {} });
+    await waitUntil(() => seen.some((m) => m.type === "WA_ERROR"), 5000);
+    expect(seen.find((m) => m.type === "WA_ERROR").error).toContain("500");
+    expect(seen.some((m) => m.type === "WA_DONE")).toBe(false);
   });
 });
 

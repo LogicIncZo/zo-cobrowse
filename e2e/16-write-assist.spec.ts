@@ -6,7 +6,7 @@
 // request is a threadless /zo/ask (write-assist marker, no conversation_id).
 
 import { test, expect } from "@playwright/test";
-import { openHarness, recordedAsks } from "./helpers/extension";
+import { openHarness, recordedAsks, clearRecordedRequests } from "./helpers/extension";
 
 const ENHANCED = "I led the migration of 40 dashboards to DuckDB, unifying our analytics stack and cutting p95 query times roughly in half.";
 
@@ -121,6 +121,51 @@ test.describe("write-assist (feature/textarea-fill)", () => {
       await h.site.reload();
       await h.site.locator("#proj").focus();
       await expect(h.site.locator(".zo-wa-icon")).toHaveCount(0);
+    } finally {
+      await h.context.close();
+    }
+  });
+});
+
+test.describe("write-assist round 3 (#53)", () => {
+  test("streaming popover: enhance streams through the port, the Shorter chip iterates on the thread", async () => {
+    const h = await openHarness({ freshProfile: true, sitePath: "/writing.html" });
+    try {
+      await clearRecordedRequests();
+      const ta = h.site.locator("#proj");
+      await ta.focus();
+      await h.site.locator(".zo-wa-icon").click();
+      const pop = h.site.locator(".zo-wa-pop");
+      await expect(pop).toBeVisible({ timeout: 10_000 });
+      await pop.locator("button", { hasText: "Enhance" }).click();
+
+      // Streaming path: the SSE narration must never leak into the popover,
+      // and the streamed result lands complete.
+      const result = pop.locator(".zo-wa-result");
+      await expect(result).toBeVisible({ timeout: 20_000 });
+      await expect(result).toHaveText(
+        "I led the migration of 40 dashboards to DuckDB, unifying our analytics stack and cutting p95 query times roughly in half.",
+        { timeout: 20_000 },
+      );
+
+      // Follow-up chip: second pass on the echoed thread revises the draft.
+      await pop.locator("button", { hasText: "Shorter" }).click();
+      await expect(result).toHaveText("SHORTENED: led the DuckDB migration; p95 cut in half.", { timeout: 20_000 });
+
+      // Wire: two streaming asks — threadless first, then the thread +
+      // follow-up framing with the prior draft riding along.
+      const asks = (await recordedAsks()).filter((r: any) => String(r.body?.input || "").includes("write-assist"));
+      expect(asks.length).toBe(2);
+      expect(asks[0].body.conversation_id).toBeUndefined();
+      expect(asks[0].body.stream).toBe(true);
+      expect(asks[1].body.conversation_id).toBe("e2e-wa-thread");
+      expect(asks[1].body.input).toContain("FOLLOW-UP iteration");
+      expect(asks[1].body.input).toContain("make it shorter");
+      expect(asks[1].body.input).toContain("I led the migration of 40 dashboards");
+
+      // Accept fills the field with the FINAL (revised) pass.
+      await pop.locator("button", { hasText: "Accept" }).click();
+      await expect(ta).toHaveValue("SHORTENED: led the DuckDB migration; p95 cut in half.", { timeout: 10_000 });
     } finally {
       await h.context.close();
     }

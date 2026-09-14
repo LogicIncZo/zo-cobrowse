@@ -258,24 +258,59 @@
     return null;
   }
 
-  /** Set a select value; Zo usually sends the visible OPTION TEXT ("Visa
-   *  (Preferred)") while el.value assignment matches the value attr ("visa")
-   *  — fall back to text matching when the direct set selects nothing. */
-  function setFieldValue(el, val) {
-    el.focus();
-    el.value = '';
-    el.value = val;
-    if (el.tagName === 'SELECT' && el.selectedIndex === -1) {
-      const want = String(val == null ? '' : val).trim().toLowerCase();
-      if (want) {
-        const opts = Array.from(el.options || []);
-        const opt = opts.find((o) => (o.textContent || '').trim().toLowerCase() === want) ||
-          opts.find((o) => (o.textContent || '').trim().toLowerCase().startsWith(want));
-        if (opt) el.value = opt.value;
-      }
-    }
+  /** Fire the synthetic input/change pair every write lands with. */
+  function fireValueEvents(el) {
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  /** One field-write pipeline for EVERY writer (#53): contenteditable goes
+   *  through the editor's own input pipeline (execCommand insert), plain
+   *  elements use the element's native value setter when one exists (React's
+   *  value tracker sees the change), textContent last resort. opts.select
+   *  keeps form-fill's SELECT text-match fallback: Zo usually sends the
+   *  visible OPTION TEXT ("Visa (Preferred)") while el.value assignment
+   *  matches the value attr ("visa") — fall back to text matching when the
+   *  direct set selects nothing. */
+  function writeFieldValue(el, text, opts) {
+    const o = opts || {};
+    el.focus();
+    if (el.isContentEditable) {
+      if (waInsertEditableText(el, text)) return;
+      el.textContent = text; // fallback (no execCommand: old engines/tests)
+      fireValueEvents(el);
+      return;
+    }
+    if (o.select && el.tagName === 'SELECT') {
+      el.value = '';
+      el.value = text;
+      if (el.selectedIndex === -1) {
+        const want = String(text == null ? '' : text).trim().toLowerCase();
+        if (want) {
+          const optList = Array.from(el.options || []);
+          const opt = optList.find((o) => (o.textContent || '').trim().toLowerCase() === want) ||
+            optList.find((o) => (o.textContent || '').trim().toLowerCase().startsWith(want));
+          if (opt) el.value = opt.value;
+        }
+      }
+      fireValueEvents(el);
+      return;
+    }
+    let setter = null;
+    let proto = Object.getPrototypeOf(el);
+    while (proto && !setter) {
+      const d = Object.getOwnPropertyDescriptor(proto, 'value');
+      if (d && typeof d.set === 'function') setter = d.set;
+      else proto = Object.getPrototypeOf(proto);
+    }
+    if (setter) setter.call(el, text);
+    else el.value = text;
+    fireValueEvents(el);
+  }
+
+  /** Form-fill entry — SELECT text-match semantics preserved. */
+  function setFieldValue(el, val) {
+    writeFieldValue(el, val, { select: true });
   }
 
   /** Execute a single action */
@@ -417,6 +452,11 @@
     .zo-wa-btn:hover { background: var(--wa-hover); }
     .zo-wa-primary { background: #2962b8; border-color: #2962b8; color: #fff; }
     .zo-wa-primary:hover { background: #1f4f96; }
+    .zo-wa-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 10px 0; }
+    .zo-wa-chip { padding: 4px 10px; border: 1px solid var(--wa-border); border-radius: 999px;
+      background: var(--wa-bg); cursor: pointer; font: inherit; font-size: 12px; color: var(--wa-btn-text); }
+    .zo-wa-chip:hover { background: var(--wa-hover); }
+    .zo-wa-follow { flex: 1; min-width: 110px; margin: 0; width: auto; }
   `;
 
   let waEnabled = true;      // enableWriteAssist setting (default on)
@@ -426,7 +466,9 @@
   let waActiveEl = null;     // textarea the icon/popover is anchored to
   let waReqId = 0;           // stale-response guard
   let waHideTimer = null;
-  let waView = { mode: 'compose', result: '', error: '', instruction: '' };
+  let waPort = null;         // #53 cobrowse-wa-stream port while a stream is live
+  let waThread = '';         // #53 short-lived per-popover Zo thread (dropped on close)
+  let waView = { mode: 'compose', result: '', error: '', instruction: '', streaming: false };
 
   function waAvailable() {
     try {
@@ -554,15 +596,17 @@
   function waOpen() {
     if (!waReady || !waActiveEl) return;
     if (waHideTimer) { clearTimeout(waHideTimer); waHideTimer = null; }
-    waView = { mode: 'compose', result: '', error: '', instruction: waView.instruction || '' };
+    waView = { mode: 'compose', result: '', error: '', instruction: waView.instruction || '', streaming: false };
     waPop.hidden = false; // shown before render so waRender can measure + position
     waRender();
   }
 
   function waClose() {
     waReqId++; // invalidate any in-flight response
+    if (waPort) { try { waPort.disconnect(); } catch { /* already dead */ } waPort = null; }
+    waThread = ''; // the thread is short-lived per popover session (#53)
     if (waPop) waPop.hidden = true;
-    waView = { mode: 'compose', result: '', error: '', instruction: '' };
+    waView = { mode: 'compose', result: '', error: '', instruction: '', streaming: false };
     if (waEligible(document.activeElement)) { waActiveEl = document.activeElement; waShowIcon(); }
     else waHideIcon();
   }
@@ -626,10 +670,48 @@
       const body = waEl('div', 'zo-wa-body zo-wa-result');
       body.textContent = waView.result;
       waPop.appendChild(body);
+      if (waView.streaming) {
+        // #53: text is still arriving — spinner + cancel, no accept/retry yet.
+        const foot = waEl('div', 'zo-wa-foot');
+        const spinWrap = waEl('div', 'zo-wa-loading');
+        spinWrap.appendChild(waEl('div', 'zo-wa-spin'));
+        foot.appendChild(spinWrap);
+        foot.appendChild(waEl('div', 'zo-wa-spacer'));
+        const cancel = waEl('button', 'zo-wa-btn');
+        cancel.type = 'button';
+        cancel.textContent = 'Cancel';
+        cancel.addEventListener('click', () => waClose());
+        foot.appendChild(cancel);
+        waPop.appendChild(foot);
+      } else {
       const ml = waActiveEl && typeof waActiveEl.maxLength === 'number' ? waActiveEl.maxLength : -1;
       if (ml > 0 && waView.result.length > ml) {
         waPop.appendChild(waEl('div', 'zo-wa-note', `Longer than the field's ${ml}-character limit.`));
       }
+      // #53 follow-up iteration chips: re-work the result on the popover's
+      // short-lived thread. Custom instruction rides the same path.
+      const chips = waEl('div', 'zo-wa-chips');
+      const mkChip = (label, instr) => {
+        const c = waEl('button', 'zo-wa-chip');
+        c.type = 'button';
+        c.textContent = label;
+        c.addEventListener('click', () => { waView.instruction = instr; waEnhance(); });
+        return c;
+      };
+      chips.appendChild(mkChip('Shorter', 'make it shorter'));
+      chips.appendChild(mkChip('Formaler', 'make it more formal'));
+      const custom = document.createElement('input');
+      custom.type = 'text';
+      custom.className = 'zo-wa-instr zo-wa-follow';
+      custom.placeholder = 'Follow-up instruction \u2014 iterate on the draft\u2026';
+      custom.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && custom.value.trim()) {
+          waView.instruction = custom.value.trim();
+          waEnhance();
+        }
+      });
+      chips.appendChild(custom);
+      waPop.appendChild(chips);
       const foot = waEl('div', 'zo-wa-foot');
       const retry = waEl('button', 'zo-wa-btn');
       retry.type = 'button';
@@ -642,6 +724,7 @@
       foot.appendChild(retry);
       foot.appendChild(accept);
       waPop.appendChild(foot);
+      }
     } else if (waView.mode === 'error') {
       waPop.appendChild(waEl('div', 'zo-wa-body zo-wa-error', waView.error || 'Something went wrong.'));
       const foot = waEl('div', 'zo-wa-foot');
@@ -657,12 +740,94 @@
     if (!waPop.hidden) waPositionPop();
   }
 
+  /** Mirror of lib/write-assist.js#parseEnhanceDelta (content scripts can't
+   *  import): what the popover may show from accumulated raw stream text —
+   *  only content inside the <write-assist> tags ever renders; narration
+   *  before the open tag and after the close tag is dropped wholesale. */
+  function waParseDelta(raw) {
+    const t = String(raw == null ? '' : raw);
+    const open = t.indexOf('<write-assist>');
+    if (open === -1) return '';
+    let body = t.slice(open + '<write-assist>'.length);
+    const close = body.indexOf('</write-assist>');
+    if (close !== -1) body = body.slice(0, close);
+    return body.replace(/^[ \t]*\r?\n/, '').trimStart();
+  }
+
   function waEnhance() {
     if (!waActiveEl) return;
     const el = waActiveEl;
     const reqId = ++waReqId;
+    const priorResult = waView.result;
     waView.mode = 'loading';
+    waView.streaming = false;
     waRender();
+    // #53: preferred path — a streaming port. Cancel is port.disconnect()
+    // (waClose does this); the reqId guard supersedes stale callbacks.
+    let port = null;
+    try {
+      port = (chrome.runtime && typeof chrome.runtime.connect === 'function')
+        ? chrome.runtime.connect({ name: 'cobrowse-wa-stream' })
+        : null;
+    } catch { port = null; }
+    if (port) {
+      waPort = port;
+      const finish = () => {
+        waPort = null;
+        try { port.disconnect(); } catch { /* already dead */ }
+      };
+      port.onMessage.addListener((m) => {
+        if (!m || reqId !== waReqId || waActiveEl !== el) return; // stale / superseded
+        if (m.type === 'WA_DELTA') {
+          if (waView.mode !== 'result') { waView.mode = 'result'; waView.streaming = true; }
+          waView.result = waParseDelta(m.raw);
+          waRender();
+        } else if (m.type === 'WA_DONE') {
+          finish();
+          waThread = (m.conversationId && String(m.conversationId)) || waThread;
+          waView.mode = 'result';
+          waView.streaming = false;
+          waView.result = String(m.text || '');
+          waRender();
+        } else if (m.type === 'WA_ERROR') {
+          finish();
+          waView.mode = 'error';
+          waView.streaming = false;
+          waView.error = (m && m.error) || 'Enhance failed.';
+          waRender();
+        }
+      });
+      port.onDisconnect.addListener(() => {
+        if (reqId !== waReqId || waActiveEl !== el) return;
+        if (waPort !== port) return;
+        waPort = null;
+        waView.mode = 'error';
+        waView.streaming = false;
+        waView.error = 'Extension unavailable \u2014 try reloading the page.';
+        waRender();
+      });
+      const msg = {
+        type: 'WA_ENHANCE',
+        text: waGetText(el),
+        instruction: waView.instruction || '',
+        field: waFieldInfo(el),
+        page: { url: location.href, title: document.title },
+        conversationId: waThread || undefined,
+        // Follow-up iteration (#53): an existing thread + a prior result makes
+        // this turn a revision of that result rather than a fresh rewrite.
+        priorText: (waThread && priorResult) ? priorResult : undefined,
+      };
+      try {
+        port.postMessage(msg);
+      } catch {
+        finish();
+        waView.mode = 'error';
+        waView.error = 'Extension unavailable \u2014 try reloading the page.';
+        waRender();
+      }
+      return;
+    }
+    // Fallback: the threadless one-shot (ports unavailable / older runtimes).
     const payload = {
       type: 'ENHANCE_TEXT',
       text: waGetText(el),
@@ -697,32 +862,11 @@
     });
   }
 
-  /** Framework-safe write-back. Textareas: use the element's own native value
-   *  setter (so React's value tracker sees the change), then fire input +
-   *  change. Contenteditable editors (CodeMirror/ProseMirror/Lexical): go
-   *  through the editor's own input pipeline (select-all + execCommand
-   *  insertText/insertLineBreak) so its internal state stays in sync — a
-   *  direct textContent write would be clobbered by the next editor update. */
+  /** Write-assist write-back (#53): the same unified pipeline as form-fill,
+   *  without SELECT semantics. See writeFieldValue — native setter (React
+   *  safe) / execCommand for editors / textContent fallback. */
   function setEnhancedValue(el, text) {
-    el.focus();
-    if (el.isContentEditable) {
-      if (waInsertEditableText(el, text)) return;
-      el.textContent = text; // fallback (no execCommand: old engines/tests)
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-      return;
-    }
-    let setter = null;
-    let proto = Object.getPrototypeOf(el);
-    while (proto && !setter) {
-      const d = Object.getOwnPropertyDescriptor(proto, 'value');
-      if (d && typeof d.set === 'function') setter = d.set;
-      else proto = Object.getPrototypeOf(proto);
-    }
-    if (setter) setter.call(el, text);
-    else el.value = text;
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
+    writeFieldValue(el, text);
   }
 
   /** Select-all + insert via execCommand, one insertText per line with
