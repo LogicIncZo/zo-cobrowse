@@ -19,7 +19,7 @@ import { zoChatUrl, truncateId } from './lib/zo-links.js';
 import { WORKSPACE_ROOT, filterPickerEntries } from './lib/pickers.js';
 import { applyI18nDom } from './lib/i18n.js';
 import { handoffInstructions, runProgress } from './lib/handoff.js';
-import { conversationToMarkdown, exportFileName } from './lib/export.js';
+import { conversationToMarkdown, exportFileName, pageContextToMarkdown, pageExportFileName } from './lib/export.js';
 import {
   openChatTab,
   closeChatTab,
@@ -1368,15 +1368,71 @@ function exportConversation(convId) {
   if (!conv || !Array.isArray(conv.messages)) return;
   const exportedAt = Date.now();
   const markdown = conversationToMarkdown({ title: conv.title || 'Zo conversation', messages: conv.messages, exportedAt });
+  downloadText(markdown, exportFileName(conv.title, exportedAt));
+}
+
+/** Blob download with no new permissions — a temp <a download> click (#51). */
+function downloadText(markdown, filename) {
   const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = exportFileName(conv.title, exportedAt);
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+/** Page-context export (#51): the captured page as a Markdown note download. */
+function exportPageMarkdown(pageContext) {
+  const exportedAt = Date.now();
+  const markdown = pageContextToMarkdown(pageContext, exportedAt);
+  downloadText(markdown, pageExportFileName(pageContext && pageContext.title, exportedAt));
+}
+
+/** Reader-view PDF (#51): a print-friendly window over the page text; the
+ * user's own print dialog does the PDF (no new permissions, no print CSS
+ * wrestling in the panel). Text is HTML-escaped before it hits the window. */
+function openReaderViewPdf(pageContext) {
+  const pc = pageContext && typeof pageContext === 'object' ? pageContext : {};
+  const win = window.open('', '_blank');
+  if (!win) {
+    addMessage('error', 'PDF export needs popups — allow popups for this extension and retry.');
+    return;
+  }
+  const esc = (v) => String(v == null ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const title = pc.title || 'Untitled page';
+  const url = pc.url || '';
+  const body = esc(pc.visibleText || 'No readable content was captured for this page.');
+  // No inline handlers/scripts: a popup from an extension page inherits the
+  // extension CSP, which blocks them. The print button gets a real listener
+  // attached from here (DOM injection is CSP-exempt).
+  win.document.write(
+    '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc(title) + '</title>' +
+    '<style>' +
+    'body{font:15px/1.7 Georgia,serif;max-width:44em;margin:3em auto;padding:0 1.5em;color:#1a1a1a;}' +
+    'h1{font-size:1.6em;line-height:1.25;margin-bottom:.2em;}' +
+    '.src{color:#555;font-size:.85em;margin-bottom:2em;}' +
+    '.src a{color:#555;}' +
+    '.print-btn{position:fixed;top:12px;right:12px;padding:8px 14px;font-size:13px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer;}' +
+    '@media print{.print-btn{display:none}.src{margin-bottom:1em}}' +
+    'pre.wrap{white-space:pre-wrap;word-break:break-word;font:inherit;}' +
+    '</style></head><body>' +
+    '<button class="print-btn" type="button">Save as PDF / Print</button>' +
+    '<h1>' + esc(title) + '</h1>' +
+    '<p class="src">Source: ' + (url ? '<a href="' + esc(url) + '">' + esc(url) + '</a>' : '(unknown)') + '</p>' +
+    '<pre class="wrap">' + body + '</pre>' +
+    '</body></html>');
+  win.document.close();
+  const printBtn = win.document.querySelector('.print-btn');
+  if (printBtn) {
+    printBtn.addEventListener('click', () => {
+      try { win.focus(); win.print(); } catch { /* print unavailable — the reader view still stands */ }
+    });
+  }
 }
 
 function renderHistoryView() {
@@ -4875,6 +4931,43 @@ sendQuery = async function() {
     if (bang.inlineReply) {
       addMessage('user', query);
       addMessage('assistant', bang.inlineReply);
+      input.disabled = false;
+      sendBtn.disabled = false;
+      input.focus();
+      return;
+    }
+    if (bang.kind === 'export') {
+      addMessage('user', query);
+      if (bang.exportTarget === 'conversation') {
+        exportConversation(activeId);
+        addMessage('assistant', '📥 Conversation exported as Markdown (same file the history ⬇ button writes).');
+      } else if (bang.exportTarget === 'page') {
+        exportPageMarkdown(currentContext);
+        addMessage('assistant', '📥 Page exported as Markdown.');
+      } else if (bang.exportTarget === 'pdf') {
+        openReaderViewPdf(currentContext);
+        addMessage('assistant', '📖 Reader view opened — use its Save as PDF button to print.');
+      } else {
+        // workspace — mirror !save's agent-write, content = the chat transcript
+        const conv = conversations[activeId];
+        if (!conv) {
+          addMessage('error', 'Nothing to export — this chat has no conversation record.');
+        } else {
+          addMessage('thinking', 'Saving conversation to workspace...');
+          const saveResp = await chrome.runtime.sendMessage({
+            type: 'SAVE_CONVERSATION',
+            conversation: { title: conv.title, messages: conv.messages },
+            savePath: bang.exportPath || '',
+          });
+          const thinkingEl = msgsEl.querySelector('.msg-thinking');
+          if (thinkingEl) thinkingEl.remove();
+          if (saveResp && saveResp.error) {
+            addMessage('error', saveResp.error);
+          } else {
+            addMessage('assistant', (saveResp && saveResp.path) ? `Conversation saved to \`${saveResp.path}\`.` : 'Conversation saved to workspace.');
+          }
+        }
+      }
       input.disabled = false;
       sendBtn.disabled = false;
       input.focus();

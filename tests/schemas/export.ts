@@ -35,3 +35,22 @@ export const ExportFileName = z.string().regex(
   /^zo-chat-[a-z0-9-]+-\d{8}\.md$/,
   { message: "filename must be zo-chat-<slug>-<YYYYMMDD>.md" },
 );
+// Page export (#51): the structured note lib/export.js#buildPageExport
+// returns and the markdown it renders to. Distinct zo-page- filename prefix.
+export const PageExport = z.object({
+  title: z.string().min(1),
+  url: z.string(),
+  savedAt: z.string(),
+  body: z.string(),
+});
+export type PageExport = z.infer<typeof PageExport>;
+
+export const PageMarkdownExport = z.string().min(1).refine(
+  (s) => s.startsWith("# ") && s.includes("> **Source:**"),
+  { message: "page export must carry a title header and source attribution" },
+);
+
+export const PageExportFileName = z.string().regex(
+  /^zo-page-[a-z0-9-]+-\d{8}\.md$/,
+  { message: "filename must be zo-page-<slug>-<YYYYMMDD>.md" },
+);

@@ -3,12 +3,18 @@ import {
   conversationToMarkdown,
   exportFileName,
   slugifyTitle,
+  buildPageExport,
+  pageContextToMarkdown,
+  pageExportFileName,
 } from "../extension/lib/export.js";
 import {
   ExportRequest,
   MarkdownExport,
   ExportFileName,
   ExportedMessage,
+  PageExport,
+  PageMarkdownExport,
+  PageExportFileName,
 } from "./schemas/export";
 
 const NOW = 1788048000000; // 2026-08-30 UTC — fixed clock
@@ -78,5 +84,47 @@ describe("export — filenames", () => {
     expect(name).toBe("zo-chat-compare-the-5-product-tabs-20260830.md");
     expect(() => ExportFileName.parse(name)).not.toThrow();
     expect(() => ExportFileName.parse(exportFileName("", NOW))).not.toThrow();
+  });
+});
+
+describe("export — page export (#51)", () => {
+  const pageContext = {
+    url: "https://example.test/rti-guide",
+    title: "How to file an RTI",
+    visibleText: "Step 1: identify the department.\nStep 2: draft the question.",
+  };
+
+  it("buildPageExport returns the structured note (schema-valid)", () => {
+    const exp = buildPageExport(pageContext, NOW);
+    expect(exp.title).toBe("How to file an RTI");
+    expect(exp.url).toBe("https://example.test/rti-guide");
+    expect(exp.body).toContain("Step 1");
+    expect(() => PageExport.parse(exp)).not.toThrow();
+  });
+
+  it("degrades honestly on empty/missing context", () => {
+    const exp = buildPageExport(null, NOW);
+    expect(exp.title).toBe("Untitled page");
+    expect(exp.body).toBe("");
+    expect(() => PageExport.parse(exp)).not.toThrow();
+    const md = pageContextToMarkdown(null, NOW);
+    expect(md).toContain("No readable content");
+    expect(() => PageMarkdownExport.parse(md)).not.toThrow();
+  });
+
+  it("pageContextToMarkdown renders title, source attribution, saved day, body", () => {
+    const md = pageContextToMarkdown(pageContext, NOW);
+    expect(md.startsWith("# How to file an RTI")).toBe(true);
+    expect(md).toContain("> **Source:** https://example.test/rti-guide");
+    expect(md).toContain("> **Saved:**");
+    expect(md).toContain("Step 2: draft the question.");
+    expect(() => PageMarkdownExport.parse(md)).not.toThrow();
+  });
+
+  it("page filenames match zo-page-<slug>-<YYYYMMDD>.md (distinct from chats)", () => {
+    const name = pageExportFileName("How to file an RTI", NOW);
+    expect(name).toBe("zo-page-how-to-file-an-rti-20260830.md");
+    expect(() => PageExportFileName.parse(name)).not.toThrow();
+    expect(name.startsWith("zo-chat-")).toBe(false);
   });
 });

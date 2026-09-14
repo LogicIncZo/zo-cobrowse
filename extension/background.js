@@ -28,6 +28,7 @@ import {
   MAX_PULL_CYCLES,
 } from './lib/pull.js';
 import { isSensitiveForm } from './lib/formfill.js';
+import { conversationToMarkdown, slugifyTitle } from './lib/export.js';
 import {
   createRun as handoffCreateRunPure,
   transition as handoffTransition,
@@ -548,6 +549,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     case 'SAVE_PAGE': {
       savePageToWorkspace(request.pageContext, request.savePath).then(sendResponse);
+      return true;
+    }
+    case 'SAVE_CONVERSATION': {
+      saveConversationToWorkspace(request.conversation, request.savePath).then(sendResponse);
       return true;
     }
     case 'RUN_SKILL': {
@@ -2740,6 +2745,43 @@ async function savePageToWorkspace(pageContext, savePath) {
     const data = await resp.json();
     const output = data.output || '';
     return { ok: true, path: path, response: output };
+  } catch (err) {
+    return { ok: false, error: `Save failed: ${err.message}` };
+  }
+}
+
+/**
+ * #51: conversation → workspace markdown write. Mirrors savePageToWorkspace's
+ * one-shot agent-write prompt (deliberately NOT MCP bash — consistency with
+ * save-page, which never used MCP either). Content = the same
+ * conversationToMarkdown serializer the local ⬇ download uses.
+ */
+async function saveConversationToWorkspace(conversation, savePath) {
+  if (!config.zoAccessToken) return { ok: false, error: 'Zo access token not configured. Open settings to set it up.' };
+  const conv = conversation && typeof conversation === 'object' ? conversation : {};
+  const title = typeof conv.title === 'string' && conv.title.trim() ? conv.title.trim() : 'Zo conversation';
+  const path = (typeof savePath === 'string' && savePath.trim()) || `Documents/research/${slugifyTitle(title)}.md`;
+  const markdown = conversationToMarkdown({ title, messages: Array.isArray(conv.messages) ? conv.messages : [] });
+
+  const prompt = `Write the following content to the file at path \`${path}\` in my workspace. Create the directory if it does not exist. Use write_file or equivalent. Do not respond with anything other than a confirmation with the file path.\n\n---CONTENT START---\n${markdown}\n---CONTENT END---`;
+
+  try {
+    const resp = await fetch(config.zoApiUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${config.zoAccessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        input: prompt,
+        model_name: config.zoModel || undefined,
+      }),
+    });
+    if (!resp.ok) {
+      return { ok: false, error: `Zo API error: ${resp.status} ${resp.statusText}` };
+    }
+    const data = await resp.json();
+    return { ok: true, path, response: data.output || '' };
   } catch (err) {
     return { ok: false, error: `Save failed: ${err.message}` };
   }
