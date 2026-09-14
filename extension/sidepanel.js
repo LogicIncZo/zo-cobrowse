@@ -25,6 +25,8 @@ import {
   closeChatTab,
   activateChatTab,
   pruneChatTabs,
+  togglePinConversation,
+  orderTabsPinnedFirst,
   tabTitleFor,
   renameConversation,
   searchConversations,
@@ -757,7 +759,7 @@ async function migrateOldFormat() {
     messages: oldMessages,
   };
   activeId = id;
-  tabsState = openChatTab(tabsState, id); // the migrated chat opens as its tab
+  tabsState = openTab(id); // the migrated chat opens as its tab
 
   await saveConversations();
   await chrome.storage.local.remove(OLD_STORAGE_KEY);
@@ -776,13 +778,18 @@ async function loadConversations() {
   // active chat opens as the single tab (upgrade default).
   const storedOpen = Array.isArray(result[STORAGE_TABS_KEY]) ? result[STORAGE_TABS_KEY] : [];
   tabsState = pruneChatTabs({ openIds: storedOpen, activeId }, Object.keys(conversations));
+  // #54: write the pruned set back — a tab closed/deleted while the panel was
+  // shut must not resurrect on the next reload (prune is otherwise in-memory).
+  if (JSON.stringify(tabsState.openIds) !== JSON.stringify(storedOpen)) {
+    await chrome.storage.local.set({ [STORAGE_TABS_KEY]: tabsState.openIds });
+  }
 
   // If no active conversation, create one
   if (!activeId || !conversations[activeId]) {
     createNewConversation();
     renderCurrentConversation(); // fresh chat: system message + empty-state chips
   } else {
-    if (!tabsState.openIds.length) tabsState = openChatTab(tabsState, activeId);
+    if (!tabsState.openIds.length) tabsState = openTab(activeId);
     renderCurrentConversation();
   }
 
@@ -846,7 +853,7 @@ function createNewConversation() {
     messages: [],
   };
   activeId = id;
-  tabsState = openChatTab(tabsState, id); // every chat opens as a tab
+  tabsState = openTab(id); // every chat opens as a tab
   saveConversations();
 }
 
@@ -1033,7 +1040,7 @@ async function switchToConversation(id) {
 
   // Switch (opening the tab covers history-view switches to unopened chats)
   activeId = id;
-  tabsState = openChatTab(tabsState, id);
+  tabsState = openTab(id);
   await saveConversations();
 
   // Per-chat context-policy state + tab-ref toggles
@@ -1111,7 +1118,7 @@ async function deleteConversation(id) {
       activeId = tabsState.activeId;
     } else if (ids.length > 0) {
       activeId = ids[0];
-      tabsState = openChatTab(tabsState, activeId);
+      tabsState = openTab(activeId);
     } else {
       createNewConversation();
     }
@@ -1132,6 +1139,16 @@ async function deleteConversation(id) {
 // ---- Chat tab bar ----
 
 /** Render the open-chat tab strip (call after any conversation mutation). */
+/** Ids of pinned conversations (#54) — eviction exemption + tab-bar order. */
+function pinnedChatIds() {
+  return Object.values(conversations).filter((c) => c && c.pinned && typeof c.id === 'string').map((c) => c.id);
+}
+
+/** Every tab-open goes through here so LRU eviction always knows the pinned set. */
+function openTab(id) {
+  return openChatTab(tabsState, id, { pinnedIds: pinnedChatIds() });
+}
+
 function renderChatTabs() {
   if (!chatTabsEl) return;
   tabsState = pruneChatTabs(tabsState, Object.keys(conversations));
@@ -1143,7 +1160,8 @@ function renderChatTabs() {
   const streamingId = streamSession.active ? streamSession.chatId : null;
   // #166: the chat a live handoff run is driving carries the 🤖 run marker.
   const handoffId = activeHandoffRun?.chatId || null;
-  for (const id of tabsState.openIds) {
+  // #54: pinned first (display only — openIds keeps recency for eviction).
+  for (const id of orderTabsPinnedFirst(tabsState.openIds, pinnedChatIds())) {
     const convo = conversations[id];
     if (!convo) continue;
     const isRun = id === handoffId;
@@ -1154,6 +1172,14 @@ function renderChatTabs() {
     tab.setAttribute('role', 'tab');
     tab.setAttribute('aria-selected', String(id === activeId));
     tab.title = labelText + (id === streamingId ? ' — generating…' : '');
+    if (convo.pinned) {
+      // 📌 glyph marks a pinned chat (exempt from LRU eviction).
+      const pin = document.createElement('span');
+      pin.className = 'chat-tab-pin';
+      pin.textContent = '📌';
+      pin.title = 'Pinned — open ⇢ right-click to unpin';
+      tab.appendChild(pin);
+    }
     if (id === streamingId && id !== activeId) {
       // Pulsing dot marks BACKGROUND chats still generating (#135) — on the
       // active tab the user is already watching the stream live.
@@ -1182,6 +1208,8 @@ function renderChatTabs() {
         closeChatTabById(id);
       }
     });
+    // Right-click opens the tab menu (#54): Pin/Unpin + Export Markdown.
+    tab.addEventListener('contextmenu', (e) => openTabContextMenu(e, id));
     chatTabsEl.appendChild(tab);
   }
 }
@@ -1206,6 +1234,70 @@ async function closeChatTabById(id) {
     return; // switchToConversation already saved + re-rendered
   }
   tabsState = next;
+  await saveConversations();
+  renderChatTabs();
+}
+
+// ---- Chat-tab context menu (#54) — Pin/Unpin + Export Markdown ----
+
+let tabContextMenuEl = null;
+
+function closeTabContextMenu() {
+  if (tabContextMenuEl) {
+    tabContextMenuEl.remove();
+    tabContextMenuEl = null;
+  }
+}
+
+function openTabContextMenu(e, chatId) {
+  e.preventDefault();
+  closeTabContextMenu();
+  const menu = document.createElement('div');
+  menu.className = 'chat-tab-menu';
+  menu.setAttribute('role', 'menu');
+  const pinItem = document.createElement('button');
+  pinItem.type = 'button';
+  pinItem.setAttribute('role', 'menuitem');
+  pinItem.textContent = conversations[chatId]?.pinned ? 'Unpin chat' : '📌 Pin chat';
+  pinItem.addEventListener('click', () => {
+    closeTabContextMenu();
+    togglePinConversationById(chatId);
+  });
+  const exportItem = document.createElement('button');
+  exportItem.type = 'button';
+  exportItem.setAttribute('role', 'menuitem');
+  exportItem.textContent = '⬇ Export Markdown';
+  exportItem.addEventListener('click', () => {
+    closeTabContextMenu();
+    exportConversation(chatId);
+  });
+  menu.appendChild(pinItem);
+  menu.appendChild(exportItem);
+  document.body.appendChild(menu);
+  // Clamp to the viewport (the menu measures after append).
+  const px = Math.min(e.clientX || 0, window.innerWidth - menu.offsetWidth - 8);
+  const py = Math.min(e.clientY || 0, window.innerHeight - menu.offsetHeight - 8);
+  menu.style.left = Math.max(4, px) + 'px';
+  menu.style.top = Math.max(4, py) + 'px';
+  tabContextMenuEl = menu;
+}
+
+// Dismissal: any click outside the open menu, or Escape. One set of
+// document-level listeners for the lifetime of the panel — inert while no
+// menu is open (tabContextMenuEl is null).
+document.addEventListener('click', (e) => {
+  if (tabContextMenuEl && !tabContextMenuEl.contains(e.target)) closeTabContextMenu();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeTabContextMenu();
+});
+
+/** Flip a conversation's pin, persist, re-render. The pin lives on the
+ * conversation record → survives restarts and tab close/reopen (#54). */
+async function togglePinConversationById(chatId) {
+  const res = togglePinConversation(conversations, chatId);
+  if (!res.convos[chatId]) return; // unknown id — no-op
+  conversations = res.convos;
   await saveConversations();
   renderChatTabs();
 }
@@ -4754,7 +4846,7 @@ sendQuery = async function() {
 
   await ensureActiveConversation();
   // The active chat always has an open tab (covers sends after a storage reset).
-  tabsState = openChatTab(tabsState, activeId);
+  tabsState = openTab(activeId);
   renderChatTabs();
   await refreshPageContext();
   if (!currentContext) {

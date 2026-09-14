@@ -92,3 +92,36 @@ test.describe("chat tabs mid-stream", () => {
     await expect(h.panel.locator("#run-all-btn")).toBeVisible();
   });
 });
+
+test.describe("chat tabs round 2 (#54)", () => {
+  test("pin protects a chat from LRU eviction; the tab menu exports Markdown", async () => {
+    // Two tabs open from the earlier describes; pin the first via its menu.
+    const pinnedLabel = await h.panel.evaluate(
+      () => (document.querySelector("#chat-tabs .chat-tab .chat-tab-label") as HTMLElement)?.textContent,
+    );
+    await h.panel.locator("#chat-tabs .chat-tab").first().click({ button: "right" });
+    await h.panel.getByRole("menuitem", { name: /pin/i }).first().click();
+    await expect(h.panel.locator("#chat-tabs .chat-tab-pin")).toHaveCount(1);
+
+    // Open 8 more chats → LRU pressure (cap 8). The pinned chat survives;
+    // the oldest unpinned evict instead.
+    for (let i = 0; i < 8; i++) {
+      await h.panel.locator("#new-chat-btn").click();
+      await h.panel.waitForTimeout(120);
+    }
+    const labels = await h.panel.evaluate(() =>
+      [...document.querySelectorAll("#chat-tabs .chat-tab .chat-tab-label")].map((e) => e.textContent),
+    );
+    expect(labels).toHaveLength(8);
+    expect(labels[0]).toBe(pinnedLabel); // pinned sorts first
+    expect(labels).toContain(pinnedLabel);
+
+    // The same menu exports the conversation: a real .md download fires.
+    await h.panel.locator("#chat-tabs .chat-tab").first().click({ button: "right" });
+    const [download] = await Promise.all([
+      h.panel.waitForEvent("download", { timeout: 10_000 }),
+      h.panel.getByRole("menuitem", { name: /export markdown/i }).click(),
+    ]);
+    expect(download.suggestedFilename()).toMatch(/^zo-chat-.*\.md$/);
+  });
+});
