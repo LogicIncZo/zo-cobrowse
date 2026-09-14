@@ -87,6 +87,8 @@ import {
   validateRecipe,
   substituteParams,
   bumpVersion,
+  healPrompt,
+  parseRecipeHealResponse,
 } from './lib/recipes.js';
 import { createSessionCache } from './lib/sw-cache.js';
 import { createDebugLog } from './lib/debug-log.js';
@@ -2682,8 +2684,14 @@ async function recipePlayStep(runId) {
   const res = await executeActions([{ type: 'recipe_step', step, dataB64 }], run.tabId, { recipe: true, sensitive });
   const r = (res.results && res.results[0]) || { ok: false, error: res.error || 'no result' };
   if (!r.ok) {
-    // PR2: any failure parks. PR3 routes cueMiss through the healer first.
-    await recipeBlock(runId, r.cueMiss ? `cue miss — ${r.error}` : `${step.type}: ${r.error}`);
+    if (r.cueMiss) {
+      // Cue-miss → exactly one re-ground turn (the healer) patches the cues,
+      // bumps the version, caches the healed copy, and retries. No heal
+      // budget left, or a failed heal → blocked.
+      await recipeHeal(runId, step, r);
+      return;
+    }
+    await recipeBlock(runId, `${step.type}: ${r.error}`);
     return;
   }
   if (step.type === 'extract') {
@@ -2781,6 +2789,75 @@ async function recipeList() {
     recipes: Object.values(lib).map((r) => ({ name: r.name, version: r.version, steps: r.steps.length, draft: !!r.draft, origin: r.origin })),
     liveRun: live ? { runId: live.runId, name: live.name, status: live.status } : null,
   };
+}
+
+// The healer (#220): on a cue miss, ONE re-ground turn — a redacted tier-2
+// capture + the failed cues + the page's near-miss candidates go to a one-shot
+// Zo call (generateMode pattern: plain JSON POST, no conversation_id, no
+// stream port). A parseable cue patch updates the run's copy, bumps the
+// version, caches the healed recipe in the local library, and retries the
+// step. Everything else blocks the run honestly.
+async function recipeHeal(runId, step, missResult) {
+  let run = await recipeGet({ runId });
+  if (!run || run.status !== 'running') return;
+  if ((run.healCount || 0) >= 1) {
+    await recipeBlock(runId, `cue miss — ${missResult.error} (heal budget spent)`);
+    return;
+  }
+  if (!config.zoAccessToken) {
+    await recipeBlock(runId, `cue miss — ${missResult.error} (no Zo token for the healer)`);
+    return;
+  }
+  run.status = 'healing';
+  run.updatedAt = Date.now();
+  await recipePut(run);
+
+  // Redaction: the healer gets field STRUCTURE (labels/questions/selectors),
+  // never live values — strip them defensively before anything leaves.
+  const cap = await getActiveTabContext(run.tabId, 2, null).catch(() => null);
+  const pageContext = cap && !cap.error ? {
+    url: cap.url,
+    title: cap.title,
+    formFields: (Array.isArray(cap.formFields) ? cap.formFields : []).map((f) => ({ ...f, value: undefined })),
+  } : null;
+
+  try {
+    const resp = await fetch(config.zoApiUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${config.zoAccessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        input: healPrompt(run.recipe, step, missResult, pageContext),
+        model_name: config.zoModel || undefined,
+      }),
+    });
+    if (!resp.ok) {
+      await recipeBlock(runId, `healer HTTP ${resp.status} — cue miss: ${missResult.error}`);
+      return;
+    }
+    const data = await resp.json().catch(() => ({}));
+    const parsed = parseRecipeHealResponse(String(data?.output ?? ''));
+    if (!parsed.ok) {
+      await recipeBlock(runId, `healer: ${parsed.error}`);
+      return;
+    }
+    run = await recipeGet({ runId });
+    if (!run || run.status !== 'healing') return;
+    run.recipe.steps[run.stepIndex].cues = parsed.cues;
+    run.version = bumpVersion(run.version, 'patch') || run.version;
+    run.healCount = (run.healCount || 0) + 1;
+    run.updatedAt = Date.now();
+    run.status = 'running';
+    const lib = await recipeLibrary.load();
+    lib[run.recipeId] = run.recipe; // healed copy cached under the recipe id
+    await recipeLibrary.save(lib);
+    await recipePut(run);
+    recipePlayStep(run.runId).catch((e) => console.debug('recipePlayStep:', e));
+  } catch (e) {
+    await recipeBlock(runId, `healer failed: ${e?.message || e}`);
+  }
 }
 
 async function runExecuteActions(domActions, target, { confirmed, boundaryMode } = {}) {

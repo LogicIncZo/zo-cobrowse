@@ -255,3 +255,59 @@ export function recipeProgress(run, now = Date.now()) {
   }
   return `${run.status} · ${step} · ${evidence} · ${mins}m`;
 }
+
+// ---- Healer pure halves (#220) --------------------------------------------
+
+// The cue-miss re-ground prompt: one-shot (generateMode pattern — no
+// conversation_id), JSON-only reply. NOTE: pageContext fields must be
+// REDACTED by the caller before building this — the prompt builder also
+// strips live field values defensively (values never leave the extension).
+export function healPrompt(recipe, step, miss, pageContext) {
+  const ctx = pageContext || {};
+  const fields = (Array.isArray(ctx.formFields) ? ctx.formFields : [])
+    .map((f) => `${f.tag || 'input'}${f.type ? `[${f.type}]` : ''} "${String(f.question || f.placeholder || f.name || '').slice(0, 80)}" ${f.selector || ''}`)
+    .join('; ');
+  const candidates = (Array.isArray(miss?.candidates) ? miss.candidates : [])
+    .map((c) => `- ${String(c.text || '').slice(0, 60)} (${c.selector || 'no selector'})`);
+  return [
+    '## Recipe Step Repair',
+    '',
+    `Recipe "${recipe?.name || 'unnamed'}" is playing deterministically and its cues matched nothing.`,
+    `Failing step (${step?.type}): tried cues, in order — ${Array.isArray(miss?.tried) ? miss.tried.join('; ') : 'none recorded'}`,
+    candidates.length ? `Near-miss candidates the page DID offer:\n${candidates.join('\n')}` : 'No near-miss candidates were captured.',
+    '',
+    'Current page:',
+    `- URL: ${ctx.url || 'unknown'}`,
+    `- Title: ${ctx.title || 'unknown'}`,
+    fields ? `- Form fields: ${fields}` : '- No form fields captured.',
+    '',
+    'Respond with ONLY a JSON object, no prose:',
+    '{"cues": [{"strategy": "…", "value": "…"}], "note": "one-line reason"}',
+    'Replace the step\'s cue array, best strategy first. Strategies: selector | text | label | aria | placeholder | question. Use AT LEAST TWO cues and never a single selector alone.',
+  ].join('\n');
+}
+
+// Parse the healer's reply: fenced or bare JSON, cues shape-checked here
+// (strategy known, values non-empty, ≥2 cues so an answer is never a lone
+// selector). Returns {ok, cues, note} | {ok:false, error}.
+export function parseRecipeHealResponse(text) {
+  const fenced = typeof text === 'string' ? text : '';
+  const jsonSlice = fenced.indexOf('{');
+  if (jsonSlice === -1) return { ok: false, error: 'healer reply contained no JSON' };
+  const end = fenced.lastIndexOf('}');
+  if (end <= jsonSlice) return { ok: false, error: 'healer reply contained no JSON object' };
+  let parsed;
+  try {
+    parsed = JSON.parse(fenced.slice(jsonSlice, end + 1));
+  } catch (e) {
+    return { ok: false, error: `healer reply was not valid JSON: ${e.message}` };
+  }
+  const cues = Array.isArray(parsed?.cues) ? parsed.cues : null;
+  if (!cues || cues.length === 0) return { ok: false, error: 'healer reply had no cues' };
+  const valid = cues.every((c) => c
+    && typeof c.value === 'string' && c.value.trim()
+    && CUE_STRATEGIES.includes(c.strategy));
+  if (!valid) return { ok: false, error: 'healer cues must each carry a known strategy and a value' };
+  if (cues.length < 2) return { ok: false, error: 'healer must answer with at least two cues (never a single selector)' };
+  return { ok: true, cues, note: typeof parsed.note === 'string' ? parsed.note : undefined };
+}

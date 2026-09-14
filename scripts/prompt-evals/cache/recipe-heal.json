@@ -1,0 +1,6 @@
+{
+  "id": "recipe-heal",
+  "promptHash": "3e5128509d00d657973b3649262c89cb3cc070fb17f442d66ae004e71d1d9467",
+  "fetchedAt": "2026-09-14T15:03:32.876Z",
+  "output": "{\"cues\": [{\"strategy\": \"label\", \"value\": \"Name of Applicant\"}, {\"strategy\": \"selector\", \"value\": \"#f-name\"}, {\"strategy\": \"question\", \"value\": \"Name of Applicant\"}], \"note\": \"Real field is labelled 'Name of Applicant' with id #f-name; old cues 'Applicant Full Name' and '#fullname-ghost' do not exist on the page.\"}"
+}

@@ -258,3 +258,43 @@ describe("recipeProgress", () => {
     expect(recipeProgress({ status: "blocked", stepIndex: 3, stepsTotal: 6, evidence: [], startedAt: T0, stopReason: "cue miss" }, T0 + 60_000)).toBe("blocked — cue miss · 0 evidence · 1m");
   });
 });
+
+// ---- healer pure halves (PR3) ---------------------------------------------
+
+import { healPrompt, parseRecipeHealResponse } from "../extension/lib/recipes.js";
+
+describe("healPrompt / parseRecipeHealResponse", () => {
+  const step = { type: "fill", cues: [{ strategy: "question", value: "Ghost" }], value: "x" };
+  const miss = { tried: ["question=Ghost"], candidates: [{ text: "Your name", selector: "#fullname" }] };
+
+  it("healPrompt carries the failed cues, candidates and a JSON-only reply protocol", () => {
+    const p = healPrompt({ name: "RTI" }, step, miss, { url: "https://x/form", title: "Form", formFields: [{ tag: "input", type: "text", question: "Your name", selector: "#fullname" }] });
+    expect(p).toContain("## Recipe Step Repair");
+    expect(p).toContain("question=Ghost");
+    expect(p).toContain("Your name");
+    expect(p).toContain('"cues"');
+    expect(p).toContain("never a single selector");
+  });
+
+  it("healPrompt redacts all live field values (they never leave the extension)", () => {
+    const p = healPrompt({ name: "R" }, step, miss, {
+      url: "https://x", title: "T",
+      formFields: [{ tag: "input", type: "password", name: "pw", value: "hunter2", selector: "#pw" }],
+    });
+    expect(p).not.toContain("hunter2");
+  });
+
+  it("parseRecipeHealResponse accepts fenced JSON with valid cues", () => {
+    const res = parseRecipeHealResponse('```json\n{"cues":[{"strategy":"selector","value":"#fullname"},{"strategy":"question","value":"Your name"}],"note":"renamed"}\n```');
+    expect(res.ok).toBe(true);
+    expect(res.cues).toHaveLength(2);
+    expect(res.note).toBe("renamed");
+  });
+
+  it("parseRecipeHealResponse rejects invalid JSON, bad cues, and single-selector answers", () => {
+    expect(parseRecipeHealResponse("no json here").ok).toBe(false);
+    expect(parseRecipeHealResponse(JSON.stringify({ cues: [{ strategy: "psychic", value: "x" }] })).ok).toBe(false);
+    expect(parseRecipeHealResponse(JSON.stringify({ cues: [{ strategy: "selector", value: "#a" }] })).ok).toBe(false);
+    expect(parseRecipeHealResponse(JSON.stringify({ cues: [] })).ok).toBe(false);
+  });
+});

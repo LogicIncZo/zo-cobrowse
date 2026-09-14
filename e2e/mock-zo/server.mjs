@@ -203,6 +203,30 @@ const server = http.createServer(async (req, res) => {
       return res.end();
     }
     if (body.method === "tools/call" && body.params?.name === "read_file") {
+      // #220: the recipes player loads its artifact from the workspace. Route
+      // by path; every other path keeps the #52 notes fixture.
+      const targetFile = String(body.params.arguments?.target_file || "");
+      if (targetFile.includes("recipes/e2e-filing.json")) {
+        const recipe = {
+          id: "rcp-e2e",
+          name: "E2E filing",
+          version: "1.0.0",
+          origin: targetFile,
+          createdAt: 0,
+          updatedAt: 0,
+          params: [{ name: "applicant", type: "string", required: true, question: "Who is filing?" }],
+          steps: [
+            { type: "navigate", url: `http://127.0.0.1:${PORT}/form.html`, expectUrl: "form.html" },
+            { type: "fill", cues: [{ strategy: "label", value: "Name" }, { strategy: "selector", value: "#name" }], value: "{{applicant}}" },
+            { type: "navigate", url: `http://127.0.0.1:${PORT}/gateway.html`, expectUrl: "gateway.html" },
+            { type: "human", title: "Pay ₹10 on the mock gateway", instructions: "Click Pay on the gateway page, then verify from the panel.", resumeOn: { url: "paid=1" } },
+            { type: "extract", cues: [{ strategy: "selector", value: "#reg-number" }], evidenceKey: "registration", label: "Registration number" },
+            { type: "done", message: "Filed {{applicant}} — registration {{registration}}" },
+          ],
+        };
+        const wrappedRecipe = JSON.stringify([JSON.stringify(recipe), `kind='file_ref' path='${targetFile}' media_type=None label=None`]);
+        return json({ jsonrpc: "2.0", id: body.id, result: { isError: false, content: [{ type: "text", text: wrappedRecipe }] } });
+      }
       // #52 pull loop: mirrors the LIVE read_file shape (probe-read-file.ts) —
       // a JSON array of [fileText, fileRefDescriptor]; the background unwraps it.
       const wrapped = JSON.stringify([

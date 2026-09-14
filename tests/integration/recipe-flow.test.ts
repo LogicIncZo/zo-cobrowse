@@ -80,6 +80,8 @@ bus.storage.local._store.cobrowse_recipes = {
 const target = createTabTarget();
 let executeBehavior: (action: any) => any = (action) => ({ ok: true, type: action.step?.type ?? action.type });
 let captureBehavior: () => any = () => ({ url: tabUrl(), title: "Fixture page", formFields: [], clickable: [] });
+// The healer's one-shot /zo/ask call (null → default {} response → parse fail).
+let askResponder: (() => any) | null = null;
 const executedSteps: any[] = [];
 target.onMessage.addListener((msg: any, _sender: any, sendResponse: Function) => {
   if (msg.type === "CAPTURE_CONTEXT") {
@@ -99,6 +101,7 @@ beforeAll(async () => {
   await bus.tabs.create({ id: 1, url: "https://fixture.example/start", active: true });
   fm.install();
   fm.handle((url, _init, req) => {
+    if (url.includes("/zo/ask") && askResponder) return askResponder();
     if (!url.endsWith("/mcp")) return jsonResponse({});
     const body: any = (req as any).body || {};
     if (body.method === "initialize") {
@@ -290,7 +293,7 @@ describe("recipes player (#220)", () => {
     expect(notifications.find((n) => n.id === `recipe-${blocked.runId}`)?.opts.title).toBe("Recipe run blocked");
   });
 
-  it("cue-miss parks the run blocked with the miss reason (healer lands next round)", async () => {
+  it("cue-miss spends the healer one-shot; a useless reply parks the run blocked", async () => {
     bus.storage.local._store.cobrowse_recipes.missy = makeRecipe({
       id: "rcp-miss", name: "Missy",
       steps: [
@@ -299,10 +302,60 @@ describe("recipes player (#220)", () => {
       ],
     });
     executeBehavior = () => ({ ok: false, type: "fill", cueMiss: true, tried: ["question=Ghost field"], candidates: [], error: "no element matched cues: question=Ghost field" });
+    askResponder = null; // default {} → healer parse failure
     const res = await start({ localName: "missy" });
     const blocked = await settle(res.run.runId, ["blocked"]);
     expect(blocked.status).toBe("blocked");
-    expect(blocked.stopReason).toContain("cue miss");
+    expect(blocked.stopReason).toContain("healer");
+    expect(blocked.healCount).toBe(0); // the patch never landed
+  });
+
+  it("healer: cue-miss → one-shot re-ground → patch + version bump + retry to done", async () => {
+    bus.storage.local._store.cobrowse_recipes.healx = makeRecipe({
+      id: "rcp-healx", name: "Heal me", version: "2.1.0",
+      steps: [
+        { type: "fill", cues: [{ strategy: "question", value: "Ghost field" }], value: "Ada" },
+        { type: "done" },
+      ],
+    });
+    executedSteps.length = 0;
+    executeBehavior = (action) => {
+      const st = action.step;
+      // First attempt misses; the healed cue array resolves.
+      if (st.type === "fill" && st.cues[0]?.value === "Ghost field") {
+        return { ok: false, type: "fill", cueMiss: true, tried: ["question=Ghost field"], candidates: [{ text: "Your name", selector: "#fullname" }], error: "no element matched" };
+      }
+      return { ok: true, type: st.type };
+    };
+    captureBehavior = () => ({
+      url: "https://fixture.example/form",
+      title: "Fixture page",
+      // A sensitive value that must NEVER reach the healer prompt.
+      formFields: [{ tag: "input", type: "password", name: "pw", value: "hunter2", selector: "#pw", question: "Password" }],
+    });
+    askResponder = () => jsonResponse({ output: JSON.stringify({ cues: [{ strategy: "selector", value: "#fullname" }, { strategy: "question", value: "Your name" }], note: "renamed field" }) });
+    const res = await start({ localName: "healx" });
+    expect(res.ok).toBe(true);
+    const run = await settle(res.run.runId, ["done"]);
+    expect(run.status).toBe("done");
+    expect(run.healCount).toBe(1);
+    expect(run.version).toBe("2.1.1"); // patch bump on heal
+    // The retry executed the PATCHED cues.
+    const retried = executedSteps.filter((s) => s.type === "fill");
+    expect(retried.length).toBe(2);
+    expect(retried[1].cues.map((c: any) => c.value)).toContain("#fullname");
+    // The healed copy is cached in the local library under the recipe id.
+    const cached = bus.storage.local._store.cobrowse_recipes["rcp-healx"];
+    expect(cached?.steps[0].cues.map((c: any) => c.value)).toContain("#fullname");
+    // Redaction: the healer prompt carried field structure, never values.
+    const asks = fm.to("/zo/ask");
+    const healAsk = [...fm.to("/zo/ask")].reverse().find((a: any) => String(a.body?.input || "").includes('Recipe "Heal me"'));
+    expect(healAsk).toBeTruthy();
+    const prompt = String(healAsk.body.input);
+    expect(prompt).toContain("question=Ghost field");
+    expect(prompt).toContain("Your name");
+    expect(prompt).not.toContain("hunter2");
+    askResponder = null;
   });
 
   it("STOP aborts a live run; resume on a terminal run is refused", async () => {

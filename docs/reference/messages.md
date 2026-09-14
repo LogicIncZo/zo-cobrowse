@@ -34,6 +34,24 @@ panel (and options page) send:
 | `DUCKDB_QUERY` | Run a natural-language DuckDB query (`!query` / `!data`) |
 | `NEW_CONVERSATION` | Reset `zoConversationId` to `null` |
 | `RECREATE_CONTEXT_MENUS` | Rebuild right-click context menus |
+| `HANDOFF_START` / `HANDOFF_PAUSE` / `HANDOFF_RESUME` / `HANDOFF_STOP` / `HANDOFF_STATUS` | Delegate-mode run loop (Lane E, `!handoff`) — start/pause/resume/abort/status |
+| `RECIPE_START` | Load a recipe artifact (workspace path or local name), validate it, collect params, start the deterministic player (#220) |
+| `RECIPE_RESUME` | Verify the pending human checkpoint's postcondition (`force: true` skips the check) and continue playback |
+| `RECIPE_STOP` | Abort a live recipe run |
+| `RECIPE_STATUS` | Fetch a recipe run by `runId` or `chatId` |
+| `RECIPE_LIST` | The local learned-recipes library + any live run |
+
+## Background → Panel (pushes)
+
+State pushes are broadcast with `chrome.runtime.sendMessage` from the
+background and land in the panel's `onMessage` listener. They live in
+`BACKGROUND_PUSH_TYPES`, not `MESSAGE_TYPES` — there is deliberately no
+request handler for them:
+
+| Type | Purpose |
+|------|---------|
+| `HANDOFF_UPDATE` | Full handoff run object after every transition — progress line, resume controls |
+| `RECIPE_UPDATE` | Full recipe run object after every player transition (#220) — progress line, checkpoint card, evidence summary |
 
 ## Background → Content
 

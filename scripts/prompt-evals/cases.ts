@@ -24,6 +24,7 @@ import {
   buildTestConnectionPrompt,
 } from "../../extension/lib/zo-prompts.js";
 import { parseZoOutput } from "../../extension/lib/parse-output.js";
+import { healPrompt } from "../../extension/lib/recipes.js";
 import {
   nonEmpty,
   noActionEnvelope,
@@ -279,6 +280,34 @@ export const CASES: EvalCase[] = [
     build: () => buildGenerateModePrompt("a mode that finds recipes on the current page and lists ingredients"),
     live: true,
     checks: [generateModeJson()],
+  },
+  {
+    id: "recipe-heal",
+    kind: "json",
+    what: "Recipe cue healer returns {cues[]} JSON — at least 2 cues, known strategies (never a lone selector)",
+    build: () => healPrompt(
+      { id: "rcp-eval", name: "RTI filing", version: "1.0.0" },
+      { type: "fill", cues: [{ strategy: "question", value: "Applicant Full Name" }], value: "{{applicant}}" },
+      {
+        tried: ["question=Applicant Full Name", "selector=#fullname-ghost"],
+        candidates: [{ text: "Name of Applicant", selector: "#f-name" }, { text: "Submit", selector: "#send" }],
+      },
+      {
+        url: "https://rtionline.gov.in/request-form.php",
+        title: "RTI Request Form",
+        formFields: [{ tag: "input", type: "text", question: "Name of Applicant", selector: "#f-name" }],
+      },
+    ),
+    live: true,
+    checks: [
+      (out) => ({ name: "cues array with >=2 cues", pass: Array.isArray(out.parsed?.cues) && out.parsed.cues.length >= 2 }),
+      (out) => ({
+        name: "known strategies with non-empty values",
+        pass: (out.parsed?.cues || []).every(
+          (c: any) => ["selector", "text", "label", "aria", "placeholder", "question"].includes(c?.strategy) && typeof c?.value === "string" && c.value.trim(),
+        ),
+      }),
+    ],
   },
   {
     id: "run-skill",
