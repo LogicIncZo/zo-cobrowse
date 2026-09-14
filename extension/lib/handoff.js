@@ -21,7 +21,7 @@ export const DEFAULT_BUDGET = { maxTurns: 12, maxNavigations: 25, maxMinutes: 20
 
 const READONLY_ALLOWED = new Set([
   'navigate', 'extract', 'scroll', 'wait', 'done',
-  'read_tab', 'read_page', 'get_dom', 'get_form',
+  'read_tab', 'read_page', 'get_dom', 'get_form', 'read_file',
 ]);
 
 // Submit/terminal-action hints for 'no-submit' mode — the #26 no-submit rule

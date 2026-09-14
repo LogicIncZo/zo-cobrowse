@@ -9,6 +9,11 @@ export const PullRequestSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("read_page") }),
   z.object({ type: z.literal("get_dom") }),
   z.object({ type: z.literal("get_form") }),
+  // #52: on-demand workspace file read. `path` is the raw string Zo emitted
+  // (possibly empty/unsafe — validation to safeWorkspacePath happens in the
+  // background; an invalid path becomes an `unavailable` follow-up, never a
+  // schema failure).
+  z.object({ type: z.literal("read_file"), path: z.string() }),
 ]);
 
 export const FOLLOW_UP_KINDS = ["content", "unavailable", "duplicate", "budget", "blank"] as const;
