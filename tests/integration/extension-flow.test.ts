@@ -1991,3 +1991,82 @@ describe("switching back to a streaming chat (#169)", () => {
     );
   }, 25000);
 });
+
+describe("pending query pickup (context menu / omnibox handoff)", () => {
+  it("a PENDING_ZO_QUERY broadcast fills the composer and auto-sends", async () => {
+    // The #169 scenarios left a spent deferredSse handler installed —
+    // restore a live answer stream for this turn's auto-send.
+    fm.handle((url: string) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      return sseResponse(zoSseText({ text: "It is a test page." }));
+    });
+    const before = panelWin.document.querySelectorAll("#messages .msg-assistant").length;
+    const askBefore = askLog.length;
+    bus.runtime.sendMessage({ type: "PENDING_ZO_QUERY", text: "What is this trio page about?", source: "omnibox" });
+    await waitUntil(() => panelWin.document.querySelectorAll("#messages .msg-assistant").length === before + 1, 10000);
+
+    // The parked text rode the ensuing ASK_ZO and the answer rendered in-chat.
+    expect(askLog[askLog.length - 1].userQuery).toBe("What is this trio page about?");
+    const bodies = [...panelWin.document.querySelectorAll("#messages .msg-assistant .msg-body")];
+    expect(bodies.at(-1).textContent).toContain("It is a test page.");
+  });
+});
+
+describe("TTS — read aloud + stop (footer speaker)", () => {
+  it("speaking switches buttons, a new speak interrupts the old one, re-click stops", async () => {
+    // Same spent-handler restore as above — these turns need live streams.
+    fm.handle((url: string) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      return sseResponse(zoSseText({ text: "It is a test page." }));
+    });
+    // A recording tts fake that holds the end event so speaking states are
+    // deterministic (the shared mock fires `end` immediately).
+    const spoken: Array<{ text: string; lang?: string }> = [];
+    let stopCount = 0;
+    bus.tts.speak = (text: string, opts: any) => { spoken.push({ text, lang: opts?.lang }); };
+    bus.tts.stop = () => { stopCount++; };
+
+    // Two completed turns → two footer speaker buttons to click.
+    const before = panelWin.document.querySelectorAll("#messages .msg-assistant").length;
+    await typeAndSend("tts turn one");
+    await waitUntil(() => panelWin.document.querySelectorAll("#messages .msg-assistant").length === before + 1, 10000);
+    await typeAndSend("tts turn two");
+    await waitUntil(() => panelWin.document.querySelectorAll("#messages .msg-assistant").length === before + 2, 10000);
+
+    const btns = () => [...panelWin.document.querySelectorAll("#messages .msg-assistant .tts-btn")] as any[];
+    expect(btns().length).toBeGreaterThanOrEqual(2);
+    const btnA = btns().at(-2);
+    const btnB = btns().at(-1);
+
+    btnA.click();
+    expect(spoken).toHaveLength(1);
+    expect(btnA.textContent).toBe("⏹"); // speaking marker
+    expect(btnA.classList.contains("speaking")).toBe(true);
+
+    // Clicking a DIFFERENT speaker interrupts the first (auto-read style takeover).
+    btnB.click();
+    expect(spoken).toHaveLength(2);
+    expect(stopCount).toBe(1);
+    expect(btnA.textContent).toBe("🔊"); // old button restored
+    expect(btnA.classList.contains("speaking")).toBe(false);
+    expect(btnB.textContent).toBe("⏹");
+
+    // Same button while speaking → stop.
+    btnB.click();
+    expect(stopCount).toBe(2);
+    expect(btnB.textContent).toBe("🔊");
+    expect(btnB.classList.contains("speaking")).toBe(false);
+  });
+});
+
+describe("STT — mic button degrades without SpeechRecognition", () => {
+  it("posts an honest unsupported-browser error instead of throwing", async () => {
+    const before = panelWin.document.querySelectorAll("#messages .msg-error").length;
+    (panelWin.document.querySelector("#mic-btn") as any).click();
+    await waitUntil(() => panelWin.document.querySelectorAll("#messages .msg-error").length === before + 1, 5000);
+    const err = [...panelWin.document.querySelectorAll("#messages .msg-error .msg-body")].at(-1) as any;
+    expect(err.textContent).toContain("Speech recognition not supported");
+  });
+});

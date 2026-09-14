@@ -569,3 +569,18 @@ describe("content.js — injection idempotency (#109)", () => {
     expect(String(ctx2.url)).toContain("example.test");
   });
 });
+
+describe("content.js — dead-page guard", () => {
+  it("CAPTURE_CONTEXT on a chrome/about page degrades honestly instead of capturing", async () => {
+    // content.js refuses to run meaningfully on dead pages (about:, chrome-extension:,
+    // file:) — the same guard reinjection (#109) skips tabs for.
+    const deadWin: any = new Window({ url: "about:blank" });
+    deadWin.document.write("<!DOCTYPE html><html><head><title>Dead</title></head><body></body></html>");
+    const deadTarget = createTabTarget();
+    // Function-recipe (not a module import): a fresh script instance without
+    // adding another instrumented module to this process's coverage set.
+    loadContentScript(deadWin, deadTarget.chrome);
+    const resp = await deadTarget.dispatch({ type: "CAPTURE_CONTEXT", tier: 2 });
+    expect(resp).toEqual({ error: "Extension context unavailable" });
+  });
+});

@@ -653,3 +653,60 @@ describe("parseZoOutput — schema conformance (tests/schemas/parse-output.ts)",
     expect(plain.actions).toEqual([]);
   });
 });
+
+// ---- isRetriableStreamError — the retry-policy predicate, direct ----
+// Extracted from the real source like loadHelpers above (it depends on the
+// module-local safeText, so both are sliced together and evaluated in the
+// sandbox).
+
+/** Brace-match a full function body from its `function name(` header onward. */
+function sliceFn(source: string, header: string): string {
+  const start = source.indexOf(header);
+  if (start < 0) throw new Error(`${header} not found in background.js`);
+  let depth = 0;
+  for (let i = source.indexOf("{", start); i < source.length; i++) {
+    if (source[i] === "{") depth++;
+    else if (source[i] === "}") {
+      depth--;
+      if (depth === 0) return source.slice(start, i + 1);
+    }
+  }
+  throw new Error("unbalanced braces slicing background.js");
+}
+
+function loadRetryPredicate() {
+  const slice = sliceFn(bgSource, "function isRetriableStreamError(") + "\n" +
+    sliceFn(bgSource, "function safeText(");
+  const sandbox: any = {};
+  runInSandbox(slice, sandbox);
+  if (typeof sandbox.isRetriableStreamError !== "function") {
+    throw new Error("failed to load isRetriableStreamError from background.js");
+  }
+  return sandbox.isRetriableStreamError as (err: unknown) => boolean;
+}
+
+describe("isRetriableStreamError — retry policy", () => {
+  const retriable = loadRetryPredicate();
+
+  it("retries transient failures: network, 5xx, aborted, unknown", () => {
+    expect(retriable(new Error("fetch failed"))).toBe(true);
+    expect(retriable(new Error("Zo API error: 500 upstream exploded"))).toBe(true);
+    expect(retriable(new Error("Zo API error: 503 service unavailable"))).toBe(true);
+    expect(retriable(new Error("aborted"))).toBe(true);
+    expect(retriable(new Error(""))).toBe(true);          // unknown — one retry
+    expect(retriable(undefined)).toBe(true);
+  });
+
+  it("does not retry configuration, auth/4xx, or parse errors", () => {
+    expect(retriable(new Error("No token"))).toBe(false);
+    expect(retriable(new Error("Zo access token not configured. Open settings."))).toBe(false);
+    expect(retriable(new Error("Zo API error: 401 Unauthorized"))).toBe(false);
+    expect(retriable(new Error("Zo API error: 400 Bad Request"))).toBe(false);
+    expect(retriable(new Error("parse error: unexpected token"))).toBe(false);
+  });
+
+  it("matching is case-insensitive on the message", () => {
+    expect(retriable(new Error("ZO API ERROR: 500"))).toBe(true);
+    expect(retriable(new Error("TOKEN missing"))).toBe(false);
+  });
+});
