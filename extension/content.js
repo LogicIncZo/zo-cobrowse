@@ -507,6 +507,94 @@
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+  // ---- Recipe recorder (#220) ---------------------------------------------
+  // While a recording session is armed, capture-phase listeners observe the
+  // user's manual flow and stream observation records to the background,
+  // which assembles a draft recipe on stop. Armed state re-arms per
+  // navigation: each fresh content script asks the background on init.
+  // Sensitive fields NEVER emit values (the event is recorded so the page
+  // collapses into a human checkpoint; the value stays with the user).
+
+  const REC_SENSITIVE_FIELD_RE = /password|card|cc[-_.\s]?num|ccv|cvc|cvv|expir|ssn|social|pin\b|passport|otp|captcha/i;
+  const REC_SENSITIVE_URL_RE = /login|signin|sign-in|signup|sign-up|register|checkout|payment|billing|password|banking/i;
+  const REC_SUBMITISH_RE = /submit|pay\b|checkout|order|place|buy|sign in|sign up|register|confirm purchase/i;
+  let recArmed = false;
+
+  function recCueSnapshot(el) {
+    const cues = [{ strategy: 'selector', value: buildSelector(el) }];
+    const q = nearestQuestion(el);
+    if (q) cues.push({ strategy: 'question', value: q.slice(0, 80) });
+    const ph = (el.getAttribute('placeholder') || '').trim();
+    if (ph) cues.push({ strategy: 'placeholder', value: ph.slice(0, 80) });
+    const aria = (el.getAttribute('aria-label') || '').trim();
+    if (aria) cues.push({ strategy: 'aria', value: aria.slice(0, 80) });
+    return cues;
+  }
+
+  function recObserve(op, el, extra) {
+    if (!recArmed) return;
+    try {
+      chrome.runtime.sendMessage({
+        type: 'RECIPE_OBS',
+        obs: {
+          op,
+          url: location.href,
+          title: document.title || '',
+          pageSensitive: REC_SENSITIVE_URL_RE.test(location.href) || !!(extra && extra.fieldSensitive),
+          cues: recCueSnapshot(el),
+          ...extra,
+        },
+      }).catch(() => { /* context gone */ });
+    } catch { /* context gone */ }
+  }
+
+  function recArm() {
+    if (recArmed) return;
+    recArmed = true;
+    document.addEventListener('click', recOnClick, true);
+    document.addEventListener('change', recOnChange, true);
+  }
+
+  function recOnClick(e) {
+    const el = e.target && e.target.closest
+      ? e.target.closest('a, button, [role=button], [onclick], input[type=submit], input[type=button]')
+      : null;
+    if (!el) return;
+    const text = ((el.textContent || '') || (el.value || '')).trim();
+    recObserve('click', el, { submitish: REC_SUBMITISH_RE.test(text) });
+  }
+
+  function recOnChange(e) {
+    const el = e.target;
+    if (!el || !el.tagName) return;
+    if (el.tagName === 'INPUT' && el.type === 'file') {
+      const f = (el.files && el.files[0]) || null;
+      recObserve('attach', el, { fileName: f ? f.name : 'attachment' });
+      return;
+    }
+    if (el.type === 'checkbox' || el.type === 'radio') {
+      recObserve('check', el, {});
+      return;
+    }
+    const isTextField = el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' ||
+      (el.tagName === 'INPUT' && !['hidden', 'submit', 'button', 'file'].includes(el.type));
+    if (!isTextField) return;
+    const surface = `${el.name || ''} ${el.id || ''} ${el.placeholder || ''} ${el.getAttribute('aria-label') || ''}`;
+    const sensitive = el.type === 'password' || REC_SENSITIVE_FIELD_RE.test(surface);
+    recObserve('fill', el, sensitive ? { fieldSensitive: true } : { value: String(el.value == null ? '' : el.value) });
+  }
+
+  function recPeek() {
+    // Ask whether a recording is live — runs once per page load so the
+    // recorder re-arms after every navigation in the session.
+    try {
+      const p = chrome.runtime.sendMessage({ type: 'RECIPE_RECORD_PEEK' });
+      if (p && p.then) p.then((res) => { if (res && res.armed) recArm(); }).catch(() => {});
+    } catch { /* context gone */ }
+  }
+  recPeek();
+
+
   // ---- Write-assist widget (feature/textarea-fill) -------------------------
   // First page-injected UI in this extension: a floating Zo icon on a focused
   // <textarea> that asks the background to enhance the lead text (ENHANCE_TEXT)
@@ -1118,6 +1206,13 @@
   // Listen for messages from background/service worker
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     switch (request.type) {
+      case 'RECIPE_RECORD_STATE':
+        // #220 recorder: live tabs arm/disarm immediately on broadcast (new
+        // pages arm via the recPeek round-trip instead).
+        if (request.armed) recArm();
+        else recArmed = false;
+        sendResponse({ ok: true });
+        break;
       case 'CAPTURE_CONTEXT':
         sendResponse(isAlive() ? captureContext(request.tier, { pull: request.pull }) : { error: 'Extension context unavailable' });
         break;

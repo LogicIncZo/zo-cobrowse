@@ -7,6 +7,7 @@
 // never asked for actions — the whole point is determinism.
 
 import { test, expect } from "@playwright/test";
+import { E2E_BASE } from "./helpers/extension";
 import { openHarness, sendQuery, type ExtensionHarness } from "./helpers/extension";
 
 let h: ExtensionHarness;
@@ -57,5 +58,37 @@ test.describe("recipes player", () => {
     // The progress line and checkpoint cleared on the terminal push.
     await expect(h.panel.locator(".msg-recipe-line")).toHaveCount(0);
     await expect(h.panel.locator(".recipe-checkpoint-card")).toHaveCount(0);
+  });
+
+  test("recorder: a manual flow is learned, cleaned, and replayed parameterized", async () => {
+    // Test 1 left the run's tab on the gateway — go home to record.
+    await h.site.goto(`${E2E_BASE}/`);
+    // Arm the recorder.
+    await sendQuery(h.panel, "!recipe record e2e-learned");
+    await expect(h.panel.locator(".msg-recipe-record-line")).toContainText("Recording recipe", { timeout: 20_000 });
+
+    // THE MANUAL RUN: the user drives the site by hand — one page, one fill.
+    await h.site.locator("#nav-form").click();
+    await expect(h.site).toHaveURL(/form\.html/);
+    await h.site.locator("#name").fill("Recorded Value");
+
+    // Stop → the LLM cleanup (mocked on its marker) learns a cleaned recipe.
+    await h.panel.locator(".msg-recipe-record-line .handoff-stop").click();
+    const learned = h.panel.locator("#messages .msg-system", { hasText: "Learned recipe" });
+    await expect(learned).toContainText("e2e-learned", { timeout: 20_000 });
+    await expect(learned).toContainText("Cleaned by Zo");
+
+    // Replay — the recorded value must NOT be used: the cleaned recipe is
+    // parameterized, so the params card prompts for a fresh value.
+    await sendQuery(h.panel, "!recipe run e2e-learned");
+    const card = h.panel.locator(".recipe-params-card");
+    await expect(card).toBeVisible({ timeout: 20_000 });
+    await card.locator("input").fill("Fresh Param Value");
+    await card.locator(".form-review-confirm").click();
+
+    const doneLine = h.panel.locator("#messages .msg-system", { hasText: "Recipe done — e2e-learned" });
+    await expect(doneLine).toContainText("Fresh Param Value", { timeout: 30_000 });
+    // The fill landed through the cue ladder with the PARAM value.
+    await expect(h.site.locator("#name")).toHaveValue("Fresh Param Value");
   });
 });

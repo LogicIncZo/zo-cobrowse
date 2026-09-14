@@ -311,3 +311,204 @@ export function parseRecipeHealResponse(text) {
   if (cues.length < 2) return { ok: false, error: 'healer must answer with at least two cues (never a single selector)' };
   return { ok: true, cues, note: typeof parsed.note === 'string' ? parsed.note : undefined };
 }
+
+// ---- Recorder pure halves (#220) -------------------------------------------
+// A recording session buffers observation records ({op, url, title, cues,
+// value?, pageSensitive, submitish?, ts}) — the content recorder snapshots
+// cue metadata per event and NEVER emits sensitive field values. Assembly
+// turns the buffer into a draft Recipe deterministically; the LLM cleanup
+// pass only renames params / inserts checkpoints / tidies cues.
+
+const SENSITIVE_PAGE_URL_RE = /login|signin|sign-in|signup|sign-up|register|checkout|payment|billing|password|banking/i;
+
+// Background-side re-check: a page is sensitive if the recorder flagged it OR
+// the URL pattern matches — the collapse must not depend on one signal.
+export function isSensitivePageEvent(ev) {
+  if (!ev) return false;
+  if (ev.pageSensitive === true) return true;
+  return typeof ev.url === 'string' && SENSITIVE_PAGE_URL_RE.test(ev.url);
+}
+
+function slugParam(text) {
+  const slug = String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 32);
+  return slug || 'value';
+}
+
+function cueText(cues) {
+  const hit = (Array.isArray(cues) ? cues : []).find((c) => c && c.strategy !== 'selector' && typeof c.value === 'string' && c.value.trim());
+  return hit ? hit.value.trim() : '';
+}
+
+function cleanCues(cues) {
+  return (Array.isArray(cues) ? cues : []).filter((c) => c
+    && typeof c.value === 'string' && c.value.trim()
+    && CUE_STRATEGIES.includes(c.strategy));
+}
+
+function safeExpectUrl(url) {
+  try { return new URL(url).pathname + new URL(url).search; } catch { return url; }
+}
+
+function safeHost(url) {
+  try { return new URL(url).host || 'the page'; } catch { return 'the page'; }
+}
+
+// Ordered observation buffer → draft Recipe. Sensitive-page event runs
+// collapse into ONE human checkpoint (resumeOn = the first clean page after
+// them — or an unmatchable sentinel, forcing the "Skip check" fallback);
+// clean-page submitish clicks get a human step inserted before them so the
+// draft always passes validateRecipe's E-INVARIANT; fill values become param
+// defaults (kept locally); attach paths become required params.
+export function assembleDraftRecipe(obs, name, now = Date.now()) {
+  const events = Array.isArray(obs) ? obs.filter(Boolean) : [];
+  if (!events.length) return { ok: false, errors: ['no recorded events'], recipe: null };
+
+  const params = [];
+  const steps = [];
+  const usedNames = new Set();
+  const addParam = (question, defaultValue, nameBase) => {
+    const base = slugParam(nameBase || question);
+    let n = base;
+    let k = 2;
+    while (usedNames.has(n)) n = `${base}_${k++}`;
+    usedNames.add(n);
+    const param = { name: n, type: 'string', required: defaultValue === undefined || defaultValue === '', question: question || n };
+    if (defaultValue !== undefined && defaultValue !== '') param.default = defaultValue;
+    params.push(param);
+    return `{{${n}}}`;
+  };
+
+  let i = 0;
+  while (i < events.length) {
+    const ev = events[i];
+    if (ev.op === 'navigate') {
+      steps.push({ type: 'navigate', url: ev.url, expectUrl: safeExpectUrl(ev.url) });
+      i += 1;
+      continue;
+    }
+    if (isSensitivePageEvent(ev)) {
+      // Collapse the whole sensitive run — the user did it by hand once and
+      // will do it by hand on every replay.
+      let j = i;
+      while (j < events.length && isSensitivePageEvent(events[j])) j += 1;
+      const after = events[j];
+      const resumeUrl = after ? safeExpectUrl(after.url) : 'RECIPE-AWAITING-MANUAL-STEP';
+      steps.push({
+        type: 'human',
+        title: `Complete ${safeHost(ev.url)} by hand`,
+        instructions: after
+          ? 'This part of the flow touches sensitive pages the recipe must not automate — payment, OTP, credentials. You did it manually during recording; do it manually on replay, then continue.'
+          : 'This part of the flow touches sensitive pages the recipe must not automate. Finish it, then use "Skip check" to complete the recipe.',
+        resumeOn: { url: resumeUrl },
+      });
+      i = j;
+      continue;
+    }
+    const cues = cleanCues(ev.cues);
+    switch (ev.op) {
+      case 'fill': {
+        if (!cues.length) break; // unidentifiable field — drop rather than misfire
+        const question = cueText(cues) || 'Field';
+        const ref = addParam(question, typeof ev.value === 'string' ? ev.value : undefined);
+        steps.push({ type: 'fill', cues, value: ref });
+        break;
+      }
+      case 'check':
+        if (cues.length) steps.push({ type: 'check', cues });
+        break;
+      case 'click': {
+        if (!cues.length) break;
+        if (ev.submitish === true) {
+          // The invariant, authored: the draft cannot auto-click submit.
+          steps.push({
+            type: 'human',
+            title: 'Review, then submit',
+            instructions: 'The recipe never clicks a submit button for you — review the page, make the final click yourself, then continue.',
+            resumeOn: { url: safeExpectUrl(ev.url) },
+          });
+        }
+        steps.push({ type: 'click', cues, ...(ev.submitish === true ? { submitish: true } : {}) });
+        break;
+      }
+      case 'attach': {
+        if (!cues.length) break;
+        const ref = addParam(`Workspace path of ${ev.fileName || 'the attached file'}`, undefined, ev.fileName);
+        steps.push({ type: 'attach', cues, path: ref });
+        break;
+      }
+    }
+    i += 1;
+  }
+
+  if (!steps.length) return { ok: false, errors: ['no usable recorded events'], recipe: null };
+  steps.push({ type: 'done', message: 'Recorded recipe complete' });
+  return {
+    ok: true,
+    errors: [],
+    recipe: {
+      id: `rcp-${slugParam(name) || 'draft'}-${Math.random().toString(36).slice(2, 6)}`,
+      name: String(name || 'Recorded recipe'),
+      version: '1.0.0',
+      origin: 'recorded',
+      draft: true,
+      createdAt: now,
+      updatedAt: now,
+      params,
+      steps,
+    },
+  };
+}
+
+// The LLM cleanup prompt for a recorded draft: rename params, insert human
+// checkpoints, tidy cues. Param DEFAULTS are stripped — recorded values stay
+// local and never reach the model.
+export function generateRecipePrompt(draft) {
+  const slim = {
+    name: draft?.name || 'Recorded recipe',
+    params: (Array.isArray(draft?.params) ? draft.params : []).map((p) => {
+      const { default: _omit, ...rest } = p;
+      return rest;
+    }),
+    steps: draft?.steps || [],
+  };
+  return [
+    '## Recipe Draft',
+    '',
+    'The user recorded this multi-page flow manually. Clean it into a replayable recipe:',
+    '- Give each {{param}} a clear question for the run-start prompt; keep {{...}} references consistent.',
+    '- Insert human checkpoints before anything trust-critical (payment, OTP, captcha). A click step with "submitish": true is ONLY legal immediately after a human step — keep that true.',
+    '- Improve cues: label/question/aria strategies beat bare selectors; keep AT LEAST TWO cues per interactive step.',
+    '- Keep the flow linear (no branching or looping).',
+    '',
+    'Respond with ONLY a JSON object:',
+    '{"params": [{"name":"…","type":"string","required":true,"question":"…","default":"…"}], "steps": [ …same step shapes… ], "note": "one line"}',
+    '',
+    'Current draft (param defaults redacted):',
+    '```json',
+    JSON.stringify(slim, null, 2),
+    '```',
+  ].join('\n');
+}
+
+// Parse the cleanup reply. Shape-check only — the caller runs validateRecipe
+// (which enforces the invariant) before anything is saved.
+export function parseGeneratedRecipe(text) {
+  const raw = typeof text === 'string' ? text : '';
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (start === -1 || end <= start) return { ok: false, error: 'reply contained no JSON object' };
+  let parsed;
+  try {
+    parsed = JSON.parse(raw.slice(start, end + 1));
+  } catch (e) {
+    return { ok: false, error: `reply was not valid JSON: ${e.message}` };
+  }
+  if (!Array.isArray(parsed?.steps) || !parsed.steps.length) {
+    return { ok: false, error: 'reply had no steps' };
+  }
+  return {
+    ok: true,
+    recipe: { params: Array.isArray(parsed.params) ? parsed.params : [], steps: parsed.steps },
+    note: typeof parsed.note === 'string' ? parsed.note : undefined,
+  };
+}

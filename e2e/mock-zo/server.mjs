@@ -287,6 +287,23 @@ const server = http.createServer(async (req, res) => {
     requests.push({ ts: Date.now(), method: "POST", url: "/zo/ask", body });
 
     // Write-assist one-shot (feature/textarea-fill): the in-page widget's
+    // #220 recorder: the LLM cleanup pass for a recorded draft is a
+    // non-streaming one-shot (routes on its stable prompt marker). Returns a
+    // cleaned, parameterized recipe whose fill targets the fixture form.
+    if (String(body.input || "").includes("## Recipe Draft")) {
+      res.writeHead(200, { "content-type": "application/json", ...cors });
+      return res.end(JSON.stringify({
+        output: JSON.stringify({
+          params: [{ name: "applicant_name", type: "string", required: true, question: "Who is the applicant?" }],
+          steps: [
+            { type: "navigate", url: `http://127.0.0.1:${PORT}/form.html`, expectUrl: "form.html" },
+            { type: "fill", cues: [{ strategy: "label", value: "Name" }, { strategy: "selector", value: "#name" }], value: "{{applicant_name}}" },
+            { type: "done", message: "Learned flow complete for {{applicant_name}}" },
+          ],
+          note: "renamed the param, pinned the cues",
+        }),
+      }));
+    }
     // ENHANCE_TEXT handler calls /zo/ask NON-streaming and parses JSON
     // ({output}), so reply with a plain JSON body — not SSE. Routed on the
     // stable write-assist marker baked into the enhance prompt. The reply

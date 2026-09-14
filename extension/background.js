@@ -89,6 +89,9 @@ import {
   bumpVersion,
   healPrompt,
   parseRecipeHealResponse,
+  assembleDraftRecipe,
+  generateRecipePrompt,
+  parseGeneratedRecipe,
 } from './lib/recipes.js';
 import { createSessionCache } from './lib/sw-cache.js';
 import { createDebugLog } from './lib/debug-log.js';
@@ -541,6 +544,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'RECIPE_LIST': {
       // `!recipe list` — the local learned-recipes library + any live run.
       recipeList().then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
+      return true;
+    }
+    case 'RECIPE_RECORD_START': {
+      // #220 recorder: arm a session (content scripts arm per navigation).
+      recipeRecordStart(request).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
+      return true;
+    }
+    case 'RECIPE_RECORD_PEEK': {
+      // Content scripts ask on every page load so the recorder re-arms.
+      recipeRecordPeek().then(sendResponse).catch(() => sendResponse({ ok: false }));
+      return true;
+    }
+    case 'RECIPE_OBS': {
+      // One observation record from the content recorder.
+      recipeRecordObserve(request.obs).then(sendResponse).catch(() => sendResponse({ ok: false }));
+      return true;
+    }
+    case 'RECIPE_RECORD_STOP': {
+      // Assemble + clean + validate + save the learned recipe.
+      recipeRecordStop().then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
       return true;
     }
     case 'ENHANCE_TEXT': {
@@ -2858,6 +2881,145 @@ async function recipeHeal(runId, step, missResult) {
   } catch (e) {
     await recipeBlock(runId, `healer failed: ${e?.message || e}`);
   }
+}
+
+// ---- Recipe recorder (#220): learn a recipe from a manual run --------------
+// `!recipe record` arms a session; the content recorder (armed per navigation
+// via RECIPE_RECORD_PEEK) streams observation records (RECIPE_OBS — sensitive
+// field values never leave the page). Stop assembles the deterministic draft,
+// runs a best-effort LLM cleanup whose output must pass validateRecipe (the
+// E-INVARIANT machine-checks the learned artifact), and saves it to the local
+// library under the session name — `!recipe run <name>` replays it.
+
+const recipeRecStore = {
+  key: 'cobrowse_recipe_recording',
+  async load() {
+    const o = await chrome.storage.session.get(this.key);
+    return (o && o[this.key]) || null;
+  },
+  async save(s) {
+    await chrome.storage.session.set({ [this.key]: s });
+  },
+  async clear() {
+    await chrome.storage.session.remove(this.key);
+  },
+};
+
+async function recipeRecordStart({ chatId, name } = {}) {
+  const existing = await recipeRecStore.load();
+  if (existing && existing.armed) {
+    return { ok: false, error: `already recording "${existing.name}" — stop it first (✕ on the recording line)` };
+  }
+  const session = {
+    armed: true,
+    name: safeText(name) || `recorded-${new Date().toISOString().slice(0, 10)}`,
+    chatId: chatId || '',
+    obs: [],
+    startedAt: Date.now(),
+  };
+  await recipeRecStore.save(session);
+  // Live tabs arm NOW — a fresh page arms via RECIPE_RECORD_PEEK instead.
+  recipeBroadcastRecordState(true).catch(() => {});
+  return { ok: true, name: session.name };
+}
+
+// Tell every content script the armed state changed (best-effort per tab).
+async function recipeBroadcastRecordState(armed) {
+  let tabs = [];
+  try { tabs = await chrome.tabs.query({}); } catch { return; }
+  await Promise.all(tabs.filter((t) => t.id != null).map((t) =>
+    chrome.tabs.sendMessage(t.id, { type: 'RECIPE_RECORD_STATE', armed }).catch(() => {}),
+  ));
+}
+
+async function recipeRecordPeek() {
+  const s = await recipeRecStore.load();
+  return { ok: true, armed: !!(s && s.armed), name: s ? s.name : undefined };
+}
+
+async function recipeRecordObserve(obs) {
+  const s = await recipeRecStore.load();
+  if (!s || !s.armed) return { ok: false, error: 'no recording armed' };
+  if (obs && typeof obs === 'object' && obs.op) {
+    s.obs.push(obs);
+    await recipeRecStore.save(s);
+  }
+  return { ok: true };
+}
+
+async function recipeRecordStop() {
+  const s = await recipeRecStore.load();
+  if (!s || !s.armed) return { ok: false, error: 'no recording armed' };
+  await recipeRecStore.clear();
+  recipeBroadcastRecordState(false).catch(() => {});
+  if (!s.obs.length) return { ok: false, error: 'nothing was recorded — click through a flow first' };
+
+  // 1) Deterministic draft (sensitive-page collapse + invariant authoring).
+  const assembled = assembleDraftRecipe(s.obs, s.name);
+  if (!assembled.ok) return { ok: false, error: assembled.errors?.[0] || 'could not assemble a draft' };
+  let recipe = assembled.recipe;
+  let llmCleaned = false;
+  let note;
+
+  // 2) Best-effort LLM cleanup — param defaults stripped from the prompt
+  // (recorded values stay local). A cleaned draft that fails validateRecipe
+  // is discarded for the deterministic one, never tolerated.
+  if (config.zoAccessToken) {
+    try {
+      const resp = await fetch(config.zoApiUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${config.zoAccessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          input: generateRecipePrompt(recipe),
+          model_name: config.zoModel || undefined,
+        }),
+      });
+      if (resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        const parsed = parseGeneratedRecipe(String(data?.output ?? ''));
+        if (parsed.ok) {
+          const merged = { ...recipe, params: parsed.recipe.params, steps: parsed.recipe.steps, updatedAt: Date.now() };
+          const verdict = validateRecipe(merged);
+          if (verdict.ok) {
+            recipe = merged;
+            llmCleaned = true;
+            note = parsed.note;
+          } else {
+            note = `LLM draft rejected (${verdict.errors[0]}) — kept the deterministic draft`;
+          }
+        } else {
+          note = `LLM cleanup unusable (${parsed.error}) — kept the deterministic draft`;
+        }
+      } else {
+        note = `LLM cleanup HTTP ${resp.status} — kept the deterministic draft`;
+      }
+    } catch (e) {
+      note = `LLM cleanup failed (${e?.message || e}) — kept the deterministic draft`;
+    }
+  }
+
+  // The gate, whichever draft survived.
+  const finalVerdict = validateRecipe(recipe);
+  if (!finalVerdict.ok) {
+    return { ok: false, error: `learned recipe failed validation: ${finalVerdict.errors[0]}` };
+  }
+
+  const lib = await recipeLibrary.load();
+  lib[s.name] = recipe;
+  await recipeLibrary.save(lib);
+  return {
+    ok: true,
+    name: s.name,
+    steps: recipe.steps.length,
+    params: recipe.params.length,
+    llmCleaned,
+    note,
+    warnings: finalVerdict.warnings,
+    recipe,
+  };
 }
 
 async function runExecuteActions(domActions, target, { confirmed, boundaryMode } = {}) {

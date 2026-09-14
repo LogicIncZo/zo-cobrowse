@@ -4878,6 +4878,42 @@ function removeRecipeLine() {
   msgsEl?.querySelector('.msg-recipe-line')?.remove();
 }
 
+/** Stop an armed recording and render the learn summary. Shared by the ⏺
+ * line's ✕ and `!recipe stop`. */
+async function stopRecipeRecordingAndReport() {
+  const resp = await chrome.runtime.sendMessage({ type: 'RECIPE_RECORD_STOP' }).catch(() => null);
+  removeRecipeRecordLine();
+  if (!resp?.ok) {
+    addMessage('error', resp?.error || 'Could not learn the recipe.');
+    return;
+  }
+  const cleaned = resp.llmCleaned ? `Cleaned by Zo${resp.note ? `: ${safeText(resp.note)}` : ''}.` : 'Kept the deterministic draft (LLM cleanup unavailable).';
+  addMessage('system', `🧠 Learned recipe "**${safeText(resp.name)}**" — ${resp.steps} steps, ${resp.params} params. ${cleaned}\n\nReplay it with \`!recipe run ${safeText(resp.name)}\`${(resp.warnings || []).length ? `\n\nWarnings: ${resp.warnings.map((w) => `- ${safeText(w)}`).join(' ')}` : ''}`);
+}
+
+/** The ⏺ recording indicator — ✕ stops, assembles the draft, learns. */
+function renderRecipeRecordLine(name) {
+  if (!msgsEl) return;
+  removeRecipeRecordLine();
+  const line = document.createElement('div');
+  line.className = 'msg-system msg-recipe-line msg-recipe-record-line';
+  const stopBtn = document.createElement('button');
+  stopBtn.className = 'handoff-stop';
+  stopBtn.textContent = '✕ stop';
+  stopBtn.title = 'Stop recording and learn the recipe';
+  stopBtn.addEventListener('click', () => stopRecipeRecordingAndReport());
+  line.replaceChildren(
+    Object.assign(document.createElement('span'), { textContent: `⏺ Recording recipe — ${safeText(name)} · click through your flow, then stop` }),
+    stopBtn,
+  );
+  msgsEl.appendChild(line);
+  line.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function removeRecipeRecordLine() {
+  msgsEl?.querySelector('.msg-recipe-record-line')?.remove();
+}
+
 /** The human-checkpoint card: what the user must do by hand, plus the two
  * ways back in — verify the declared postcondition, or skip the check. */
 function renderRecipeCheckpoint(run) {
@@ -5230,8 +5266,20 @@ sendQuery = async function() {
       addMessage('user', query);
       const reenable = () => { input.disabled = false; sendBtn.disabled = false; input.focus(); };
       if (bang.sub === 'record') {
-        // Lands with the recipes recorder round; honest stub until then.
-        addMessage('system', '⏺ Recipe recording is landing in the next recipes update — `!recipe run <path|name>` replays saved recipes today.');
+        // #220 recorder: arm a session; the user clicks through the flow, the
+        // ✕ on the recording line assembles + learns the recipe.
+        const recName = bang.target || '';
+        const resp = await chrome.runtime.sendMessage({
+          type: 'RECIPE_RECORD_START',
+          chatId: activeId,
+          name: recName,
+        }).catch(() => null);
+        if (!resp?.ok) {
+          addMessage('error', resp?.error || 'Could not start the recording.');
+        } else {
+          renderRecipeRecordLine(resp.name);
+          addMessage('system', `⏺ Recording "**${safeText(resp.name)}**" — click through the flow now (multi-page works; sensitive pages become human checkpoints). Press ✕ when done to learn the recipe.`);
+        }
         reenable();
         return;
       }
@@ -5248,6 +5296,12 @@ sendQuery = async function() {
         return;
       }
       if (bang.sub === 'stop') {
+        const rec = await chrome.runtime.sendMessage({ type: 'RECIPE_RECORD_PEEK' }).catch(() => null);
+        if (rec?.armed) {
+          await stopRecipeRecordingAndReport();
+          reenable();
+          return;
+        }
         const st = await chrome.runtime.sendMessage({ type: 'RECIPE_STATUS', chatId: activeId }).catch(() => null);
         if (!st?.run) {
           addMessage('system', 'No live recipe run in this chat.');

@@ -441,3 +441,69 @@ describe("recipes player (#220)", () => {
     expect(res.error).toContain("invalid recipe");
   });
 });
+
+describe("recipe recorder — learn from a manual run (#220)", () => {
+  it("arm → observe → stop learns a validated recipe; replay completes", async () => {
+    // Arm.
+    const armed = await bus.runtime.sendMessage({ type: "RECIPE_RECORD_START", chatId: "chat-rec", name: "learned-flow" });
+    expect(armed.ok).toBe(true);
+    expect(armed.name).toBe("learned-flow");
+    // The content recorder's re-arm contract:
+    const peek = await bus.runtime.sendMessage({ type: "RECIPE_RECORD_PEEK" });
+    expect(peek.armed).toBe(true);
+
+    // A second arm while live is refused.
+    const again = await bus.runtime.sendMessage({ type: "RECIPE_RECORD_START", chatId: "chat-rec" });
+    expect(again.ok).toBe(false);
+
+    // Observations: a clean-page fill (value becomes a local param default)…
+    await bus.runtime.sendMessage({
+      type: "RECIPE_OBS",
+      obs: { op: "fill", url: "https://fixture.example/form", title: "F", pageSensitive: false, cues: [{ strategy: "question", value: "Applicant name" }, { strategy: "selector", value: "#fullname" }], value: "LOCAL-ONLY-VALUE" },
+    });
+    // …and a sensitive-page event — the VALUE STAYS ON THE PAGE.
+    await bus.runtime.sendMessage({
+      type: "RECIPE_OBS",
+      obs: { op: "fill", url: "https://fixture.example/checkout", title: "C", pageSensitive: true, cues: [{ strategy: "selector", value: "#cc" }], fieldSensitive: true },
+    });
+
+    // Stop: the LLM cleanup runs — its prompt must never carry values — and
+    // fails (default mock returns {}), so the deterministic draft is kept.
+    askResponder = null;
+    const stop = await bus.runtime.sendMessage({ type: "RECIPE_RECORD_STOP" });
+    expect(stop.ok).toBe(true);
+    expect(stop.llmCleaned).toBe(false);
+    expect(stop.steps).toBeGreaterThanOrEqual(3); // fill + human(checkpoint) + done
+    const healAsks = fm.to("/zo/ask").filter((a: any) => String(a.body?.input || "").includes("## Recipe Draft"));
+    expect(healAsks.length).toBe(1);
+    const draftPrompt = String(healAsks[0].body.input);
+    expect(draftPrompt).not.toContain("LOCAL-ONLY-VALUE");
+    expect(draftPrompt).not.toContain("fieldSensitive");
+
+    // Peek says disarmed.
+    const after = await bus.runtime.sendMessage({ type: "RECIPE_RECORD_PEEK" });
+    expect(after.armed).toBe(false);
+
+    // The learned draft passed validation and is in the library — with the
+    // sensitive page collapsed into exactly one human checkpoint.
+    const lib = bus.storage.local._store.cobrowse_recipes["learned-flow"];
+    expect(lib).toBeTruthy();
+    const humans = lib.steps.filter((s: any) => s.type === "human");
+    expect(humans).toHaveLength(1);
+    expect(humans[0].resumeOn.url).toBe("RECIPE-AWAITING-MANUAL-STEP");
+    expect(JSON.stringify(lib)).not.toContain("#cc"); // the sensitive field's own step was collapsed away
+
+    // Replay: `!recipe run learned-flow` plays it — the human checkpoint
+    // parks (its sentinel postcondition can never auto-verify), so force.
+    executeBehavior = (action) => ({ ok: true, type: action.step?.type ?? action.type });
+    captureBehavior = () => ({ url: "https://fixture.example/form", title: "F", formFields: [] });
+    const res = await start({ localName: "learned-flow" });
+    expect(res.ok).toBe(true);
+    const waiting = await settle(res.run.runId, ["waiting_human"]);
+    expect(waiting.status).toBe("waiting_human");
+    const ok = await bus.runtime.sendMessage({ type: "RECIPE_RESUME", runId: waiting.runId, force: true });
+    expect(ok.ok).toBe(true);
+    const done = await settle(waiting.runId, ["done"]);
+    expect(done.status).toBe("done");
+  });
+});

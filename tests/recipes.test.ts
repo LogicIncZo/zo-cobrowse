@@ -298,3 +298,98 @@ describe("healPrompt / parseRecipeHealResponse", () => {
     expect(parseRecipeHealResponse(JSON.stringify({ cues: [] })).ok).toBe(false);
   });
 });
+
+// ---- recorder pure halves (PR4) --------------------------------------------
+
+import { assembleDraftRecipe, generateRecipePrompt, parseGeneratedRecipe } from "../extension/lib/recipes.js";
+
+describe("assembleDraftRecipe", () => {
+  const T = 1757800000000;
+  const nav = (url, title, ts, pageSensitive = false) => ({ op: "navigate", url, title, ts, pageSensitive });
+  const fill = (url, cues, value, ts, pageSensitive = false) => ({ op: "fill", url, title: "T", cues, value, ts, pageSensitive });
+
+  it("assembles navigations + fills into a valid draft recipe; values become param defaults", () => {
+    const res = assembleDraftRecipe([
+      nav("https://x.test/form", "Form", T),
+      fill("https://x.test/form", [{ strategy: "question", value: "Applicant name" }], "Ada Lovelace", T + 1),
+    ], "my flow", T);
+    expect(res.ok).toBe(true);
+    const v = validateRecipe(res.recipe);
+    expect(v.errors).toEqual([]);
+    expect(res.recipe.draft).toBe(true);
+    expect(res.recipe.params).toHaveLength(1);
+    expect(res.recipe.params[0].default).toBe("Ada Lovelace");
+    const fillStep = res.recipe.steps.find((s) => s.type === "fill");
+    expect(fillStep.value).toBe("{{applicant_name}}");
+  });
+
+  it("collapses sensitive-page events into ONE human step whose resumeOn is the next clean page", () => {
+    const res = assembleDraftRecipe([
+      nav("https://x.test/form", "Form", T),
+      fill("https://x.test/checkout", [{ strategy: "selector", value: "#cc" }], "411111", T + 1, true),
+      nav("https://x.test/receipt", "Receipt", T + 2),
+    ], "pay flow", T);
+    expect(res.ok).toBe(true);
+    const humans = res.recipe.steps.filter((s) => s.type === "human");
+    expect(humans).toHaveLength(1);
+    expect(humans[0].resumeOn.url).toContain("receipt");
+    // The sensitive value must not survive anywhere in the draft.
+    expect(JSON.stringify(res.recipe)).not.toContain("411111");
+    const v = validateRecipe(res.recipe);
+    expect(v.ok).toBe(true);
+  });
+
+  it("a submitish click on a clean page gets a human step inserted before it", () => {
+    const res = assembleDraftRecipe([
+      nav("https://x.test/request", "Request", T),
+      { op: "click", url: "https://x.test/request", title: "T", cues: [{ strategy: "text", value: "Submit Request" }], submitish: true, pageSensitive: false, ts: T + 1 },
+      nav("https://x.test/done", "Done", T + 2),
+    ], "submit flow", T);
+    expect(res.ok).toBe(true);
+    const steps = res.recipe.steps;
+    const submitIdx = steps.findIndex((s) => s.type === "click" && s.submitish);
+    expect(steps[submitIdx - 1].type).toBe("human"); // the invariant, authored
+    expect(validateRecipe(res.recipe).ok).toBe(true);
+  });
+
+  it("an attach event parameterizes the file path", () => {
+    const res = assembleDraftRecipe([
+      nav("https://x.test/upload", "Upload", T),
+      { op: "attach", url: "https://x.test/upload", title: "T", cues: [{ strategy: "selector", value: "#file" }], fileName: "proof.pdf", pageSensitive: false, ts: T + 1 },
+      { type: "done" },
+    ], "up", T);
+    expect(res.ok).toBe(true);
+    const att = res.recipe.steps.find((s) => s.type === "attach");
+    expect(att.path).toBe("{{proof_pdf}}");
+    expect(res.recipe.params.some((p) => p.name === "proof_pdf")).toBe(true);
+  });
+
+  it("trailing done step is always present; empty events are an error", () => {
+    const res = assembleDraftRecipe([nav("https://x.test/", "Home", T)], "t", T);
+    expect(res.recipe.steps.at(-1).type).toBe("done");
+    expect(assembleDraftRecipe([], "x", T).ok).toBe(false);
+  });
+});
+
+describe("generateRecipePrompt / parseGeneratedRecipe", () => {
+  it("the prompt omits param defaults (values stay local) and demands full recipe JSON", () => {
+    const draft = assembleDraftRecipe([
+      { op: "navigate", url: "https://x.test/form", title: "F", ts: 1, pageSensitive: false },
+      { op: "fill", url: "https://x.test/form", title: "F", cues: [{ strategy: "question", value: "Applicant name" }], value: "Ada Lovelace", pageSensitive: false, ts: 2 },
+    ], "my flow", 0).recipe;
+    const p = generateRecipePrompt(draft);
+    expect(p).toContain("## Recipe Draft");
+    expect(p).not.toContain("Ada Lovelace");
+    expect(p).toContain('"params"');
+    expect(p).toContain('"steps"');
+    expect(p).toContain("human");
+  });
+
+  it("parseGeneratedRecipe extracts a fenced recipe JSON", () => {
+    const raw = '```json\n{"params":[],"steps":[{"type":"done"}],"note":"ok"}\n```';
+    const res = parseGeneratedRecipe(raw);
+    expect(res.ok).toBe(true);
+    expect(res.recipe.steps).toHaveLength(1);
+    expect(parseGeneratedRecipe("nothing here").ok).toBe(false);
+  });
+});

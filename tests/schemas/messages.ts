@@ -39,6 +39,10 @@ export const MESSAGE_TYPES = [
   "RECIPE_STOP",
   "RECIPE_STATUS",
   "RECIPE_LIST",
+  "RECIPE_RECORD_START",
+  "RECIPE_RECORD_PEEK",
+  "RECIPE_RECORD_STOP",
+  "RECIPE_OBS",
 ] as const;
 
 export const MessageType = z.enum(MESSAGE_TYPES);
