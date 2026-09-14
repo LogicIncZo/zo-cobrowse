@@ -187,7 +187,8 @@ describe("sidepanel chat tabs", () => {
   });
 
   it("opens a tab for every new/migrated conversation", () => {
-    expect(code).toMatch(/tabsState = openChatTab\(tabsState, id\)/);
+    // #54: opens route through the pinned-aware openTab() wrapper.
+    expect(code).toMatch(/tabsState = openTab\(id\)/);
   });
 
   it("keeps context-policy state per chat (load + save keyed by activeId)", () => {

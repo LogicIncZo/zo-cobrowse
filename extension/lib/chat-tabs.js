@@ -32,21 +32,53 @@ export function createTabsState() {
 /**
  * Open (or focus) a chat tab and activate it. Idempotent. When the result
  * would exceed maxOpen, the oldest-position non-active tab is evicted — the
- * chat stays in history, just not open.
+ * chat stays in history, just not open. `opts.pinnedIds` (#54) are exempt:
+ * eviction skips them, and if ONLY pinned tabs + the active one remain the
+ * set may grow past maxOpen rather than close a protected chat.
  */
-export function openChatTab(state, chatId, { maxOpen = MAX_OPEN_TABS } = {}) {
+export function openChatTab(state, chatId, { maxOpen = MAX_OPEN_TABS, pinnedIds = [] } = {}) {
   const st = state || createTabsState();
   const id = txt(chatId).trim();
   if (!id) return { ...st };
 
+  const pinned = new Set((Array.isArray(pinnedIds) ? pinnedIds : []).map((x) => txt(x)));
   let openIds = st.openIds.includes(id) ? [...st.openIds] : [...st.openIds, id];
   const activeId = id;
   while (openIds.length > maxOpen) {
-    const idx = openIds.findIndex((x) => x !== activeId);
+    const idx = openIds.findIndex((x) => x !== activeId && !pinned.has(x));
     if (idx === -1) break;
     openIds.splice(idx, 1);
   }
   return { openIds, activeId };
+}
+
+/**
+ * Toggle a conversation's pin (#54). Pinned chats are exempt from the LRU
+ * eviction and sort first in the tab bar; the flag lives ON the conversation
+ * record so it persists in `cobrowse_convos` across tab close/reopen and
+ * browser restarts. Unknown ids are a no-op.
+ *
+ * @returns {{ convos: object, pinned: boolean }} new map (spread-copied) + the NEW pin state
+ */
+export function togglePinConversation(convos, chatId) {
+  const map = convos || {};
+  const id = txt(chatId);
+  const convo = map[id];
+  if (!convo) return { convos: map, pinned: false };
+  const pinned = !convo.pinned;
+  return { convos: { ...map, [id]: { ...convo, pinned } }, pinned };
+}
+
+/**
+ * Pinned-first display order (#54): stable partition of openIds — pinned
+ * chats (in their existing order) first, then the rest. Pure display
+ * concern: openIds itself keeps insertion order, so eviction semantics stay
+ * oldest-position and the ordering never leaks into persisted state.
+ */
+export function orderTabsPinnedFirst(openIds, pinnedIds = []) {
+  const ids = Array.isArray(openIds) ? openIds : [];
+  const pinned = new Set((Array.isArray(pinnedIds) ? pinnedIds : []).map((x) => txt(x)));
+  return [...ids.filter((x) => pinned.has(x)), ...ids.filter((x) => !pinned.has(x))];
 }
 
 /**
