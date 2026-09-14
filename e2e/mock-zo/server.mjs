@@ -264,6 +264,8 @@ const server = http.createServer(async (req, res) => {
     // stable write-assist marker baked into the enhance prompt. The reply
     // follows the prompt's tag protocol with narration outside the tags —
     // the widget must preview ONLY the tag content.
+    // Write-assist one-shot routes FIRST (it is also non-streaming): its
+    // reply follows the <write-assist> tag protocol the widget parses.
     if (String(body.input || "").includes("write-assist")) {
       res.writeHead(200, { "content-type": "application/json", ...cors });
       return res.end(JSON.stringify({
@@ -273,6 +275,12 @@ const server = http.createServer(async (req, res) => {
           "</write-assist>",
         conversation_id: "e2e-enhance-conv",
       }));
+    }
+    // Other non-streaming asks (!save / SAVE_CONVERSATION) are plain JSON on
+    // the live server — SSE is opt-in via stream:true.
+    if (!body.stream) {
+      res.writeHead(200, { "content-type": "application/json", ...cors });
+      return res.end(JSON.stringify({ output: "mock answer", conversation_id: "e2e-nostream-conv" }));
     }
 
     const scenario = pickScenario(body.input);

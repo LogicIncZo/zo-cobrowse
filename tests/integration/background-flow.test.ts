@@ -708,3 +708,51 @@ describe("pull loop — read_file (#52)", () => {
     expect(asks[2].body.input).toContain("could not be read");
   });
 });
+
+describe("SAVE_CONVERSATION — #51 workspace export", () => {
+  it("issues the one-shot agent-write prompt with the transcript and echoes {ok, path}", async () => {
+    const conv = {
+      title: "RTI research",
+      messages: [
+        { role: "user", text: "Find the RTI fee", timestamp: 1757800000000 },
+        { role: "assistant", text: "The RTI fee is Rs.10.", timestamp: 1757800001000 },
+      ],
+    };
+    let writePrompt = "";
+    fm.handle((url) => {
+      if (url.includes("/zo/ask")) {
+        return jsonResponse({ output: "Confirmed write." });
+      }
+      return jsonResponse({});
+    });
+    fm.to("/zo/ask").length; // noop read keeps types happy
+    const asksBefore = fm.requests.filter((r) => r.url.includes("/zo/ask")).length;
+    const resp = await bus.runtime.sendMessage({ type: "SAVE_CONVERSATION", conversation: conv, savePath: "" });
+    await waitUntil(() => fm.requests.filter((r) => r.url.includes("/zo/ask")).length === asksBefore + 1, 5000);
+    const asks = fm.requests.filter((r) => r.url.includes("/zo/ask"));
+    writePrompt = asks[asks.length - 1].body.input;
+    expect(resp.ok).toBe(true);
+    expect(resp.path).toBe("Documents/research/rti-research.md");
+    expect(resp.response).toBe("Confirmed write.");
+    // The prompt asks for a file write and carries the serialized transcript.
+    expect(writePrompt).toContain("Write the following content to the file at path");
+    expect(writePrompt).toContain("Documents/research/rti-research.md");
+    expect(writePrompt).toContain("# RTI research");
+    expect(writePrompt).toContain("The RTI fee is Rs.10.");
+  });
+
+  it("an explicit path wins over the derived default", async () => {
+    fm.handle((url) => (url.includes("/zo/ask") ? jsonResponse({ output: "ok" }) : jsonResponse({})));
+    const before = fm.requests.filter((r) => r.url.includes("/zo/ask")).length;
+    const resp = await bus.runtime.sendMessage({
+      type: "SAVE_CONVERSATION",
+      conversation: { title: "Any", messages: [] },
+      savePath: "Notes/chats/any.md",
+    });
+    await waitUntil(() => fm.requests.filter((r) => r.url.includes("/zo/ask")).length === before + 1, 5000);
+    const asks = fm.requests.filter((r) => r.url.includes("/zo/ask"));
+    expect(resp.ok).toBe(true);
+    expect(resp.path).toBe("Notes/chats/any.md");
+    expect(asks[asks.length - 1].body.input).toContain("Notes/chats/any.md");
+  });
+});
