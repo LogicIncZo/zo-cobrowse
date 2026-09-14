@@ -2924,6 +2924,24 @@ body.options-page {
   color: var(--text);
   white-space: pre-wrap;
 }
+.recipe-review-text {
+  width: 100%;
+  min-width: 0;
+  resize: vertical;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text);
+  font-family: inherit;
+}
+.recipe-review-text:focus {
+  outline: none;
+  border-color: var(--accent, #5b8def);
+  box-shadow: 0 0 0 2px var(--amber-glow);
+}
 .form-review-actions {
   display: flex;
   gap: 8px;

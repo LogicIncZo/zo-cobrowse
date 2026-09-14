@@ -24,7 +24,7 @@ import {
   buildTestConnectionPrompt,
 } from "../../extension/lib/zo-prompts.js";
 import { parseZoOutput } from "../../extension/lib/parse-output.js";
-import { healPrompt } from "../../extension/lib/recipes.js";
+import { generateValuePrompt, healPrompt } from "../../extension/lib/recipes.js";
 import {
   nonEmpty,
   noActionEnvelope,
@@ -280,6 +280,25 @@ export const CASES: EvalCase[] = [
     build: () => buildGenerateModePrompt("a mode that finds recipes on the current page and lists ingredients"),
     live: true,
     checks: [generateModeJson()],
+  },
+  {
+    id: "recipe-generate",
+    kind: "utility",
+    what: "Recipe generate-fill drafts an under-cap RTI application as plain field text",
+    build: () => generateValuePrompt({
+      type: "fill",
+      cues: [],
+      generate: {
+        prompt: "Draft an RTI application to the Public Information Officer of the Ministry of Urban Development requesting the FY 2025-26 annual report. Formal, first person, applicant: Ada Lovelace, address: 12 Civil Lines.",
+        maxChars: 2900,
+      },
+    }),
+    live: true,
+    checks: [
+      (out) => ({ name: "non-empty field text", pass: (out.text || "").trim().length > 0 }),
+      (out) => ({ name: "under the 2900-char field cap", pass: (out.text || "").length <= 2900 }),
+      (out) => ({ name: "no markdown fences in the value", pass: !out.text.includes("```") }),
+    ],
   },
   {
     id: "recipe-heal",

@@ -33,6 +33,11 @@ Highlights:
   steps.
 - **Attach files.** Steps can attach a workspace file (PDF, image, up to ~1 MB)
   to a form's file input.
+- **Zo drafts field values at run time.** A fill step can be marked
+  *generated*: when the run reaches it, Zo writes the field's content fresh —
+  from a prompt in the recipe and optionally a workspace document — while your
+  contact details stay static. Generated values can require your review before
+  they're filled.
 
 <details>
 <summary><b>How to use it</b></summary>
@@ -73,6 +78,26 @@ recording become human checkpoints automatically.
 A recipe is plain JSON — steps, cue arrays (label/question/aria/selector —
 never a single brittle selector), and `{{parameters}}`. Author one in
 `/home/workspace/recipes/` and run it by path.
+
+**Have Zo draft a field at run time** (#228) — static where you want it,
+generated where you don't:
+
+```json
+{
+  "type": "fill",
+  "cues": [{ "strategy": "question", "value": "RTI Application text" }],
+  "evidenceKey": "application_text",
+  "generate": {
+    "prompt": "Draft an RTI application to the PIO of {{department}} requesting the FY {{fy}} annual report. Formal, first person. Applicant: {{applicant}}.",
+    "maxChars": 3000,
+    "contextFile": "/home/workspace/notes/draft-points.md",
+    "review": true
+  }
+}
+```
+
+`review: true` shows you the draft (editable) before it fills; generated text
+lands in the run's evidence either way.
 
 </details>
 

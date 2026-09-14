@@ -18,14 +18,26 @@ export const MAX_WAIT_MS = 15000;
 const VERSION_RE = /^\d+\.\d+\.\d+$/;
 const PARAM_REF_RE = /\{\{\s*([A-Za-z0-9_-]+)\s*\}\}/g;
 
-// String fields per step type that may carry {{param}} references.
+// String fields per step type that may carry {{param}} references. Dotted
+// paths reach into sub-objects (generate.prompt).
 const PARAM_FIELDS = {
   navigate: ['url'],
-  fill: ['value'],
+  fill: ['value', 'generate.prompt', 'generate.contextFile'],
   attach: ['path'],
   human: ['instructions'],
   done: ['message'],
 };
+
+function fieldAt(step, dotted) {
+  return dotted.split('.').reduce((o, k) => (o == null ? o : o[k]), step);
+}
+
+function setFieldAt(step, dotted, val) {
+  const parts = dotted.split('.');
+  const last = parts.pop();
+  const host = parts.reduce((o, k) => o[k], step);
+  host[last] = val;
+}
 
 function isHttpUrl(url) {
   return typeof url === 'string' && /^https?:\/\//.test(url);
@@ -102,10 +114,15 @@ export function validateRecipe(recipe) {
 
   // Steps
   const steps = Array.isArray(recipe.steps) ? recipe.steps : null;
-  // Evidence keys declared by extract steps — valid substitution refs alongside
-  // params ({{registration}} in a done message, per the #220 worked example).
+  // Evidence keys declared by extract steps AND generate fills — valid
+  // substitution refs alongside params ({{registration}} per the #220 worked
+  // example; {{application_text}} per #228).
   const evidenceKeys = new Set(
-    steps ? steps.filter((s) => s?.type === 'extract').map((s) => s.evidenceKey).filter(Boolean) : [],
+    steps
+      ? steps
+          .filter((s) => (s?.type === 'extract' || s?.type === 'fill') && s.evidenceKey)
+          .map((s) => s.evidenceKey)
+      : [],
   );
   if (!steps || steps.length === 0) {
     errors.push('steps must be a non-empty array');
@@ -127,8 +144,33 @@ export function validateRecipe(recipe) {
           break;
         }
         case 'fill':
-          if (validateCues(step, i, errors) && typeof step.value !== 'string') {
-            errors.push(`Step ${n} (fill): value must be a string`);
+          if (validateCues(step, i, errors)) {
+            const hasValue = typeof step.value === 'string';
+            const hasGenerate = step.generate != null;
+            if (hasGenerate) {
+              const g = step.generate;
+              if (typeof g !== 'object' || typeof g.prompt !== 'string' || !g.prompt.trim()) {
+                errors.push(`Step ${n} (fill): generate needs a prompt`);
+              }
+              if (g.maxChars !== undefined && (typeof g.maxChars !== 'number' || g.maxChars <= 0)) {
+                errors.push(`Step ${n} (fill): generate maxChars must be a positive number`);
+              }
+              if (g.contextFile !== undefined && (typeof g.contextFile !== 'string' || !g.contextFile.trim())) {
+                errors.push(`Step ${n} (fill): generate contextFile must be a non-empty string`);
+              }
+              if (g.review !== undefined && typeof g.review !== 'boolean') {
+                errors.push(`Step ${n} (fill): generate review must be a boolean`);
+              }
+              if (hasValue) errors.push(`Step ${n} (fill): use either value or generate, not both`);
+              if (step.evidenceKey !== undefined && typeof step.evidenceKey !== 'string') {
+                errors.push(`Step ${n} (fill): evidenceKey must be a string`);
+              }
+              if (step.label !== undefined && typeof step.label !== 'string') {
+                errors.push(`Step ${n} (fill): label must be a string`);
+              }
+            } else if (!hasValue) {
+              errors.push(`Step ${n} (fill): either value or generate is required`);
+            }
           }
           break;
         case 'click':
@@ -183,7 +225,7 @@ export function validateRecipe(recipe) {
       }
       // Unknown {{param}} references ({{evidenceKey}} refs are also legal)
       for (const field of PARAM_FIELDS[step.type] || []) {
-        const text = step[field];
+        const text = fieldAt(step, field);
         if (typeof text === 'string') {
           for (const m of text.matchAll(PARAM_REF_RE)) {
             if (!paramNames.has(m[1]) && !evidenceKeys.has(m[1])) {
@@ -221,10 +263,11 @@ export function substituteParams(recipe, values) {
   const out = JSON.parse(JSON.stringify(recipe));
   for (const step of out.steps) {
     for (const field of PARAM_FIELDS[step.type] || []) {
-      if (typeof step[field] === 'string') {
+      const text = fieldAt(step, field);
+      if (typeof text === 'string') {
         // Only rewrite DECLARED params — {{evidenceKey}} refs (validateRecipe
-        // accepts them) must survive for the player's done-time interpolation.
-        step[field] = step[field].replace(PARAM_REF_RE, (m, name) => (name in effective ? effective[name] : m));
+        // accepts them) must survive for the player's interpolation.
+        setFieldAt(step, field, text.replace(PARAM_REF_RE, (m, name) => (name in effective ? effective[name] : m)));
       }
     }
   }
@@ -492,8 +535,7 @@ export function generateRecipePrompt(draft) {
 
 // Parse the cleanup reply. Shape-check only — the caller runs validateRecipe
 // (which enforces the invariant) before anything is saved.
-export function parseGeneratedRecipe(text) {
-  const raw = typeof text === 'string' ? text : '';
+export function parseGeneratedRecipe(text) {  const raw = typeof text === 'string' ? text : '';
   const start = raw.indexOf('{');
   const end = raw.lastIndexOf('}');
   if (start === -1 || end <= start) return { ok: false, error: 'reply contained no JSON object' };
@@ -511,4 +553,29 @@ export function parseGeneratedRecipe(text) {
     recipe: { params: Array.isArray(parsed.params) ? parsed.params : [], steps: parsed.steps },
     note: typeof parsed.note === 'string' ? parsed.note : undefined,
   };
+}
+
+// ---- Generate-at-runtime fill values (#228) --------------------------------
+
+// The one-shot field-drafting prompt for a fill step with a `generate` block.
+// `step.generate.prompt` (and contextFile content, fetched by the caller) is
+// already param-substituted at run start. Plain-text reply protocol — no JSON,
+// no quotes, no commentary: the reply IS the field value.
+export function generateValuePrompt(step) {
+  const g = step.generate || {};
+  const lines = [
+    '## Recipe Field Draft',
+    '',
+    'You are drafting the value for ONE form field while a saved recipe replays.',
+    '',
+    g.prompt || '',
+    '',
+  ];
+  if (g.maxChars) {
+    lines.push(`Hard limit: at most ${g.maxChars} characters — the form field will reject more. Stay under it.`);
+  }
+  lines.push(
+    'Respond with only the field text itself — no quotes, no explanation, no markdown fences.',
+  );
+  return lines.join('\n');
 }

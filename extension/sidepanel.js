@@ -355,7 +355,8 @@ async function finishInit() {
         } else if (run.status === 'waiting_human') {
           activeRecipeRun = run;
           renderRecipeLine(run);
-          renderRecipeCheckpoint(run);
+          if (run.pendingReview) renderRecipeReviewCard(run);
+          else renderRecipeCheckpoint(run);
         } else {
           // Terminal — render exactly once per run+status (mirrors #160).
           const key = `${run.runId}:${run.status}`;
@@ -4953,6 +4954,39 @@ function removeRecipeCheckpoint() {
   recipeCheckpointEl = null;
 }
 
+/** #228: preview card for a generated fill — edit the draft, Fill it, or
+ * Discard (the run parks blocked and a later resume regenerates). */
+function renderRecipeReviewCard(run) {
+  removeRecipeCheckpoint();
+  const host = document.createElement('div');
+  host.className = 'msg form-review-card recipe-checkpoint-card';
+  const title = document.createElement('div');
+  title.className = 'form-review-title';
+  title.textContent = 'Zo drafted this value — review before it fills';
+  host.appendChild(title);
+  const area = document.createElement('textarea');
+  area.className = 'recipe-review-text';
+  area.value = run.pendingReview?.text || '';
+  area.rows = Math.min(12, Math.max(3, Math.ceil(area.value.length / 80)));
+  host.appendChild(area);
+  const fill = document.createElement('button');
+  fill.className = 'btn btn-primary form-review-confirm';
+  fill.textContent = 'Fill with this';
+  fill.addEventListener('click', () => resumeRecipeRun(run.runId, false, { reviewText: area.value }));
+  const discard = document.createElement('button');
+  discard.className = 'btn btn-ghost form-review-cancel';
+  discard.textContent = 'Discard';
+  discard.title = 'Discard the draft — resume later to generate a fresh one';
+  discard.addEventListener('click', () => resumeRecipeRun(run.runId, false, { discard: true }));
+  const bar = document.createElement('div');
+  bar.className = 'form-review-actions';
+  bar.append(fill, discard);
+  host.appendChild(bar);
+  msgsEl?.appendChild(host);
+  recipeCheckpointEl = host;
+  host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
 /** The params card: one input per required recipe param; resolves with a
  * {name: value} map, or null on cancel. Form-review-card styling. */
 function renderRecipeParamsCard(params) {
@@ -5005,9 +5039,10 @@ function renderRecipeParamsCard(params) {
 }
 
 /** Resume a waiting_human / paused / blocked run. A refused verify (e.g. the
- * postcondition isn't met yet) surfaces as a system note — the card stays. */
-async function resumeRecipeRun(runId, force = false) {
-  const res = await chrome.runtime.sendMessage({ type: 'RECIPE_RESUME', runId, force }).catch(() => null);
+ * postcondition isn't met yet) surfaces as a system note — the card stays.
+ * opts.reviewText / opts.discard resolve a pending generated-text review. */
+async function resumeRecipeRun(runId, force = false, opts = {}) {
+  const res = await chrome.runtime.sendMessage({ type: 'RECIPE_RESUME', runId, force, ...opts }).catch(() => null);
   if (!res?.ok) {
     addMessage('system', `⚠️ ${safeText(res?.error || 'Could not resume the recipe run.')}`);
     return;
