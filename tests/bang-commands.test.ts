@@ -225,3 +225,46 @@ describe("BANG_COMMANDS — registry integrity", () => {
     }
   });
 });
+
+describe("!recipe — subcommands (#220)", () => {
+  it("!recipe run carries the workspace path or local name", () => {
+    expect(parse("!recipe run recipes/rti-filing.json")).toEqual({
+      handled: true, kind: "recipe", isRecipe: true, sub: "run", target: "recipes/rti-filing.json",
+    });
+    expect(parse("!recipe run rti")).toEqual({
+      handled: true, kind: "recipe", isRecipe: true, sub: "run", target: "rti",
+    });
+  });
+
+  it("!recipe record carries the optional draft name", () => {
+    expect(parse("!recipe record rti-flow")).toEqual({
+      handled: true, kind: "recipe", isRecipe: true, sub: "record", target: "rti-flow",
+    });
+    expect(parse("!recipe record")).toEqual({
+      handled: true, kind: "recipe", isRecipe: true, sub: "record", target: "",
+    });
+  });
+
+  it("!recipe stop / list parse with empty targets", () => {
+    expect(parse("!recipe stop")).toEqual({
+      handled: true, kind: "recipe", isRecipe: true, sub: "stop", target: "",
+    });
+    expect(parse("!recipe list")).toEqual({
+      handled: true, kind: "recipe", isRecipe: true, sub: "list", target: "",
+    });
+  });
+
+  it("bare !recipe, unknown subs, and run-without-target → inline usage", () => {
+    for (const raw of ["!recipe", "!recipe bogus", "!recipe run"]) {
+      const r = parse(raw);
+      expect(r.handled).toBe(true);
+      expect(r.kind).toBe("inline");
+      if ("inlineReply" in r) expect(r.inlineReply).toContain("Usage:");
+    }
+  });
+
+  it("!help mentions the recipe line", () => {
+    const r = parse("!help");
+    if ("inlineReply" in r) expect(r.inlineReply).toContain("!recipe");
+  });
+});

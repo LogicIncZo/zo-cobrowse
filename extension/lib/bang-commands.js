@@ -75,6 +75,7 @@ export function parseBangCommand(rawQuery) {
     }
     lines.push('• `!context <question>` — Attach this page (text + elements) for one turn, then answer');
     lines.push('• `!handoff <goal>` — Delegate a goal to Zo as an unattended read-only run');
+    lines.push('• `!recipe run <path|name>` — Replay a saved multi-page recipe · `!recipe record [name]` — learn one from a manual run · `!recipe list`');
     lines.push('• `!save [path]` — Save this page to your Zo workspace as markdown');
     lines.push('• `!export [page|pdf|path]` — Export this chat as Markdown, the page as a note, a reader-view PDF, or save the chat to your workspace');
     lines.push('• `!auto <instruction>` — Create a scheduled Zo automation');
@@ -158,6 +159,22 @@ export function parseBangCommand(rawQuery) {
       };
     }
     return { handled: true, kind: 'handoff', isHandoff: true, query: args };
+  }
+
+  // !recipe — repeatable multi-page workflows (#220): `run <path|name>` plays
+  // a saved recipe deterministically (human checkpoints pause for you),
+  // `record [name]` learns a draft from a manual run, `stop`/`list` manage
+  // runs. The panel/background own everything after this parse.
+  if (name === 'recipe') {
+    const RECIPE_SUBS = ['run', 'record', 'stop', 'list'];
+    const usage = 'Usage: `!recipe run <path|name>` — e.g. `!recipe run recipes/rti-filing.json` replays a saved multi-page flow (pauses at human checkpoints: captcha/OTP/payment). `!recipe record [name]` learns a draft recipe from a manual run. `!recipe list` shows saved recipes.';
+    const subEnd = args.indexOf(' ');
+    const sub = (subEnd === -1 ? args : args.slice(0, subEnd)).toLowerCase();
+    const target = subEnd === -1 ? '' : args.slice(subEnd + 1).trim();
+    if (!RECIPE_SUBS.includes(sub) || (sub === 'run' && !target)) {
+      return { handled: true, kind: 'inline', inlineReply: usage };
+    }
+    return { handled: true, kind: 'recipe', isRecipe: true, sub, target };
   }
 
   // Look up the command
