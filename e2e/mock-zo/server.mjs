@@ -206,6 +206,10 @@ const server = http.createServer(async (req, res) => {
       // #220: the recipes player loads its artifact from the workspace. Route
       // by path; every other path keeps the #52 notes fixture.
       const targetFile = String(body.params.arguments?.target_file || "");
+      if (targetFile.includes("notes/source.md")) {
+        const wrappedNotes = JSON.stringify(["E2E-SOURCE-CONTENT: the draft notes behind the application.", "kind='file_ref' path='" + targetFile + "' media_type=None label=None"]);
+        return json({ jsonrpc: "2.0", id: body.id, result: { isError: false, content: [{ type: "text", text: wrappedNotes }] } });
+      }
       if (targetFile.includes("recipes/e2e-filing.json")) {
         const recipe = {
           id: "rcp-e2e",
