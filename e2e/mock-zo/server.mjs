@@ -203,9 +203,13 @@ const server = http.createServer(async (req, res) => {
       return res.end();
     }
     if (body.method === "tools/call" && body.params?.name === "read_file") {
-      // #52 pull loop: file text arrives as plain content-block text (the
-      // Python-repr CmdResult wrapper is a `bash`-tool artifact only).
-      return json({ jsonrpc: "2.0", id: body.id, result: { isError: false, content: [{ type: "text", text: "e2e-file-content-52: the fixture workspace notes." }] } });
+      // #52 pull loop: mirrors the LIVE read_file shape (probe-read-file.ts) —
+      // a JSON array of [fileText, fileRefDescriptor]; the background unwraps it.
+      const wrapped = JSON.stringify([
+        "e2e-file-content-52: the fixture workspace notes.",
+        "kind='file_ref' path='/home/workspace/notes/e2e-summary.md' media_type=None label=None",
+      ]);
+      return json({ jsonrpc: "2.0", id: body.id, result: { isError: false, content: [{ type: "text", text: wrapped }] } });
     }
     if (body.method === "tools/call" && body.params?.name === "bash") {
       const cmd = String(body.params.arguments?.cmd || "");

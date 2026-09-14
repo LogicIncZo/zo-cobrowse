@@ -610,7 +610,13 @@ describe("pull loop — read_file (#52)", () => {
         if (req.body.method === "tools/call" && req.body.params?.name === "read_file") {
           readFileCalls++;
           if (req.body.params.arguments?.target_file === FILE_PATH) {
-            return jsonResponse({ jsonrpc: "2.0", id: req.body.id, result: { isError: false, content: [{ type: "text", text: FILE_CONTENT }] } });
+            // Live-verified response shape (probe-read-file.ts): a JSON array
+            // of [fileText, fileRefDescriptor] — the background unwraps [0].
+            const wrapped = JSON.stringify([
+              FILE_CONTENT,
+              `kind='file_ref' path='${FILE_PATH}' media_type=None label=None`,
+            ]);
+            return jsonResponse({ jsonrpc: "2.0", id: req.body.id, result: { isError: false, content: [{ type: "text", text: wrapped }] } });
           }
           return jsonResponse({ jsonrpc: "2.0", id: req.body.id, result: { isError: true, content: [{ type: "text", text: "File not found" }] } });
         }
@@ -642,6 +648,7 @@ describe("pull loop — read_file (#52)", () => {
     expect(asks.length).toBe(2);
     expect(asks[1].body.input).toContain("## Auto-fetched: file rti.md");
     expect(asks[1].body.input).toContain(FILE_CONTENT);
+    expect(asks[1].body.input).not.toContain("file_ref"); // descriptor unwrapped away
 
     // Trace card pair for the pull, distinct toolName incl. basename
     const toolCall = rec.seen.find((m) => m.type === "STREAM_TOOL" && m.phase === "call");

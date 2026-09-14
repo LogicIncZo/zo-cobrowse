@@ -1,6 +1,6 @@
 {
   "id": "cobrowse-click",
-  "promptHash": "a5c3ffe144a117d04869def0d7dad663ac3c80822ef511d7bd423603339c3cab",
-  "fetchedAt": "2026-08-31T00:29:20.625Z",
-  "output": "```json\n{\n  \"actions\": [\n    {\n      \"type\": \"click\",\n      \"selector\": \"#pricing\"\n    }\n  ]\n}\n```"
+  "promptHash": "6215ac82f63d0ede38c441f430fc5d68df50f2fac88b7f8bbd05613aa9cdad1c",
+  "fetchedAt": "2026-09-14T12:45:08.555Z",
+  "output": "{\"actions\":[{\"click\":{\"selector\":\"#pricing\"}},{\"done\":{\"response\":\"Clicked the first link on the page — \\\"Pricing\\\" (#pricing).\"}}]}"
 }

@@ -1,6 +1,6 @@
 {
   "id": "cobrowse-fill-search",
-  "promptHash": "c17fd0a9bb0ca26682fe844fe28ed502c2ed93e17b24bbb651dd8a8bf966426b",
-  "fetchedAt": "2026-08-31T00:21:48.632Z",
-  "output": "```json\n{\"actions\":[{\"action\":\"fill\",\"selector\":\"#search-box\",\"value\":\"Zo Computer\"},{\"action\":\"done\",\"response\":\"Filled the search box with 'Zo Computer'. Per co-browse safety rules I don't click submit after filling a form — search is ready for your review, press search when you're happy with it.\"}]}\n```"
+  "promptHash": "235f6c6ccd92eb5a76b6c65e00b2789d46585909c182164bdf150cfe71889ffe",
+  "fetchedAt": "2026-09-14T12:45:40.930Z",
+  "output": "{\"actions\":[{\"fill\":{\"selector\":\"#search-box\",\"value\":\"Zo Computer\"}},{\"done\":{\"response\":\"Filled the search box with 'Zo Computer'. I did not click the search button — per the fill-only rule, form submissions are left for you to review and trigger. The field is populated and ready; click Search when you're set.\"}}]}"
 }
