@@ -97,7 +97,22 @@ Owner pivot: **0.2.8 is not a feature release** — it verifies everything shipp
 
 **Bash CLOSED 2026-09-14 (owner call) — train moves to 0.9.0.** Exit record: the 0.2.8 checklist section logged green against v0.2.8.0 (QA_REPORT 2026-09-05, CI run 33969916152); QA agent round 1's 15 findings all fixed + shipped as individual point releases **v0.2.8.1–v0.2.8.15**; automated gates re-verified green 2026-09-14 (`bun run verify`, evals 19/19, qa-gate clean, drift 0); 11-day usage window with zero open owner-usage P1/P2s. The driver queue #148–#152 closed with the bash: the full shell-only checklist walk, the live `!handoff` acceptance run, and the v0.2.6 human-eyes pass are **waived** (mechanics e2e-verified + QA-agent hunted; regressions file fresh), and Lane B 2a/2c perf evidence stays deferred pending owner diagnostics exports. The `0.2.8` GitHub milestone is closed.
 
-## 🎯 0.9.0 — planned 2026-08-29 (competitive round 2: "Memory, Audit & Control"); renamed from 0.3.0 on 2026-09-02, autonomy foundation merged in 2026-09-03
+## 🎯 0.2.9 — planned 2026-09-14 ("quick wins" train pulled forward from 0.9.0)
+
+Owner-chartered the day the 0.2.8 bash closed: ship the 🟢 quick wins as their own small train so 0.9.0 can start clean on the big lanes. Spec: **`docs/superpowers/specs/2026-09-14-0.2.9-slate-design.md`**; milestone `0.2.9`. **Versioning-policy exception (owner-approved, recorded in CONTRIBUTING.md):** small features ride a PATCH bump (0.2.6 precedent); MINOR stays the default for feature slates, `.STAB` stays fixes-only. **Release model: ONE `v0.2.9.0` after all items merge** (slate model, not the bash's per-fix model).
+
+| Issue | Feature | Priority | Depends on |
+|-------|---------|----------|------------|
+| [#52](https://github.com/LogicIncZo/zo-cobrowse/issues/52) | `read_file` pull action — on-demand workspace file contents via MCP (#28 follow-up) | 🟢 Nice | — |
+| [#54](https://github.com/LogicIncZo/zo-cobrowse/issues/54) | Chat tabs round 2 — pin, restore-on-restart, export | 🟢 Nice | — |
+| [#51](https://github.com/LogicIncZo/zo-cobrowse/issues/51) | Export **delta** — `/export` bang + page export + reader-view PDF + `SAVE_CONVERSATION` workspace write (the chat-markdown download half shipped in 0.2.7 as #108; serializer extracted to `lib/export.js`, shared with #54) | 🟢 Nice | #54 (serializer) |
+| [#53](https://github.com/LogicIncZo/zo-cobrowse/issues/53) | Write-assist round 3 — stream into the popover, follow-up iteration chips, unify setFieldValue | 🟢 Nice | — |
+
+**Build order:** #52 → #54 (extracts `lib/export.js`) → #51 (rides it) → #53 last (largest, independent).
+
+**Flagship spun off to 0.9.0:** the same-day survey + architecture-gap analysis on **repeatable multi-page automation ("recipes")** concluded in [#220](https://github.com/LogicIncZo/zo-cobrowse/issues/220) — extension-driven workflows with **declared human checkpoints** (captcha/OTP/payment as step types, never automated), worked example = RTI filing on rtionline.gov.in. R1 alone is Lane-E scale, so it anchors 0.9.0; 0.2.9's four items are its substrates (pull-loop maturation, export serializer, run persistence).
+
+## 🎯 0.9.0 — planned 2026-08-29 (competitive round 2: "Memory, Audit & Control"); renamed from 0.3.0 on 2026-09-02, autonomy foundation merged in 2026-09-03, recipes flagship added 2026-09-14
 
 Slate filed as detailed GitHub issues (**#46–#54**, all in the `0.9.0` milestone, each with competitive evidence + verification criteria) against a refresh of the Aug-2026 competitive scan: **`docs/superpowers/specs/2026-08-29-0.3.0-competitive-analysis.md`**. What moved since the 0.2.0 scan: ChatGPT desktop became a cross-browser agent layer (WebMCP consumption, event-triggered tasks, Computer-History→memories); memory shipped everywhere and hardened with privacy exclusions (Dia excludes banking/incognito); Perplexity shipped "Always ask" per-connector approvals; Opera Neon pivoted to a free agent runtime via MCP. The market converged on pause-and-confirm — our #26 gate is now the validated norm, and the remaining trust surface (user-facing autonomy dial, undo) is open ground. **2026-09-02/03 additions:** owner renamed the milestone to 0.9.0 and moved the 8 autonomy-foundation issues (**#124–#131** — multi-step plan schema + planner hook, mid-run checkpoint/resume, failure/retry policy layer, progress-event stream + sidepanel timeline, post-run deliverable summary, autonomous-mode `!handoff` toggle, per-run cost cap + observability, handoff local/remote split) in as prereqs for #46/#47/#48.
 
@@ -108,12 +123,9 @@ Slate filed as detailed GitHub issues (**#46–#54**, all in the `0.9.0` milesto
 | [#48](https://github.com/LogicIncZo/zo-cobrowse/issues/48) | Action audit & undo — reversible fills/scroll/tabs, session audit timeline; click stays audit-only | 🟡 Medium | fill/scroll undo none; tab-undo wants #10 verbs |
 | [#49](https://github.com/LogicIncZo/zo-cobrowse/issues/49) | WebMCP spike — consume site-declared tools (or expose ours); timeboxed, real window ~Chrome 156 desktop | 🟡 Medium | — |
 | [#50](https://github.com/LogicIncZo/zo-cobrowse/issues/50) | Tab compare — side-by-side verdicts across referenced tabs (#20 promoted) | 🟡 Medium | #10 actions half (0.2.1) |
-| [#51](https://github.com/LogicIncZo/zo-cobrowse/issues/51) | Export MD/PDF — conversation/page as Markdown download + reader-view PDF (#21 promoted) | 🟢 Nice | — |
-| [#52](https://github.com/LogicIncZo/zo-cobrowse/issues/52) | `read_file` pull action — on-demand workspace file contents via MCP (#28 follow-up) | 🟢 Nice | — |
-| [#53](https://github.com/LogicIncZo/zo-cobrowse/issues/53) | Write-assist round 3 — stream into the popover, follow-up iteration chips, unify setFieldValue | 🟢 Nice | — |
-| [#54](https://github.com/LogicIncZo/zo-cobrowse/issues/54) | Chat tabs round 2 — pin, restore-on-restart, export (shares the #51 serializer) | 🟢 Nice | — |
+| [#220](https://github.com/LogicIncZo/zo-cobrowse/issues/220) | **Recipes** — repeatable multi-page workflows as a first-class primitive: schema + deterministic player + `human` checkpoints (captcha/OTP/payment/submit never automated), authoring from runs + healer self-heal, SKILL.md-compatible library via the skills picker. Worked example: RTI filing (rtionline.gov.in). R1 → R2 → R3 | 🔴 High | #24 pull loop, #26 form-fill resolvers, handoff machinery (all shipped); `lib/export.js` from 0.2.9 |
 
-**Build order:** memory (#46) → permissions (#47) → undo (#48) in the big lane; `read_file` (#52) + chat tabs r2 (#54) as parallel quick wins; compare (#50) right after the 0.2.1 #10 actions half; export (#51) + write-assist r3 (#53) fill the tail; WebMCP (#49) timeboxed anytime.
+**Build order:** memory (#46) → permissions (#47) → undo (#48) in the big lane; **recipes (#220) R1 alongside** (the owner-chartered flagship — survey + gap analysis in the issue); compare (#50) right after the 0.2.1 #10 actions half; WebMCP (#49) timeboxed anytime. (Quick wins #51–#54 moved to the 0.2.9 train on 2026-09-14.)
 
 **Out of 0.9.0 (rationale unchanged):** shared sessions #15/#18 (0.4), background/cloud execution (waits on a Zo-side scheduler; #29's serializable specs keep it additive), agentic payments (watch-only), voice (gap closed — we ship STT + TTS; TTS output live-verified 2026-08-29 via `e2e/probe-tts.ts`), #11 store listing (own milestone after 0.9.0), #34 Mode revisit (closed 2026-09-14 as superseded — its five bullets shipped: chat-only → `ask`, workspace → #28 pickers, full access → `cobrowse`, controls-browser/meta-loop → `!handoff`; future mode-structure work lives in #124–#131).
 
