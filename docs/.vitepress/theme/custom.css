@@ -1,0 +1,21 @@
+/* Updates-page badges: release train + NEW marker. */
+.badge-new,
+.badge-ver {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 3px 8px;
+  border-radius: 999px;
+  vertical-align: middle;
+  margin-left: 6px;
+}
+.badge-new {
+  color: #fff;
+  background: #6d5bfb;
+}
+.badge-ver {
+  color: var(--vp-c-text-2);
+  background: var(--vp-c-bg-soft);
+  border: 1px solid var(--vp-c-divider);
+}
