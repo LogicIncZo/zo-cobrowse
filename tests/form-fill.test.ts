@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from "bun:test";
 import { readFileSync } from "fs";
 import { resolve } from "path";
-import * as vm from "node:vm";
+import { runInSandbox } from "./helpers/vm-sandbox";
 import { Window } from "happy-dom";
 
 /**
@@ -55,13 +55,15 @@ function loadRealRunner(win: Window): { executeAction: Exe; waitForElement: (sel
     __capture: null,
   };
   sandbox.self = sandbox;
-  vm.createContext(sandbox);
   const prologue =
     "const sleep = (ms) => new Promise(r => setTimeout(r, ms));\n";
-  vm.runInContext(
+  runInSandbox(
     prologue +
     extractFn("isValidCssSelector") + "\n" +
+    extractFn("resolveClickableByText") + "\n" + // #220: resolveClickTarget's text-match half
     extractFn("resolveClickTarget") + "\n" +
+    extractFn("fireValueEvents") + "\n" +
+    extractFn("writeFieldValue") + "\n" + // #53: setFieldValue delegates here
     extractFn("setFieldValue") + "\n" +
     extractFn("waitForElement") + "\n" +
     extractFn("executeAction") + "\n" +
@@ -168,8 +170,7 @@ describe("content.js buildSelector — form-field targeting", () => {
   function loadBuildSelector(win: Window) {
     const sandbox: any = { document: win.document, window: win, CSS: win.CSS };
     sandbox.self = sandbox;
-    vm.createContext(sandbox);
-    vm.runInContext(
+    runInSandbox(
       extractFn("buildSelector") + "\nself.__bs = buildSelector;",
       sandbox,
     );

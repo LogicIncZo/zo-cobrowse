@@ -383,3 +383,23 @@ The QA agent itself: findings queue (`docs/qa/findings/`, Zod contract in `tests
 | qa-handoff-done-refire-race | P3 | handoff | review | filed #160 |
 
 **Queue:** 0 open at start → 15 at close. Gate `qa-gate` correctly red; findings triage (fix / file on the 0.2.8 milestone / dismiss) is the owner's call per `docs/qa/agent-playbook.md` § Triage. Highest-impact cluster: the handoff run loop (10 findings — the promised resume path is a dead letter, run state leaks across chats, and chained turns re-send send-once chips) and streaming-accumulation data loss under two distinct triggers (CDP contention; concurrent-turn + rapid switch).
+
+## 2026-09-14 — 0.2.8 bash exit (owner call): train moves to 0.9.0
+
+The stabilization bash ended 11 days after the v0.2.8.0 enabler (window 2026-09-05 → 2026-09-14,
+v0.2.8.0 → **v0.2.8.15**). Exit-criteria record, mirroring the closure comments on #152:
+
+| Criterion | Result |
+|---|---|
+| Manual checklist pass | ✅ 0.2.8 section logged green against v0.2.8.0 (round 0 above, CI run `33969916152`); shell-only remainder **waived** with the bash exit (#148) |
+| Week of real usage, no new P1/P2 | ✅ zero open owner-usage P1/P2s at close; QA agent round 1's 15 findings (3×P1, 7×P2, 5×P3) all fixed + shipped as individual point releases v0.2.8.1–v0.2.8.15; findings queue empty, `qa-gate` green |
+| Suites + evals | ✅ re-verified 2026-09-14 on the release commit: `bun run verify` green, `bun run evals` 19/19, `bun run qa:gate` clean, CI drift 0 findings |
+
+**Waivers recorded with the closure** (mechanics remain e2e-verified; regressions file fresh bug issues):
+the full shell-only checklist walk (#148), the live `!handoff` API acceptance run (#149 — the loop
+instead got 10 QA-agent findings fixed through v0.2.8.15), the v0.2.6 human-eyes pass (#150), and the
+owner diagnostics exports (#151 — Lane B 2a/2c perf evidence stays deferred in BACKLOG). The `0.2.8`
+GitHub milestone is closed; #34 (Mode revisit) closed as superseded the same day — its five bullets
+shipped as the `ask`/`cobrowse` modes, the #28 workspace pickers, and 0.2.7 `!handoff`.
+
+**Next:** 0.9.0 — autonomy foundation #124–#131 as prereqs for #46/#47/#48, plus slate #49–#54.

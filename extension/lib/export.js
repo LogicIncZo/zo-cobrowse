@@ -34,6 +34,51 @@ export function exportFileName(title, exportedAt = Date.now()) {
   return `zo-chat-${slugifyTitle(title)}-${ymd}.md`;
 }
 
+/** `zo-page-<slug>-<YYYYMMDD>.md` — page exports (#51), distinct prefix so a
+ *  page note and a chat transcript never collide in the downloads folder. */
+export function pageExportFileName(title, exportedAt = Date.now()) {
+  const d = new Date(exportedAt);
+  const ymd = `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
+  return `zo-page-${slugifyTitle(title)}-${ymd}.md`;
+}
+
+/**
+ * Page-context export (#51): the captured page as a structured note. Pure —
+ * the sidepanel owns rendering/download. Escaping model: the result is plain
+ * markdown destined for a Blob (never innerHTML), so no HTML escaping here —
+ * the same rules as conversationToMarkdown above.
+ *
+ * @param {{title?: string, url?: string, visibleText?: string}} pageContext
+ * @param {number} [exportedAt]
+ * @returns {{title: string, url: string, savedAt: string, body: string}}
+ */
+export function buildPageExport(pageContext, exportedAt = Date.now()) {
+  const pc = pageContext && typeof pageContext === 'object' ? pageContext : {};
+  return {
+    title: String(pc.title || 'Untitled page'),
+    url: String(pc.url || ''),
+    savedAt: formatDay(exportedAt),
+    body: String(pc.visibleText || '').trim(),
+  };
+}
+
+/** The whole page export → one Markdown document (reader-note shape). */
+export function pageContextToMarkdown(pageContext, exportedAt = Date.now()) {
+  const exp = buildPageExport(pageContext, exportedAt);
+  return [
+    `# ${exp.title}`,
+    '',
+    `> **Source:** ${exp.url}`,
+    '',
+    `> **Saved:** ${exp.savedAt}`,
+    '',
+    '---',
+    '',
+    exp.body || '_No readable content was captured for this page._',
+    '',
+  ].join('\n');
+}
+
 function formatClock(ts) {
   try {
     return new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });

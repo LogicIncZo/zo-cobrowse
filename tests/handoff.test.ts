@@ -148,7 +148,7 @@ describe("handoff — budget", () => {
 
 describe("handoff — boundary", () => {
   it("readonly allows the read-only action set", () => {
-    for (const type of ["navigate", "extract", "scroll", "wait", "done", "read_tab", "read_page", "get_dom", "get_form"]) {
+    for (const type of ["navigate", "extract", "scroll", "wait", "done", "read_tab", "read_page", "get_dom", "get_form", "read_file"]) {
       const d = checkBoundary({ type }, "readonly");
       expect(() => BoundaryDecision.parse(d)).not.toThrow();
       expect(d.allowed).toBe(true);

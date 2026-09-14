@@ -1,7 +1,7 @@
 {
   "name": "zo-cobrowse",
   "version": "0.2.8.15",
-  "description": "Co-browsing extension powered by Zo — AI backend that sees your page and takes actions through it.",
+  "description": "Co-browsing extension powered by Zo \u2014 AI backend that sees your page and takes actions through it.",
   "private": true,
   "type": "module",
   "scripts": {
@@ -30,6 +30,7 @@
     "acorn": "^8.14.0",
     "bun-types": "latest",
     "happy-dom": "^20.11.2",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "yaml": "^2.9.0"
   }
 }

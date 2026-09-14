@@ -1991,3 +1991,147 @@ describe("switching back to a streaming chat (#169)", () => {
     );
   }, 25000);
 });
+
+describe("pending query pickup (context menu / omnibox handoff)", () => {
+  it("a PENDING_ZO_QUERY broadcast fills the composer and auto-sends", async () => {
+    // The #169 scenarios left a spent deferredSse handler installed —
+    // restore a live answer stream for this turn's auto-send.
+    fm.handle((url: string) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      return sseResponse(zoSseText({ text: "It is a test page." }));
+    });
+    const before = panelWin.document.querySelectorAll("#messages .msg-assistant").length;
+    const askBefore = askLog.length;
+    bus.runtime.sendMessage({ type: "PENDING_ZO_QUERY", text: "What is this trio page about?", source: "omnibox" });
+    await waitUntil(() => panelWin.document.querySelectorAll("#messages .msg-assistant").length === before + 1, 10000);
+
+    // The parked text rode the ensuing ASK_ZO and the answer rendered in-chat.
+    expect(askLog[askLog.length - 1].userQuery).toBe("What is this trio page about?");
+    const bodies = [...panelWin.document.querySelectorAll("#messages .msg-assistant .msg-body")];
+    expect(bodies.at(-1).textContent).toContain("It is a test page.");
+  });
+});
+
+describe("TTS — read aloud + stop (footer speaker)", () => {
+  it("speaking switches buttons, a new speak interrupts the old one, re-click stops", async () => {
+    // Same spent-handler restore as above — these turns need live streams.
+    fm.handle((url: string) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      return sseResponse(zoSseText({ text: "It is a test page." }));
+    });
+    // A recording tts fake that holds the end event so speaking states are
+    // deterministic (the shared mock fires `end` immediately).
+    const spoken: Array<{ text: string; lang?: string }> = [];
+    let stopCount = 0;
+    bus.tts.speak = (text: string, opts: any) => { spoken.push({ text, lang: opts?.lang }); };
+    bus.tts.stop = () => { stopCount++; };
+
+    // Two completed turns → two footer speaker buttons to click.
+    const before = panelWin.document.querySelectorAll("#messages .msg-assistant").length;
+    await typeAndSend("tts turn one");
+    await waitUntil(() => panelWin.document.querySelectorAll("#messages .msg-assistant").length === before + 1, 10000);
+    await typeAndSend("tts turn two");
+    await waitUntil(() => panelWin.document.querySelectorAll("#messages .msg-assistant").length === before + 2, 10000);
+
+    const btns = () => [...panelWin.document.querySelectorAll("#messages .msg-assistant .tts-btn")] as any[];
+    expect(btns().length).toBeGreaterThanOrEqual(2);
+    const btnA = btns().at(-2);
+    const btnB = btns().at(-1);
+
+    btnA.click();
+    expect(spoken).toHaveLength(1);
+    expect(btnA.textContent).toBe("⏹"); // speaking marker
+    expect(btnA.classList.contains("speaking")).toBe(true);
+
+    // Clicking a DIFFERENT speaker interrupts the first (auto-read style takeover).
+    btnB.click();
+    expect(spoken).toHaveLength(2);
+    expect(stopCount).toBe(1);
+    expect(btnA.textContent).toBe("🔊"); // old button restored
+    expect(btnA.classList.contains("speaking")).toBe(false);
+    expect(btnB.textContent).toBe("⏹");
+
+    // Same button while speaking → stop.
+    btnB.click();
+    expect(stopCount).toBe(2);
+    expect(btnB.textContent).toBe("🔊");
+    expect(btnB.classList.contains("speaking")).toBe(false);
+  });
+});
+
+describe("STT — mic button degrades without SpeechRecognition", () => {
+  it("posts an honest unsupported-browser error instead of throwing", async () => {
+    const before = panelWin.document.querySelectorAll("#messages .msg-error").length;
+    (panelWin.document.querySelector("#mic-btn") as any).click();
+    await waitUntil(() => panelWin.document.querySelectorAll("#messages .msg-error").length === before + 1, 5000);
+    const err = [...panelWin.document.querySelectorAll("#messages .msg-error .msg-body")].at(-1) as any;
+    expect(err.textContent).toContain("Speech recognition not supported");
+  });
+});
+
+describe("chat tabs round 2 — restore-on-restart (#54)", () => {
+  it("a panel reload rehydrates the open set, the pinned-first order, and the active tab", async () => {
+    // Seed storage the way a previous session left it: 4 open tabs, one of
+    // which points at a DELETED conversation (prune must drop it), one pinned.
+    const t0 = Date.now();
+    bus.storage.local._store["cobrowse_convos"] = {
+      "c-pin": { id: "c-pin", title: "Pinned research", createdAt: t0, updatedAt: t0, pinned: true, messages: [{ role: "user", text: "keep me open", timestamp: t0 }] },
+      "c-two": { id: "c-two", title: "Second chat", createdAt: t0, updatedAt: t0, messages: [{ role: "user", text: "two", timestamp: t0 }] },
+      "c-three": { id: "c-three", title: "Third chat", createdAt: t0, updatedAt: t0, messages: [{ role: "user", text: "three", timestamp: t0 }] },
+      // c-gone intentionally absent — its tab must prune on restore.
+    };
+    bus.storage.local._store["cobrowse_open_tabs"] = ["c-gone", "c-three", "c-two", "c-pin"];
+    bus.storage.local._store["cobrowse_active_id"] = "c-two";
+
+    // RESTART: re-import the panel module (same DOM, fresh module state —
+    // exactly what a browser restart/reopen does to the panel). Must be the
+    // LAST panel import in this file (one-instance-per-process rule).
+    await import("../../extension/sidepanel.js?file=extension-flow-restart");
+    await waitUntil(() => panelWin.document.querySelectorAll("#chat-tabs .chat-tab").length === 3, 10000);
+
+    const tabs = [...panelWin.document.querySelectorAll("#chat-tabs .chat-tab")] as any[];
+    const labels = tabs.map((t) => t.querySelector(".chat-tab-label")?.textContent);
+    // Pinned first, then recency (insertion) order; the deleted tab pruned.
+    expect(labels).toEqual(["Pinned research", "Third chat", "Second chat"]);
+    // 📌 glyph rides the pinned chip only.
+    expect(tabs[0].querySelector(".chat-tab-pin")).toBeTruthy();
+    expect(tabs[1].querySelector(".chat-tab-pin")).toBeNull();
+    // The seeded activeId restored (not defaulted to a fresh chat).
+    const active = tabs.find((t) => t.getAttribute("aria-selected") === "true");
+    expect(active?.querySelector(".chat-tab-label")?.textContent).toBe("Second chat");
+    // Deleted conversation pruned from the persisted open set.
+    const stored = bus.storage.local._store["cobrowse_open_tabs"];
+    expect(stored).toContain("c-pin");
+    expect(stored).not.toContain("c-gone");
+  });
+
+  it("pinning via the tab context menu flips the flag and persists it", async () => {
+    const tabByLabel = (label: string) =>
+      ([...panelWin.document.querySelectorAll("#chat-tabs .chat-tab")] as any[]).find(
+        (t) => t.querySelector(".chat-tab-label")?.textContent === label,
+      );
+    const openMenuOn = (label: string) => {
+      tabByLabel(label).dispatchEvent(new panelWin.Event("contextmenu", { bubbles: true, cancelable: true }));
+      return panelWin.document.querySelector(".chat-tab-menu") as any;
+    };
+    const clickItem = (menu: any, match: (t: string) => boolean) =>
+      [...menu.querySelectorAll("button")].find((b: any) => match(b.textContent)).click();
+
+    // The PINNED chat's menu reads "Unpin chat" — click it: glyph gone, record persists unpinned.
+    const menu = openMenuOn("Pinned research");
+    const items = [...menu.querySelectorAll("button")].map((b: any) => b.textContent as string);
+    expect(items.some((x) => /unpin/i.test(x))).toBe(true);
+    expect(items.some((x) => /export markdown/i.test(x))).toBe(true);
+    clickItem(menu, (t) => /unpin/i.test(t));
+    await waitUntil(() => !tabByLabel("Pinned research")?.querySelector(".chat-tab-pin"), 5000);
+    expect(bus.storage.local._store["cobrowse_convos"]["c-pin"].pinned).toBe(false);
+
+    // Re-pin via the same menu ("Pin chat"): glyph returns, record persists pinned.
+    const menu2 = openMenuOn("Pinned research");
+    clickItem(menu2, (t) => /pin/i.test(t) && !/unpin/i.test(t));
+    await waitUntil(() => !!tabByLabel("Pinned research")?.querySelector(".chat-tab-pin"), 5000);
+    expect(bus.storage.local._store["cobrowse_convos"]["c-pin"].pinned).toBe(true);
+  });
+});

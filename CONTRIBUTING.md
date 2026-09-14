@@ -31,7 +31,7 @@ feature/*  fix/*  chore/*   ← one branch per unit of work, branched from dev
 
 > Merging to `main` does **not** publish a release — it only keeps `main` releasable. The `v*` tag is the release trigger.
 
-**Versioning:** 4-segment `MAJOR.MINOR.PATCH.STAB` — SemVer on the first three segments plus a Chrome-native fourth that carries **stabilization fixes only** (never features — those bump MINOR, breaking changes MAJOR). `manifest.json` `version`/`version_name`, `package.json`, and the git tag all use the full four segments (e.g. `0.2.8.1` / `v0.2.8.1`); `release.yml` triggers on any `v*` tag. During a stabilization bash (e.g. 0.2.8) each verified fix ships as its own `.N` point release — one fix = one release.
+**Versioning:** 4-segment `MAJOR.MINOR.PATCH.STAB` — SemVer on the first three segments plus a Chrome-native fourth that carries **stabilization fixes only** (never features — those bump MINOR, breaking changes MAJOR). `manifest.json` `version`/`version_name`, `package.json`, and the git tag all use the full four segments (e.g. `0.2.8.1` / `v0.2.8.1`); `release.yml` triggers on any `v*` tag. During a stabilization bash (e.g. 0.2.8) each verified fix ships as its own `.N` point release — one fix = one release. **Chartered exception (0.2.9):** a PATCH train may carry *small* features pulled forward from a big slate (0.2.6 precedent, owner-approved 2026-09-14) — MINOR remains the default for feature slates and `.STAB` stays stabilization-only.
 
 ## Development Setup
 

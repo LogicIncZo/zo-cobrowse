@@ -19,12 +19,15 @@ import { zoChatUrl, truncateId } from './lib/zo-links.js';
 import { WORKSPACE_ROOT, filterPickerEntries } from './lib/pickers.js';
 import { applyI18nDom } from './lib/i18n.js';
 import { handoffInstructions, runProgress } from './lib/handoff.js';
-import { conversationToMarkdown, exportFileName } from './lib/export.js';
+import { recipeProgress } from './lib/recipes.js';
+import { conversationToMarkdown, exportFileName, pageContextToMarkdown, pageExportFileName } from './lib/export.js';
 import {
   openChatTab,
   closeChatTab,
   activateChatTab,
   pruneChatTabs,
+  togglePinConversation,
+  orderTabsPinnedFirst,
   tabTitleFor,
   renameConversation,
   searchConversations,
@@ -173,6 +176,10 @@ let activeHandoffRun = null;
 // `<runId>:<status>` for every terminal line already rendered — a repeat
 // HANDOFF_UPDATE for a finished run must not append a second one (#160).
 const terminalHandoffLines = new Set();
+// Recipes (#220): the live run this panel displays + terminal-line dedupe.
+let activeRecipeRun = null;
+const terminalRecipeLines = new Set();
+let recipeCheckpointEl = null;
 let currentContext = null;
 let actionRunning = false;
 let isHistoryView = false;
@@ -332,6 +339,46 @@ async function finishInit() {
             btn.textContent = '▶ Resume';
             btn.className = 'btn btn-ghost btn-sm';
             btn.addEventListener('click', () => resumeHandoffRun(run.runId));
+            body.appendChild(document.createElement('br'));
+            body.appendChild(btn);
+          }
+        }
+      }
+      // Recipes (#220): run-state pushes from the deterministic player.
+      if (msg.type === 'RECIPE_UPDATE' && msg.run) {
+        const run = msg.run;
+        if (activeRecipeRun && activeRecipeRun.runId !== run.runId) return; // another chat's run
+        if (run.status === 'running' || run.status === 'healing') {
+          if (!activeRecipeRun) activeRecipeRun = run;
+          renderRecipeLine(run);
+          removeRecipeCheckpoint();
+        } else if (run.status === 'waiting_human') {
+          activeRecipeRun = run;
+          renderRecipeLine(run);
+          if (run.pendingReview) renderRecipeReviewCard(run);
+          else renderRecipeCheckpoint(run);
+        } else {
+          // Terminal — render exactly once per run+status (mirrors #160).
+          const key = `${run.runId}:${run.status}`;
+          if (terminalRecipeLines.has(key)) return;
+          terminalRecipeLines.add(key);
+          activeRecipeRun = null;
+          removeRecipeLine();
+          removeRecipeCheckpoint();
+          renderChatTabs(); // drop the run marker from the chat tab
+          const icon = { done: '✅', paused: '⏸️', aborted: '🛑', blocked: '⛔' }[run.status] || 'ℹ️';
+          const reason = run.stopReason ? ` — ${safeText(run.stopReason)}` : '';
+          const evidence = (run.status === 'done' && (run.evidence || []).length)
+            ? `\n\n${run.evidence.map((e) => `- **${safeText(e.label)}:** ${safeText(e.value)}`).join('\n')}`
+            : '';
+          const line = addMessage('system', `${icon} Recipe ${run.status} — ${safeText(run.name)}${reason}${evidence}`);
+          if (run.status === 'paused' || run.status === 'blocked') {
+            const body = line.querySelector('.msg-body') || line;
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.textContent = '▶ Resume';
+            btn.className = 'btn btn-ghost btn-sm';
+            btn.addEventListener('click', () => resumeRecipeRun(run.runId));
             body.appendChild(document.createElement('br'));
             body.appendChild(btn);
           }
@@ -757,7 +804,7 @@ async function migrateOldFormat() {
     messages: oldMessages,
   };
   activeId = id;
-  tabsState = openChatTab(tabsState, id); // the migrated chat opens as its tab
+  tabsState = openTab(id); // the migrated chat opens as its tab
 
   await saveConversations();
   await chrome.storage.local.remove(OLD_STORAGE_KEY);
@@ -776,13 +823,18 @@ async function loadConversations() {
   // active chat opens as the single tab (upgrade default).
   const storedOpen = Array.isArray(result[STORAGE_TABS_KEY]) ? result[STORAGE_TABS_KEY] : [];
   tabsState = pruneChatTabs({ openIds: storedOpen, activeId }, Object.keys(conversations));
+  // #54: write the pruned set back — a tab closed/deleted while the panel was
+  // shut must not resurrect on the next reload (prune is otherwise in-memory).
+  if (JSON.stringify(tabsState.openIds) !== JSON.stringify(storedOpen)) {
+    await chrome.storage.local.set({ [STORAGE_TABS_KEY]: tabsState.openIds });
+  }
 
   // If no active conversation, create one
   if (!activeId || !conversations[activeId]) {
     createNewConversation();
     renderCurrentConversation(); // fresh chat: system message + empty-state chips
   } else {
-    if (!tabsState.openIds.length) tabsState = openChatTab(tabsState, activeId);
+    if (!tabsState.openIds.length) tabsState = openTab(activeId);
     renderCurrentConversation();
   }
 
@@ -846,7 +898,7 @@ function createNewConversation() {
     messages: [],
   };
   activeId = id;
-  tabsState = openChatTab(tabsState, id); // every chat opens as a tab
+  tabsState = openTab(id); // every chat opens as a tab
   saveConversations();
 }
 
@@ -1033,7 +1085,7 @@ async function switchToConversation(id) {
 
   // Switch (opening the tab covers history-view switches to unopened chats)
   activeId = id;
-  tabsState = openChatTab(tabsState, id);
+  tabsState = openTab(id);
   await saveConversations();
 
   // Per-chat context-policy state + tab-ref toggles
@@ -1111,7 +1163,7 @@ async function deleteConversation(id) {
       activeId = tabsState.activeId;
     } else if (ids.length > 0) {
       activeId = ids[0];
-      tabsState = openChatTab(tabsState, activeId);
+      tabsState = openTab(activeId);
     } else {
       createNewConversation();
     }
@@ -1132,6 +1184,16 @@ async function deleteConversation(id) {
 // ---- Chat tab bar ----
 
 /** Render the open-chat tab strip (call after any conversation mutation). */
+/** Ids of pinned conversations (#54) — eviction exemption + tab-bar order. */
+function pinnedChatIds() {
+  return Object.values(conversations).filter((c) => c && c.pinned && typeof c.id === 'string').map((c) => c.id);
+}
+
+/** Every tab-open goes through here so LRU eviction always knows the pinned set. */
+function openTab(id) {
+  return openChatTab(tabsState, id, { pinnedIds: pinnedChatIds() });
+}
+
 function renderChatTabs() {
   if (!chatTabsEl) return;
   tabsState = pruneChatTabs(tabsState, Object.keys(conversations));
@@ -1143,10 +1205,13 @@ function renderChatTabs() {
   const streamingId = streamSession.active ? streamSession.chatId : null;
   // #166: the chat a live handoff run is driving carries the 🤖 run marker.
   const handoffId = activeHandoffRun?.chatId || null;
-  for (const id of tabsState.openIds) {
+  // #220: a live recipe run marks its chat the same way.
+  const recipeRunChatId = activeRecipeRun?.chatId || null;
+  // #54: pinned first (display only — openIds keeps recency for eviction).
+  for (const id of orderTabsPinnedFirst(tabsState.openIds, pinnedChatIds())) {
     const convo = conversations[id];
     if (!convo) continue;
-    const isRun = id === handoffId;
+    const isRun = id === handoffId || id === recipeRunChatId;
     const labelText = tabTitleFor(convo, { handoff: isRun });
     const tab = document.createElement('button');
     tab.type = 'button';
@@ -1154,6 +1219,14 @@ function renderChatTabs() {
     tab.setAttribute('role', 'tab');
     tab.setAttribute('aria-selected', String(id === activeId));
     tab.title = labelText + (id === streamingId ? ' — generating…' : '');
+    if (convo.pinned) {
+      // 📌 glyph marks a pinned chat (exempt from LRU eviction).
+      const pin = document.createElement('span');
+      pin.className = 'chat-tab-pin';
+      pin.textContent = '📌';
+      pin.title = 'Pinned — open ⇢ right-click to unpin';
+      tab.appendChild(pin);
+    }
     if (id === streamingId && id !== activeId) {
       // Pulsing dot marks BACKGROUND chats still generating (#135) — on the
       // active tab the user is already watching the stream live.
@@ -1182,6 +1255,8 @@ function renderChatTabs() {
         closeChatTabById(id);
       }
     });
+    // Right-click opens the tab menu (#54): Pin/Unpin + Export Markdown.
+    tab.addEventListener('contextmenu', (e) => openTabContextMenu(e, id));
     chatTabsEl.appendChild(tab);
   }
 }
@@ -1195,6 +1270,12 @@ async function closeChatTabById(id) {
     activeHandoffRun = null;
     chrome.runtime.sendMessage({ type: 'HANDOFF_STOP', runId, reason: 'run tab closed' });
   }
+  // Same contract for recipes (#220): closing the run's chat tab aborts it.
+  if (activeRecipeRun && activeRecipeRun.chatId === id) {
+    const runId = activeRecipeRun.runId;
+    activeRecipeRun = null;
+    chrome.runtime.sendMessage({ type: 'RECIPE_STOP', runId, reason: 'run tab closed' });
+  }
   // #168: closing a BACKGROUND chat's tab must not orphan its stream — the
   // turn keeps accumulating into that conversation and lands in history (the
   // panel reattaches when the chat is reopened). Only the chat the user is
@@ -1206,6 +1287,70 @@ async function closeChatTabById(id) {
     return; // switchToConversation already saved + re-rendered
   }
   tabsState = next;
+  await saveConversations();
+  renderChatTabs();
+}
+
+// ---- Chat-tab context menu (#54) — Pin/Unpin + Export Markdown ----
+
+let tabContextMenuEl = null;
+
+function closeTabContextMenu() {
+  if (tabContextMenuEl) {
+    tabContextMenuEl.remove();
+    tabContextMenuEl = null;
+  }
+}
+
+function openTabContextMenu(e, chatId) {
+  e.preventDefault();
+  closeTabContextMenu();
+  const menu = document.createElement('div');
+  menu.className = 'chat-tab-menu';
+  menu.setAttribute('role', 'menu');
+  const pinItem = document.createElement('button');
+  pinItem.type = 'button';
+  pinItem.setAttribute('role', 'menuitem');
+  pinItem.textContent = conversations[chatId]?.pinned ? 'Unpin chat' : '📌 Pin chat';
+  pinItem.addEventListener('click', () => {
+    closeTabContextMenu();
+    togglePinConversationById(chatId);
+  });
+  const exportItem = document.createElement('button');
+  exportItem.type = 'button';
+  exportItem.setAttribute('role', 'menuitem');
+  exportItem.textContent = '⬇ Export Markdown';
+  exportItem.addEventListener('click', () => {
+    closeTabContextMenu();
+    exportConversation(chatId);
+  });
+  menu.appendChild(pinItem);
+  menu.appendChild(exportItem);
+  document.body.appendChild(menu);
+  // Clamp to the viewport (the menu measures after append).
+  const px = Math.min(e.clientX || 0, window.innerWidth - menu.offsetWidth - 8);
+  const py = Math.min(e.clientY || 0, window.innerHeight - menu.offsetHeight - 8);
+  menu.style.left = Math.max(4, px) + 'px';
+  menu.style.top = Math.max(4, py) + 'px';
+  tabContextMenuEl = menu;
+}
+
+// Dismissal: any click outside the open menu, or Escape. One set of
+// document-level listeners for the lifetime of the panel — inert while no
+// menu is open (tabContextMenuEl is null).
+document.addEventListener('click', (e) => {
+  if (tabContextMenuEl && !tabContextMenuEl.contains(e.target)) closeTabContextMenu();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeTabContextMenu();
+});
+
+/** Flip a conversation's pin, persist, re-render. The pin lives on the
+ * conversation record → survives restarts and tab close/reopen (#54). */
+async function togglePinConversationById(chatId) {
+  const res = togglePinConversation(conversations, chatId);
+  if (!res.convos[chatId]) return; // unknown id — no-op
+  conversations = res.convos;
   await saveConversations();
   renderChatTabs();
 }
@@ -1276,15 +1421,71 @@ function exportConversation(convId) {
   if (!conv || !Array.isArray(conv.messages)) return;
   const exportedAt = Date.now();
   const markdown = conversationToMarkdown({ title: conv.title || 'Zo conversation', messages: conv.messages, exportedAt });
+  downloadText(markdown, exportFileName(conv.title, exportedAt));
+}
+
+/** Blob download with no new permissions — a temp <a download> click (#51). */
+function downloadText(markdown, filename) {
   const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = exportFileName(conv.title, exportedAt);
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+/** Page-context export (#51): the captured page as a Markdown note download. */
+function exportPageMarkdown(pageContext) {
+  const exportedAt = Date.now();
+  const markdown = pageContextToMarkdown(pageContext, exportedAt);
+  downloadText(markdown, pageExportFileName(pageContext && pageContext.title, exportedAt));
+}
+
+/** Reader-view PDF (#51): a print-friendly window over the page text; the
+ * user's own print dialog does the PDF (no new permissions, no print CSS
+ * wrestling in the panel). Text is HTML-escaped before it hits the window. */
+function openReaderViewPdf(pageContext) {
+  const pc = pageContext && typeof pageContext === 'object' ? pageContext : {};
+  const win = window.open('', '_blank');
+  if (!win) {
+    addMessage('error', 'PDF export needs popups — allow popups for this extension and retry.');
+    return;
+  }
+  const esc = (v) => String(v == null ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const title = pc.title || 'Untitled page';
+  const url = pc.url || '';
+  const body = esc(pc.visibleText || 'No readable content was captured for this page.');
+  // No inline handlers/scripts: a popup from an extension page inherits the
+  // extension CSP, which blocks them. The print button gets a real listener
+  // attached from here (DOM injection is CSP-exempt).
+  win.document.write(
+    '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc(title) + '</title>' +
+    '<style>' +
+    'body{font:15px/1.7 Georgia,serif;max-width:44em;margin:3em auto;padding:0 1.5em;color:#1a1a1a;}' +
+    'h1{font-size:1.6em;line-height:1.25;margin-bottom:.2em;}' +
+    '.src{color:#555;font-size:.85em;margin-bottom:2em;}' +
+    '.src a{color:#555;}' +
+    '.print-btn{position:fixed;top:12px;right:12px;padding:8px 14px;font-size:13px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer;}' +
+    '@media print{.print-btn{display:none}.src{margin-bottom:1em}}' +
+    'pre.wrap{white-space:pre-wrap;word-break:break-word;font:inherit;}' +
+    '</style></head><body>' +
+    '<button class="print-btn" type="button">Save as PDF / Print</button>' +
+    '<h1>' + esc(title) + '</h1>' +
+    '<p class="src">Source: ' + (url ? '<a href="' + esc(url) + '">' + esc(url) + '</a>' : '(unknown)') + '</p>' +
+    '<pre class="wrap">' + body + '</pre>' +
+    '</body></html>');
+  win.document.close();
+  const printBtn = win.document.querySelector('.print-btn');
+  if (printBtn) {
+    printBtn.addEventListener('click', () => {
+      try { win.focus(); win.print(); } catch { /* print unavailable — the reader view still stands */ }
+    });
+  }
 }
 
 function renderHistoryView() {
@@ -4647,6 +4848,209 @@ function removeHandoffLine() {
   msgsEl?.querySelector('.msg-handoff-line')?.remove();
 }
 
+// ---- Recipes (#220) panel surface -----------------------------------------
+
+/** Slim run-status line above the messages (progress + stop) — the recipe
+ * twin of renderHandoffLine. */
+function renderRecipeLine(run) {
+  if (!msgsEl) return;
+  let line = msgsEl.querySelector('.msg-recipe-line');
+  if (!line) {
+    line = document.createElement('div');
+    line.className = 'msg-system msg-recipe-line';
+    msgsEl.appendChild(line);
+  }
+  const stopBtn = document.createElement('button');
+  stopBtn.className = 'handoff-stop';
+  stopBtn.textContent = '✕ stop';
+  stopBtn.title = 'Abort this recipe run';
+  stopBtn.addEventListener('click', async () => {
+    stopBtn.disabled = true;
+    await chrome.runtime.sendMessage({ type: 'RECIPE_STOP', runId: run.runId, reason: 'stopped by user' }).catch(() => {});
+  });
+  line.replaceChildren(
+    Object.assign(document.createElement('span'), { textContent: `🧾 Recipe — ${recipeProgress(run)} · ${safeText(run.name).slice(0, 60)}` }),
+    stopBtn,
+  );
+  line.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function removeRecipeLine() {
+  msgsEl?.querySelector('.msg-recipe-line')?.remove();
+}
+
+/** Stop an armed recording and render the learn summary. Shared by the ⏺
+ * line's ✕ and `!recipe stop`. */
+async function stopRecipeRecordingAndReport() {
+  const resp = await chrome.runtime.sendMessage({ type: 'RECIPE_RECORD_STOP' }).catch(() => null);
+  removeRecipeRecordLine();
+  if (!resp?.ok) {
+    addMessage('error', resp?.error || 'Could not learn the recipe.');
+    return;
+  }
+  const cleaned = resp.llmCleaned ? `Cleaned by Zo${resp.note ? `: ${safeText(resp.note)}` : ''}.` : 'Kept the deterministic draft (LLM cleanup unavailable).';
+  addMessage('system', `🧠 Learned recipe "**${safeText(resp.name)}**" — ${resp.steps} steps, ${resp.params} params. ${cleaned}\n\nReplay it with \`!recipe run ${safeText(resp.name)}\`${(resp.warnings || []).length ? `\n\nWarnings: ${resp.warnings.map((w) => `- ${safeText(w)}`).join(' ')}` : ''}`);
+}
+
+/** The ⏺ recording indicator — ✕ stops, assembles the draft, learns. */
+function renderRecipeRecordLine(name) {
+  if (!msgsEl) return;
+  removeRecipeRecordLine();
+  const line = document.createElement('div');
+  line.className = 'msg-system msg-recipe-line msg-recipe-record-line';
+  const stopBtn = document.createElement('button');
+  stopBtn.className = 'handoff-stop';
+  stopBtn.textContent = '✕ stop';
+  stopBtn.title = 'Stop recording and learn the recipe';
+  stopBtn.addEventListener('click', () => stopRecipeRecordingAndReport());
+  line.replaceChildren(
+    Object.assign(document.createElement('span'), { textContent: `⏺ Recording recipe — ${safeText(name)} · click through your flow, then stop` }),
+    stopBtn,
+  );
+  msgsEl.appendChild(line);
+  line.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function removeRecipeRecordLine() {
+  msgsEl?.querySelector('.msg-recipe-record-line')?.remove();
+}
+
+/** The human-checkpoint card: what the user must do by hand, plus the two
+ * ways back in — verify the declared postcondition, or skip the check. */
+function renderRecipeCheckpoint(run) {
+  removeRecipeCheckpoint();
+  const step = run.recipe?.steps?.[run.stepIndex];
+  if (!step || step.type !== 'human') return;
+  const host = document.createElement('div');
+  host.className = 'msg form-review-card recipe-checkpoint-card';
+  const title = document.createElement('div');
+  title.className = 'form-review-title';
+  title.textContent = `Checkpoint — ${safeText(step.title)}`;
+  host.appendChild(title);
+  const body = document.createElement('div');
+  body.className = 'recipe-checkpoint-instructions';
+  body.textContent = safeText(step.instructions);
+  host.appendChild(body);
+  const verify = document.createElement('button');
+  verify.className = 'btn btn-primary form-review-confirm';
+  verify.textContent = 'Done — verify';
+  verify.addEventListener('click', () => resumeRecipeRun(run.runId, false));
+  const skip = document.createElement('button');
+  skip.className = 'btn btn-ghost form-review-cancel';
+  skip.textContent = 'Skip check';
+  skip.title = 'Continue without verifying the resume condition';
+  skip.addEventListener('click', () => resumeRecipeRun(run.runId, true));
+  const bar = document.createElement('div');
+  bar.className = 'form-review-actions';
+  bar.append(verify, skip);
+  host.appendChild(bar);
+  msgsEl?.appendChild(host);
+  recipeCheckpointEl = host;
+  host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function removeRecipeCheckpoint() {
+  recipeCheckpointEl?.remove();
+  recipeCheckpointEl = null;
+}
+
+/** #228: preview card for a generated fill — edit the draft, Fill it, or
+ * Discard (the run parks blocked and a later resume regenerates). */
+function renderRecipeReviewCard(run) {
+  removeRecipeCheckpoint();
+  const host = document.createElement('div');
+  host.className = 'msg form-review-card recipe-checkpoint-card';
+  const title = document.createElement('div');
+  title.className = 'form-review-title';
+  title.textContent = 'Zo drafted this value — review before it fills';
+  host.appendChild(title);
+  const area = document.createElement('textarea');
+  area.className = 'recipe-review-text';
+  area.value = run.pendingReview?.text || '';
+  area.rows = Math.min(12, Math.max(3, Math.ceil(area.value.length / 80)));
+  host.appendChild(area);
+  const fill = document.createElement('button');
+  fill.className = 'btn btn-primary form-review-confirm';
+  fill.textContent = 'Fill with this';
+  fill.addEventListener('click', () => resumeRecipeRun(run.runId, false, { reviewText: area.value }));
+  const discard = document.createElement('button');
+  discard.className = 'btn btn-ghost form-review-cancel';
+  discard.textContent = 'Discard';
+  discard.title = 'Discard the draft — resume later to generate a fresh one';
+  discard.addEventListener('click', () => resumeRecipeRun(run.runId, false, { discard: true }));
+  const bar = document.createElement('div');
+  bar.className = 'form-review-actions';
+  bar.append(fill, discard);
+  host.appendChild(bar);
+  msgsEl?.appendChild(host);
+  recipeCheckpointEl = host;
+  host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+/** The params card: one input per required recipe param; resolves with a
+ * {name: value} map, or null on cancel. Form-review-card styling. */
+function renderRecipeParamsCard(params) {
+  return new Promise((resolve) => {
+    const host = document.createElement('div');
+    host.className = 'msg form-review-card recipe-params-card';
+    const title = document.createElement('div');
+    title.className = 'form-review-title';
+    title.textContent = 'Recipe parameters';
+    host.appendChild(title);
+    const values = new Map();
+    for (const p of params || []) {
+      const line = document.createElement('label');
+      line.className = 'form-review-row';
+      line.textContent = `${safeText(p.question || p.name)} `;
+      const input = document.createElement('input');
+      input.dataset.target = p.name;
+      input.value = p.default != null ? String(p.default) : '';
+      input.placeholder = p.required ? 'required' : 'optional';
+      input.addEventListener('input', () => values.set(p.name, input.value));
+      line.appendChild(input);
+      host.appendChild(line);
+    }
+    const start = document.createElement('button');
+    start.className = 'btn btn-primary form-review-confirm';
+    start.textContent = 'Start run';
+    const cancel = document.createElement('button');
+    cancel.className = 'btn btn-ghost form-review-cancel';
+    cancel.textContent = 'Cancel';
+    const bar = document.createElement('div');
+    bar.className = 'form-review-actions';
+    bar.append(start, cancel);
+    host.appendChild(bar);
+    msgsEl?.appendChild(host);
+    host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    start.addEventListener('click', () => {
+      host.remove();
+      const out = {};
+      for (const p of params || []) {
+        const v = values.get(p.name);
+        if (v != null && v !== '') out[p.name] = v;
+      }
+      resolve(out);
+    });
+    cancel.addEventListener('click', () => {
+      host.remove();
+      resolve(null);
+    });
+  });
+}
+
+/** Resume a waiting_human / paused / blocked run. A refused verify (e.g. the
+ * postcondition isn't met yet) surfaces as a system note — the card stays.
+ * opts.reviewText / opts.discard resolve a pending generated-text review. */
+async function resumeRecipeRun(runId, force = false, opts = {}) {
+  const res = await chrome.runtime.sendMessage({ type: 'RECIPE_RESUME', runId, force, ...opts }).catch(() => null);
+  if (!res?.ok) {
+    addMessage('system', `⚠️ ${safeText(res?.error || 'Could not resume the recipe run.')}`);
+    return;
+  }
+  removeRecipeCheckpoint();
+}
+
+
 /** Execute one handoff turn's actions as a single batch. Results render
  * compactly; the run's own HANDOFF_UPDATE push reports loop state.
  * backgrounded:true (run's chat switched away, #162) skips the DOM entirely —
@@ -4754,7 +5158,7 @@ sendQuery = async function() {
 
   await ensureActiveConversation();
   // The active chat always has an open tab (covers sends after a storage reset).
-  tabsState = openChatTab(tabsState, activeId);
+  tabsState = openTab(activeId);
   renderChatTabs();
   await refreshPageContext();
   if (!currentContext) {
@@ -4783,6 +5187,43 @@ sendQuery = async function() {
     if (bang.inlineReply) {
       addMessage('user', query);
       addMessage('assistant', bang.inlineReply);
+      input.disabled = false;
+      sendBtn.disabled = false;
+      input.focus();
+      return;
+    }
+    if (bang.kind === 'export') {
+      addMessage('user', query);
+      if (bang.exportTarget === 'conversation') {
+        exportConversation(activeId);
+        addMessage('assistant', '📥 Conversation exported as Markdown (same file the history ⬇ button writes).');
+      } else if (bang.exportTarget === 'page') {
+        exportPageMarkdown(currentContext);
+        addMessage('assistant', '📥 Page exported as Markdown.');
+      } else if (bang.exportTarget === 'pdf') {
+        openReaderViewPdf(currentContext);
+        addMessage('assistant', '📖 Reader view opened — use its Save as PDF button to print.');
+      } else {
+        // workspace — mirror !save's agent-write, content = the chat transcript
+        const conv = conversations[activeId];
+        if (!conv) {
+          addMessage('error', 'Nothing to export — this chat has no conversation record.');
+        } else {
+          addMessage('thinking', 'Saving conversation to workspace...');
+          const saveResp = await chrome.runtime.sendMessage({
+            type: 'SAVE_CONVERSATION',
+            conversation: { title: conv.title, messages: conv.messages },
+            savePath: bang.exportPath || '',
+          });
+          const thinkingEl = msgsEl.querySelector('.msg-thinking');
+          if (thinkingEl) thinkingEl.remove();
+          if (saveResp && saveResp.error) {
+            addMessage('error', saveResp.error);
+          } else {
+            addMessage('assistant', (saveResp && saveResp.path) ? `Conversation saved to \`${saveResp.path}\`.` : 'Conversation saved to workspace.');
+          }
+        }
+      }
       input.disabled = false;
       sendBtn.disabled = false;
       input.focus();
@@ -4852,6 +5293,91 @@ sendQuery = async function() {
       renderChatTabs(); // mark the run's chat tab (#166)
       effectiveQuery = `${bang.query}\n\n${handoffInstructions(start.run)}`;
       tempMode = 'cobrowse';
+    }
+    if (bang.isRecipe) {
+      // #220: recipes are played by the BACKGROUND deterministically — the
+      // panel only starts/stops and renders pushes. Fully handled here; no
+      // chat turn is sent.
+      addMessage('user', query);
+      const reenable = () => { input.disabled = false; sendBtn.disabled = false; input.focus(); };
+      if (bang.sub === 'record') {
+        // #220 recorder: arm a session; the user clicks through the flow, the
+        // ✕ on the recording line assembles + learns the recipe.
+        const recName = bang.target || '';
+        const resp = await chrome.runtime.sendMessage({
+          type: 'RECIPE_RECORD_START',
+          chatId: activeId,
+          name: recName,
+        }).catch(() => null);
+        if (!resp?.ok) {
+          addMessage('error', resp?.error || 'Could not start the recording.');
+        } else {
+          renderRecipeRecordLine(resp.name);
+          addMessage('system', `⏺ Recording "**${safeText(resp.name)}**" — click through the flow now (multi-page works; sensitive pages become human checkpoints). Press ✕ when done to learn the recipe.`);
+        }
+        reenable();
+        return;
+      }
+      if (bang.sub === 'list') {
+        const resp = await chrome.runtime.sendMessage({ type: 'RECIPE_LIST' }).catch(() => null);
+        if (!resp?.ok) addMessage('error', resp?.error || 'Could not list recipes.');
+        else if (!(resp.recipes || []).length) addMessage('system', 'No saved recipes yet. Author JSON at `/home/workspace/recipes/`, or run one with `!recipe run <path>`.');
+        else {
+          const lines = resp.recipes.map((r) => `- **${safeText(r.name)}** v${safeText(r.version)} — ${r.steps} steps${r.draft ? ' · draft' : ''}`);
+          const live = resp.liveRun ? `\n\nLive run: ${safeText(resp.liveRun.name)} (${safeText(resp.liveRun.status)})` : '';
+          addMessage('system', `Saved recipes:\n\n${lines.join('\n')}${live}`);
+        }
+        reenable();
+        return;
+      }
+      if (bang.sub === 'stop') {
+        const rec = await chrome.runtime.sendMessage({ type: 'RECIPE_RECORD_PEEK' }).catch(() => null);
+        if (rec?.armed) {
+          await stopRecipeRecordingAndReport();
+          reenable();
+          return;
+        }
+        const st = await chrome.runtime.sendMessage({ type: 'RECIPE_STATUS', chatId: activeId }).catch(() => null);
+        if (!st?.run) {
+          addMessage('system', 'No live recipe run in this chat.');
+        } else {
+          const resp = await chrome.runtime.sendMessage({ type: 'RECIPE_STOP', runId: st.run.runId, reason: 'stopped by user' }).catch(() => null);
+          if (resp?.ok) addMessage('system', `🛑 Recipe run stopped — ${safeText(st.run.name)}`);
+          else addMessage('error', resp?.error || 'Could not stop the run.');
+        }
+        reenable();
+        return;
+      }
+      // sub === 'run'
+      const source = (bang.target.includes('/') || bang.target.endsWith('.json'))
+        ? { workspacePath: bang.target }
+        : { localName: bang.target };
+      const startRecipe = (paramValues) => chrome.runtime.sendMessage({
+        type: 'RECIPE_START',
+        chatId: activeId,
+        tabId: currentContext?.tabId,
+        source,
+        ...(paramValues ? { paramValues } : {}),
+      }).catch(() => null);
+      let start = await startRecipe();
+      if (start?.needsParams) {
+        const values = await renderRecipeParamsCard(start.params || []);
+        if (!values) {
+          addMessage('system', 'Recipe run cancelled.');
+          reenable();
+          return;
+        }
+        start = await startRecipe(values);
+      }
+      if (!start?.ok || !start.run) {
+        addMessage('error', start?.error || 'Could not start the recipe run.');
+      } else {
+        activeRecipeRun = start.run;
+        renderChatTabs(); // the run's chat tab carries the run marker
+        addMessage('system', `🧾 Recipe started — ${safeText(start.run.name)} (v${safeText(start.run.version)})`);
+      }
+      reenable();
+      return;
     }
     if (bang.isDuckdb) {
       addMessage('user', query);

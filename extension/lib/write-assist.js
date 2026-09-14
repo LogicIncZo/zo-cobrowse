@@ -94,6 +94,54 @@ export function buildEnhancePrompt({ text, instruction, field, page, acceptsMark
 }
 
 /**
+ * Follow-up iteration prompt (#53): a Shorter/Formaler/custom chip re-works
+ * the PREVIOUS result on the same short-lived per-popover Zo thread (the
+ * caller threads conversation_id; the prior draft rides in the prompt so a
+ * lost thread still degrades to a correct fresh rewrite). Same tag protocol
+ * and no-tools rules as the initial prompt — narration outside the tags is
+ * dropped by the parser, never rendered.
+ */
+export function buildEnhanceFollowUpPrompt({ priorText, instruction, field, page, acceptsMarkdown } = {}) {
+  const prior = String(priorText == null ? '' : priorText).trim();
+  const instr = String(instruction == null ? '' : instruction).trim();
+  const f = field || {};
+  const p = page || {};
+  const maxLength = Number.isFinite(Number(f.maxLength)) && Number(f.maxLength) > 0 ? Number(f.maxLength) : null;
+
+  const lines = [];
+  lines.push(`You are Zo, a writing assistant inside the user's browser (task: ${WRITE_ASSIST_MARKER}).`);
+  lines.push('This is a FOLLOW-UP iteration: revise the prior draft below per the user\'s instruction.');
+  lines.push('');
+  lines.push('Rules:');
+  lines.push("- Keep the user's voice and first-person point of view.");
+  lines.push('- Apply the instruction, but do NOT invent specific facts, numbers, names, or dates the prior draft does not contain.');
+  lines.push('- Work only from the prior draft and the context above — do not use tools, run commands, or search.');
+  lines.push(`- Put the FULL revised text for the field between <${WRITE_ASSIST_MARKER}> and </${WRITE_ASSIST_MARKER}> tags, and NOTHING outside the tags: no narration, no warm-ups, no commentary.`);
+  if (acceptsMarkdown) {
+    lines.push('- The field accepts Markdown: headings, lists, bold, and links are welcome where they help.');
+  } else {
+    lines.push('- The field is plain text: no markdown, no headings, no bullet lists.');
+  }
+  if (maxLength) lines.push(`- Keep the final text within ${maxLength} characters (the field's limit).`);
+  lines.push('');
+  const url = String(p.url || '').trim();
+  const title = String(p.title || '').trim();
+  if (url || title) {
+    lines.push('Page (context only):');
+    if (title) lines.push(`- Title: ${title}`);
+    if (url) lines.push(`- URL: ${url}`);
+    lines.push('');
+  }
+  lines.push(instr ? `The user's instruction for this revision: ${instr}` : 'The user\'s instruction for this revision: polish the draft.');
+  lines.push('');
+  lines.push('Prior draft (your previous output for this field):');
+  lines.push('"""');
+  lines.push(prior);
+  lines.push('"""');
+  return lines.join('\n');
+}
+
+/**
  * Normalize Zo's reply into bare field text. With the tag protocol, anything
  * OUTSIDE <write-assist>…</write-assist> is intermediate agent narration
  * (thought warm-ups, tool summaries) and is dropped; untagged replies fall
@@ -102,6 +150,25 @@ export function buildEnhancePrompt({ text, instruction, field, page, acceptsMark
  * @param {string} raw
  * @returns {{text:string}}
  */
+/**
+ * Streaming-safe partial parse (#53): what the popover may SHOW right now
+ * from the accumulated raw stream text. Only content after the
+ * <write-assist> open tag ever renders — narration before the tag (the
+ * "Let me quickly ground this…" warm-ups the live model emits) is dropped
+ * wholesale, and everything from the close tag on is trimmed. Never
+ * throws; a stream with no open tag yet renders nothing.
+ */
+export function parseEnhanceDelta(raw) {
+  const t = String(raw == null ? '' : raw);
+  const openTag = `<${WRITE_ASSIST_MARKER}>`;
+  const open = t.indexOf(openTag);
+  if (open === -1) return '';
+  let body = t.slice(open + openTag.length);
+  const closeIdx = body.indexOf(`</${WRITE_ASSIST_MARKER}>`);
+  if (closeIdx !== -1) body = body.slice(0, closeIdx);
+  return body.replace(/^[ \t]*\r?\n/, '').trimStart();
+}
+
 export function parseEnhanceResponse(raw) {
   let t = String(raw == null ? '' : raw).trim();
   const openTag = `<${WRITE_ASSIST_MARKER}>`;

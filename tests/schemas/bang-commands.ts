@@ -60,15 +60,34 @@ const Handoff = z.object({
   query: z.string().min(1), // the goal
 });
 
+// !recipe run|record|stop|list — multi-page workflow primitive (#220)
+const RecipeCmd = z.object({
+  handled: z.literal(true),
+  kind: z.literal("recipe"),
+  isRecipe: z.literal(true),
+  sub: z.enum(["run", "record", "stop", "list"]),
+  target: z.string(), // path or name after the subcommand ('' when none)
+});
+
+// !export [page|pdf|<path>] — export conversation/page/pdf or save to workspace
+const ExportCmd = z.object({
+  handled: z.literal(true),
+  kind: z.literal("export"),
+  exportTarget: z.enum(["conversation", "page", "pdf", "workspace"]),
+  exportPath: z.string().optional(),
+});
+
 export const BangCommandResultSchema = z.discriminatedUnion("kind", [
   Passthrough,
   InlineReply,
   Save,
+  ExportCmd,
   Automation,
   DuckdbQuery,
   ExpandedQuery,
   ContextAttach,
   Handoff,
+  RecipeCmd,
 ]);
 
 export type BangCommandResult = z.infer<typeof BangCommandResultSchema>;
@@ -90,4 +109,6 @@ export const BANG_COMMAND_NAMES = [
   "dom",
   "ctx",
   "handoff",
+  "export",
+  "recipe",
 ] as const;

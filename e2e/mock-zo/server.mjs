@@ -85,7 +85,9 @@ function userRequest(input) {
 
 function pickScenario(input) {
   // A pull follow-up is NOT a new user turn — route by its auto-fetched
-  // header, not the (absent) ## User Request section.
+  // header, not the (absent) ## User Request section. The file pull (#52)
+  // has its own follow-up (the generic one fills the form fixture).
+  if (String(input || "").includes("## Auto-fetched: file")) return "pull-file-followup";
   if (String(input || "").includes("## Auto-fetched:")) return "pull-followup";
   // Lane E: handoff runs route on their markers, BEFORE user-keyword routing —
   // a handoff goal may legitimately contain words like "extract" or "click".
@@ -100,6 +102,7 @@ function pickScenario(input) {
   if (String(input || "").includes("flaky")) return "flaky";
   const q = userRequest(input);
   if (q.includes("schema")) return "pull-form";
+  if (q.includes("workspace file")) return "pull-file";
   if (q.includes("code sample")) return "code-sample";
   if (q.includes("checkout")) return "fill-form";
   if (q.includes("classic form")) return "classic-form";
@@ -199,6 +202,43 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(202, cors);
       return res.end();
     }
+    if (body.method === "tools/call" && body.params?.name === "read_file") {
+      // #220: the recipes player loads its artifact from the workspace. Route
+      // by path; every other path keeps the #52 notes fixture.
+      const targetFile = String(body.params.arguments?.target_file || "");
+      if (targetFile.includes("notes/source.md")) {
+        const wrappedNotes = JSON.stringify(["E2E-SOURCE-CONTENT: the draft notes behind the application.", "kind='file_ref' path='" + targetFile + "' media_type=None label=None"]);
+        return json({ jsonrpc: "2.0", id: body.id, result: { isError: false, content: [{ type: "text", text: wrappedNotes }] } });
+      }
+      if (targetFile.includes("recipes/e2e-filing.json")) {
+        const recipe = {
+          id: "rcp-e2e",
+          name: "E2E filing",
+          version: "1.0.0",
+          origin: targetFile,
+          createdAt: 0,
+          updatedAt: 0,
+          params: [{ name: "applicant", type: "string", required: true, question: "Who is filing?" }],
+          steps: [
+            { type: "navigate", url: `http://127.0.0.1:${PORT}/form.html`, expectUrl: "form.html" },
+            { type: "fill", cues: [{ strategy: "label", value: "Name" }, { strategy: "selector", value: "#name" }], value: "{{applicant}}" },
+            { type: "navigate", url: `http://127.0.0.1:${PORT}/gateway.html`, expectUrl: "gateway.html" },
+            { type: "human", title: "Pay ₹10 on the mock gateway", instructions: "Click Pay on the gateway page, then verify from the panel.", resumeOn: { url: "paid=1" } },
+            { type: "extract", cues: [{ strategy: "selector", value: "#reg-number" }], evidenceKey: "registration", label: "Registration number" },
+            { type: "done", message: "Filed {{applicant}} — registration {{registration}}" },
+          ],
+        };
+        const wrappedRecipe = JSON.stringify([JSON.stringify(recipe), `kind='file_ref' path='${targetFile}' media_type=None label=None`]);
+        return json({ jsonrpc: "2.0", id: body.id, result: { isError: false, content: [{ type: "text", text: wrappedRecipe }] } });
+      }
+      // #52 pull loop: mirrors the LIVE read_file shape (probe-read-file.ts) —
+      // a JSON array of [fileText, fileRefDescriptor]; the background unwraps it.
+      const wrapped = JSON.stringify([
+        "e2e-file-content-52: the fixture workspace notes.",
+        "kind='file_ref' path='/home/workspace/notes/e2e-summary.md' media_type=None label=None",
+      ]);
+      return json({ jsonrpc: "2.0", id: body.id, result: { isError: false, content: [{ type: "text", text: wrapped }] } });
+    }
     if (body.method === "tools/call" && body.params?.name === "bash") {
       const cmd = String(body.params.arguments?.cmd || "");
       const bash = (stdout) => `CmdResult(stdout='__ZO_BEGIN__\\n${stdout}\\n__ZO_END__\\n', stderr='', returncode=0)`;
@@ -251,12 +291,46 @@ const server = http.createServer(async (req, res) => {
     requests.push({ ts: Date.now(), method: "POST", url: "/zo/ask", body });
 
     // Write-assist one-shot (feature/textarea-fill): the in-page widget's
+    // #220 recorder: the LLM cleanup pass for a recorded draft is a
+    // non-streaming one-shot (routes on its stable prompt marker). Returns a
+    // cleaned, parameterized recipe whose fill targets the fixture form.
+    if (String(body.input || "").includes("## Recipe Draft")) {
+      res.writeHead(200, { "content-type": "application/json", ...cors });
+      return res.end(JSON.stringify({
+        output: JSON.stringify({
+          params: [{ name: "applicant_name", type: "string", required: true, question: "Who is the applicant?" }],
+          steps: [
+            { type: "navigate", url: `http://127.0.0.1:${PORT}/form.html`, expectUrl: "form.html" },
+            { type: "fill", cues: [{ strategy: "label", value: "Name" }, { strategy: "selector", value: "#name" }], value: "{{applicant_name}}" },
+            { type: "done", message: "Learned flow complete for {{applicant_name}}" },
+          ],
+          note: "renamed the param, pinned the cues",
+        }),
+      }));
+    }
     // ENHANCE_TEXT handler calls /zo/ask NON-streaming and parses JSON
     // ({output}), so reply with a plain JSON body — not SSE. Routed on the
     // stable write-assist marker baked into the enhance prompt. The reply
     // follows the prompt's tag protocol with narration outside the tags —
     // the widget must preview ONLY the tag content.
+    // Write-assist one-shot routes FIRST (it is also non-streaming): its
+    // reply follows the <write-assist> tag protocol the widget parses.
     if (String(body.input || "").includes("write-assist")) {
+      // #53 streaming popover: the port path posts stream:true and reads real
+      // SSE — narration outside the tags streams too (the popover must drop
+      // it); the completed event echoes the thread for the follow-up chips.
+      if (body.stream) {
+        const revised = String(body.input || "").includes("FOLLOW-UP iteration")
+          ? "SHORTENED: led the DuckDB migration; p95 cut in half."
+          : "I led the migration of 40 dashboards to DuckDB, unifying our analytics stack and cutting p95 query times roughly in half.";
+        const blocks = [];
+        blocks.push(`event: PartStartEvent\ndata: ${JSON.stringify({ index: 1, part: { part_kind: "text", content: "Thinking out loud about the rewrite. " } })}\n`);
+        for (const piece of ["<write-assist>", revised, "</write-assist>"]) {
+          blocks.push(`event: PartDeltaEvent\ndata: ${JSON.stringify({ index: 1, delta: { part_delta_kind: "text", content_delta: piece } })}\n`);
+        }
+        blocks.push(`event: completed\ndata: ${JSON.stringify({ status: "succeeded", conversation_id: "e2e-wa-thread" })}\n`);
+        return streamSse(res, blocks, { delayMs: 40 });
+      }
       res.writeHead(200, { "content-type": "application/json", ...cors });
       return res.end(JSON.stringify({
         output: "Let me quickly ground this in the data model before expanding.\n" +
@@ -265,6 +339,12 @@ const server = http.createServer(async (req, res) => {
           "</write-assist>",
         conversation_id: "e2e-enhance-conv",
       }));
+    }
+    // Other non-streaming asks (!save / SAVE_CONVERSATION) are plain JSON on
+    // the live server — SSE is opt-in via stream:true.
+    if (!body.stream) {
+      res.writeHead(200, { "content-type": "application/json", ...cors });
+      return res.end(JSON.stringify({ output: "mock answer", conversation_id: "e2e-nostream-conv" }));
     }
 
     const scenario = pickScenario(body.input);
@@ -326,6 +406,24 @@ const server = http.createServer(async (req, res) => {
       const envelope = JSON.stringify({
         reasoning: "I need the complete form schema first.",
         actions: [{ type: "get_form" }],
+      });
+      return streamSse(res, [textStart(envelope), completed()], { delayMs: 40 });
+    }
+    if (scenario === "pull-file") {
+      // #52: Zo asks for a referenced workspace file before answering.
+      const envelope = JSON.stringify({
+        reasoning: "I need the workspace notes first.",
+        actions: [{ type: "read_file", path: "/home/workspace/notes/e2e-summary.md" }],
+      });
+      return streamSse(res, [textStart(envelope), completed()], { delayMs: 40 });
+    }
+    if (scenario === "pull-file-followup") {
+      // The auto-fetched file content arrived — answer from it.
+      const envelope = JSON.stringify({
+        reasoning: "File content received.",
+        actions: [
+          { type: "done", response: "Your workspace notes say: e2e-file-content-52 (summarized)." },
+        ],
       });
       return streamSse(res, [textStart(envelope), completed()], { delayMs: 40 });
     }

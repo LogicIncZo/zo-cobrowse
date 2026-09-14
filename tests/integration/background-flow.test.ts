@@ -26,6 +26,7 @@ import {
   jsonResponse,
   textResponse,
 } from "../helpers/zo-fetch-mock.ts";
+import { WaStreamEvent } from "../schemas/messages";
 
 const CONTENT_SRC = readFileSync(resolve(import.meta.dir, "../../extension/content.js"), "utf-8");
 
@@ -583,5 +584,255 @@ describe("debug diagnostics (#67)", () => {
     expect(after.entries).toHaveLength(1);
     expect(after.entries[0].label).toBe("GET_DEBUG_LOG");
     await bus.storage.sync.set({ debugMode: false });
+  });
+});
+
+describe("pull loop — read_file (#52)", () => {
+  const FILE_PATH = "/home/workspace/notes/rti.md";
+  const FILE_CONTENT = "RTI guide: fee is Rs.10. Application format enclosed.";
+  let readFileCalls = 0;
+  let askBase = 0; // fm.requests accumulates across the file — index asks relatively
+
+  /** Handler routing /mcp read_file + a sequence of /zo/ask SSE responses. */
+  function installReadFileFlow(askResponses: string[]) {
+    let ask = 0;
+    readFileCalls = 0;
+    askBase = fm.requests.filter((r) => r.url.includes("/zo/ask")).length;
+    fm.handle((url, _init, req) => {
+      if (url.endsWith("/mcp")) {
+        if (req.body.method === "initialize") {
+          return jsonResponse(
+            { jsonrpc: "2.0", id: req.body.id, result: { protocolVersion: "2024-11-05", capabilities: {}, serverInfo: { name: "zo-tools", version: "1" } } },
+            { headers: { "mcp-session-id": "sess-readfile" } },
+          );
+        }
+        if (req.body.method === "notifications/initialized") return textResponse("", 202);
+        if (req.body.method === "tools/call" && req.body.params?.name === "read_file") {
+          readFileCalls++;
+          if (req.body.params.arguments?.target_file === FILE_PATH) {
+            // Live-verified response shape (probe-read-file.ts): a JSON array
+            // of [fileText, fileRefDescriptor] — the background unwraps [0].
+            const wrapped = JSON.stringify([
+              FILE_CONTENT,
+              `kind='file_ref' path='${FILE_PATH}' media_type=None label=None`,
+            ]);
+            return jsonResponse({ jsonrpc: "2.0", id: req.body.id, result: { isError: false, content: [{ type: "text", text: wrapped }] } });
+          }
+          return jsonResponse({ jsonrpc: "2.0", id: req.body.id, result: { isError: true, content: [{ type: "text", text: "File not found" }] } });
+        }
+        return jsonResponse({ jsonrpc: "2.0", id: req.body.id, error: { code: -32601, message: "nope" } });
+      }
+      const sse = askResponses[Math.min(ask, askResponses.length - 1)];
+      ask++;
+      return sseResponse(sse);
+    });
+  }
+
+  it("streamed read_file → MCP call → follow-up renders in the same bubble (one user turn)", async () => {
+    installReadFileFlow([
+      zoSseText({ text: JSON.stringify({ actions: [{ type: "read_file", path: FILE_PATH }] }) }),
+      zoSseText({ text: "The guide says the fee is Rs.10." }),
+    ]);
+    const rec = connectRecorder();
+    rec.post({ sessionId: 51, type: "ASK_ZO", userQuery: "summarize my RTI notes", modeId: "cobrowse", chatId: "chat-rf-1" });
+    await waitUntil(() => rec.seen.some((m) => m.type === "STREAM_DONE"));
+
+    // The MCP read_file went out with the workspace-confined path
+    const mcpCalls = fm.requests.filter((r) => r.url.endsWith("/mcp") && r.body.method === "tools/call" && r.body.params?.name === "read_file");
+    expect(mcpCalls.length).toBe(1);
+    expect(mcpCalls[0].body.params.name).toBe("read_file");
+    expect(mcpCalls[0].body.params.arguments.target_file).toBe(FILE_PATH);
+
+    // TWO /zo/ask calls for ONE user turn — the second carries the fenced content
+    const asks = fm.requests.filter((r) => r.url.includes("/zo/ask")).slice(askBase);
+    expect(asks.length).toBe(2);
+    expect(asks[1].body.input).toContain("## Auto-fetched: file rti.md");
+    expect(asks[1].body.input).toContain(FILE_CONTENT);
+    expect(asks[1].body.input).not.toContain("file_ref"); // descriptor unwrapped away
+
+    // Trace card pair for the pull, distinct toolName incl. basename
+    const toolCall = rec.seen.find((m) => m.type === "STREAM_TOOL" && m.phase === "call");
+    expect(toolCall.toolName).toBe("read_file rti.md");
+    const toolResult = rec.seen.find((m) => m.type === "STREAM_TOOL" && m.phase === "result");
+    expect(toolResult.callId).toBe(toolCall.callId);
+    expect(toolResult.outcome).toBe("ok");
+
+    // Same-session continuation: the final answer landed on the original stream
+    const done = rec.seen.find((m) => m.type === "STREAM_DONE");
+    expect(done.fullText).toBe("The guide says the fee is Rs.10.");
+    expect(rec.seen.every((m) => m.sessionId === 51)).toBe(true);
+  });
+
+  it("the same path requested twice in one turn is pulled ONCE — the retry is a duplicate follow-up", async () => {
+    installReadFileFlow([
+      zoSseText({ text: JSON.stringify({ actions: [{ type: "read_file", path: FILE_PATH }] }) }),
+      // Zo asks again for the same file in its continuation…
+      zoSseText({ text: JSON.stringify({ actions: [{ type: "read_file", path: FILE_PATH }] }) }),
+      // …and gets the pointer-only follow-up, then finishes.
+      zoSseText({ text: "Done summarizing." }),
+    ]);
+    const rec = connectRecorder();
+    rec.post({ sessionId: 52, type: "ASK_ZO", userQuery: "again", modeId: "cobrowse", chatId: "chat-rf-2" });
+    await waitUntil(() => rec.seen.some((m) => m.type === "STREAM_DONE" ));
+
+    expect(readFileCalls).toBe(1); // the MCP tool ran once
+    const asks = fm.requests.filter((r) => r.url.includes("/zo/ask")).slice(askBase);
+    expect(asks.length).toBe(3);
+    expect(asks[2].body.input).toContain("already provided above");
+  });
+
+  it("traversal paths never reach the MCP tool — honest unavailable follow-up instead", async () => {
+    installReadFileFlow([
+      zoSseText({ text: JSON.stringify({ actions: [{ type: "read_file", path: "/home/workspace/../../etc/passwd" }] }) }),
+      zoSseText({ text: "Understood — continuing without it." }),
+    ]);
+    const rec = connectRecorder();
+    rec.post({ sessionId: 53, type: "ASK_ZO", userQuery: "sneaky", modeId: "cobrowse", chatId: "chat-rf-3" });
+    await waitUntil(() => rec.seen.some((m) => m.type === "STREAM_DONE"));
+
+    expect(readFileCalls).toBe(0); // nothing escaped to the wire
+    const asks = fm.requests.filter((r) => r.url.includes("/zo/ask")).slice(askBase);
+    expect(asks[1].body.input).toContain("/home/workspace/../../etc/passwd");
+    expect(asks[1].body.input).toContain("could not be read");
+    const toolResult = rec.seen.find((m) => m.type === "STREAM_TOOL" && m.phase === "result");
+    expect(toolResult.outcome).toBe("error");
+  });
+
+  it("an MCP tool error degrades to an unavailable follow-up and does NOT mark the file sent", async () => {
+    installReadFileFlow([
+      zoSseText({ text: JSON.stringify({ actions: [{ type: "read_file", path: "/home/workspace/missing.md" }] }) }),
+      zoSseText({ text: JSON.stringify({ actions: [{ type: "read_file", path: "/home/workspace/missing.md" }] }) }),
+      zoSseText({ text: "Moved on." }),
+    ]);
+    const rec = connectRecorder();
+    rec.post({ sessionId: 54, type: "ASK_ZO", userQuery: "retry", modeId: "cobrowse", chatId: "chat-rf-4" });
+    await waitUntil(() => rec.seen.some((m) => m.type === "STREAM_DONE"));
+
+    // First read failed honestly; the retry was NOT deduped away — the tool
+    // ran again (a transient MCP failure must not poison the send-once state).
+    expect(readFileCalls).toBe(2);
+    const asks = fm.requests.filter((r) => r.url.includes("/zo/ask")).slice(askBase);
+    expect(asks[1].body.input).toContain("could not be read");
+    expect(asks[2].body.input).toContain("could not be read");
+  });
+});
+
+describe("write-assist stream port (#53)", () => {
+  /** Chunked SSE fixture: narration, then tagged content in 3 pieces. */
+  function waSse() {
+    // sseResponse takes a single string — join the event blocks here.
+    return sseResponse([
+      sseEvent("PartStartEvent", { index: 1, part: { part_kind: "text", content: "Let me think. " } }),
+      sseEvent("PartDeltaEvent", { index: 1, delta: { part_delta_kind: "text", content_delta: "<write-assist>" } }),
+      sseEvent("PartDeltaEvent", { index: 1, delta: { part_delta_kind: "text", content_delta: "I led " } }),
+      sseEvent("PartDeltaEvent", { index: 1, delta: { part_delta_kind: "text", content_delta: "the migration of 40 dashboards." } }),
+      sseEvent("PartDeltaEvent", { index: 1, delta: { part_delta_kind: "text", content_delta: "</write-assist>" } }),
+      sseEvent("completed", { status: "succeeded" }),
+    ].join("\n"));
+  }
+
+  function connectWa(): { port: any; seen: any[] } {
+    const port = bus.runtime.connect({ name: "cobrowse-wa-stream" });
+    const seen: any[] = [];
+    port.onMessage.addListener((m: any) => seen.push(m));
+    return { port, seen };
+  }
+
+  it("streams WA_DELTA pieces and finishes with the parsed tag text (narration dropped)", async () => {
+    fm.handle((url) => (url.includes("/zo/ask") ? waSse() : jsonResponse({})));
+    const { port, seen } = connectWa();
+    port.postMessage({ type: "WA_ENHANCE", text: "draft text", instruction: "", field: {}, page: {} });
+    await waitUntil(() => seen.some((m) => m.type === "WA_DONE"), 5000);
+
+    const deltas = seen.filter((m) => m.type === "WA_DELTA");
+    expect(deltas.length).toBeGreaterThanOrEqual(3); // incremental, not one blob
+    expect(deltas[0].delta).toBe("Let me think. ");
+    expect(deltas[deltas.length - 1].raw).toContain("</write-assist>");
+    for (const m of seen) expect(() => WaStreamEvent.parse(m)).not.toThrow();
+
+    const done = seen.find((m) => m.type === "WA_DONE");
+    expect(done.text).toBe("I led the migration of 40 dashboards.");
+    // The ask went out as a streaming, threadless enhance.
+    const ask = fm.requests.filter((r) => r.url.includes("/zo/ask")).pop();
+    expect(ask.body.stream).toBe(true);
+    expect(ask.body.conversation_id).toBeUndefined();
+    expect(ask.body.input).toContain("write-assist");
+  });
+
+  it("a follow-up turn carries the thread + prior text and asks for a revision", async () => {
+    fm.handle((url) => (url.includes("/zo/ask") ? waSse() : jsonResponse({})));
+    const { port, seen } = connectWa();
+    port.postMessage({
+      type: "WA_ENHANCE",
+      text: "draft",
+      instruction: "make it shorter",
+      field: {},
+      page: {},
+      conversationId: "conv_wa_thread",
+      priorText: "The long prior draft",
+    });
+    await waitUntil(() => seen.some((m) => m.type === "WA_DONE"), 5000);
+    const ask = fm.requests.filter((r) => r.url.includes("/zo/ask")).pop();
+    expect(ask.body.conversation_id).toBe("conv_wa_thread");
+    expect(ask.body.input).toContain("FOLLOW-UP iteration");
+    expect(ask.body.input).toContain("The long prior draft");
+    expect(ask.body.input).toContain("make it shorter");
+  });
+
+  it("HTTP failure surfaces WA_ERROR on the port", async () => {
+    fm.handle((url) => (url.includes("/zo/ask") ? jsonResponse({}, { status: 500 }) : jsonResponse({})));
+    const { port, seen } = connectWa();
+    port.postMessage({ type: "WA_ENHANCE", text: "x", instruction: "", field: {}, page: {} });
+    await waitUntil(() => seen.some((m) => m.type === "WA_ERROR"), 5000);
+    expect(seen.find((m) => m.type === "WA_ERROR").error).toContain("500");
+    expect(seen.some((m) => m.type === "WA_DONE")).toBe(false);
+  });
+});
+
+describe("SAVE_CONVERSATION — #51 workspace export", () => {
+  it("issues the one-shot agent-write prompt with the transcript and echoes {ok, path}", async () => {
+    const conv = {
+      title: "RTI research",
+      messages: [
+        { role: "user", text: "Find the RTI fee", timestamp: 1757800000000 },
+        { role: "assistant", text: "The RTI fee is Rs.10.", timestamp: 1757800001000 },
+      ],
+    };
+    let writePrompt = "";
+    fm.handle((url) => {
+      if (url.includes("/zo/ask")) {
+        return jsonResponse({ output: "Confirmed write." });
+      }
+      return jsonResponse({});
+    });
+    fm.to("/zo/ask").length; // noop read keeps types happy
+    const asksBefore = fm.requests.filter((r) => r.url.includes("/zo/ask")).length;
+    const resp = await bus.runtime.sendMessage({ type: "SAVE_CONVERSATION", conversation: conv, savePath: "" });
+    await waitUntil(() => fm.requests.filter((r) => r.url.includes("/zo/ask")).length === asksBefore + 1, 5000);
+    const asks = fm.requests.filter((r) => r.url.includes("/zo/ask"));
+    writePrompt = asks[asks.length - 1].body.input;
+    expect(resp.ok).toBe(true);
+    expect(resp.path).toBe("Documents/research/rti-research.md");
+    expect(resp.response).toBe("Confirmed write.");
+    // The prompt asks for a file write and carries the serialized transcript.
+    expect(writePrompt).toContain("Write the following content to the file at path");
+    expect(writePrompt).toContain("Documents/research/rti-research.md");
+    expect(writePrompt).toContain("# RTI research");
+    expect(writePrompt).toContain("The RTI fee is Rs.10.");
+  });
+
+  it("an explicit path wins over the derived default", async () => {
+    fm.handle((url) => (url.includes("/zo/ask") ? jsonResponse({ output: "ok" }) : jsonResponse({})));
+    const before = fm.requests.filter((r) => r.url.includes("/zo/ask")).length;
+    const resp = await bus.runtime.sendMessage({
+      type: "SAVE_CONVERSATION",
+      conversation: { title: "Any", messages: [] },
+      savePath: "Notes/chats/any.md",
+    });
+    await waitUntil(() => fm.requests.filter((r) => r.url.includes("/zo/ask")).length === before + 1, 5000);
+    const asks = fm.requests.filter((r) => r.url.includes("/zo/ask"));
+    expect(resp.ok).toBe(true);
+    expect(resp.path).toBe("Notes/chats/any.md");
+    expect(asks[asks.length - 1].body.input).toContain("Notes/chats/any.md");
   });
 });

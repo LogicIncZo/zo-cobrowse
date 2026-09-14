@@ -1,0 +1,376 @@
+# Zo Co-browse improvement factory — a standing, continuously-driven
+# @swamp/software-factory instance. The machine does NOT model a release
+# cadence: it turns work items into reviewed, verified, merged improvements,
+# forever. One factory serves many concurrent items:
+#
+#   - fix/improve items: a QA finding, a GitHub issue, a BACKLOG polish —
+#     triage → implement → verify → adversarial review → merge. Work item =
+#     the issue number (e.g. 155).
+#   - release items: owner-called point releases (`rel-0.2.8.N`), batched at
+#     owner discretion — NOT one per fix. Spec §4's per-fix rule is
+#     deliberately not encoded.
+#
+# The drive loop (docs/swamp-factory.md): pick the next item from
+# docs/qa/findings/ → the 0.2.8 milestone → BACKLOG queued polish, `start`
+# it, drive via `status`, and when it reaches done, pick the next one.
+#
+# Swamp MIRRORS the repo's gates by shelling out to the repo's own commands
+# (bun run verify / qa:gate / check:drift / lint) and recording their exit
+# codes as evidence. GitHub Actions stays the real enforcement — this machine
+# disciplines local agent runs, it never overrides CI.
+#
+# Usage:
+#   swamp model create @swamp/software-factory zo-loop
+#   swamp model edit zo-loop            # paste this file under globalArguments
+#   swamp model method run zo-loop validate
+#   swamp model method run zo-loop start --input workItem=155
+#
+# Gate evidence is recorded by scripts/swamp/record-gate.sh — never hand-type
+# exit codes. Full walkthrough: docs/swamp-factory.md
+#
+# If your model definition supports sibling keys of globalArguments, scope the
+# work-item summary report the way upstream examples recommend:
+#   reports:
+#     require:
+#       - { name: "@swamp/software-factory/work-item-summary", methods: [summary] }
+stages:
+  - id: intake
+    initial: true
+    description: Classify the work item — fix/improve, owner-called release, or close.
+    work:
+      mode: interactive
+      systemPrompt: |
+        Classify one work item for the zo-cobrowse repo. Items arrive from (in
+        First record_dispatch for this stage, then:
+        priority order): docs/qa/findings/*.md, GitHub issues on the 0.2.8
+        milestone, BACKLOG queued polish; `rel-<version>` items are releases
+        the owner called for.
+
+        Record intake-decision, then advance:
+        - `fix` — a code fix or improvement; the item flows implementing →
+          verify → review → merge.
+        - `release` — cut a point release (owner-called; batches everything
+          already on dev).
+        - `close` — wontfix/duplicate/dismissed; record the rationale and stop.
+    artifacts:
+      - name: intake-decision
+        schema:
+          type: object
+          required: [kind, issueRef, rationale]
+          properties:
+            kind: { type: string }
+            issueRef: { type: string, minLength: 1 }
+            rationale: { type: string }
+    transitions:
+      - name: fix
+        to: implementing
+        gates:
+          - type: artifact-exists
+            config: { artifact: intake-decision }
+      - name: release
+        to: release-prep
+        gates:
+          - type: artifact-exists
+            config: { artifact: intake-decision }
+      - name: close
+        to: done
+        gates:
+          - type: artifact-exists
+            config: { artifact: intake-decision }
+
+  - id: implementing
+    description: Branch, implement + regression test, open the PR against dev.
+    maxCycles: 5
+    work:
+      mode: interactive
+      systemPrompt: |
+        Implement the change for ${{ data.latest(self.name, "artifact-intake-decision").payload.issueRef }}
+        First record_dispatch for this stage, then:
+        in the zo-cobrowse repo.
+
+        Rules:
+        - Branch from `dev` named by kind — `fix/<issue>-<slug>`,
+          `chore/<slug>`, `feature/<slug>` — PR targets `dev`, never `main`.
+        - Bug fixes ship a regression test in tests/ or e2e/, and un-fixme any
+          test.fixme() spec carrying the finding key.
+        - The committed pre-commit hook runs `bun run verify` — do not bypass
+          with --no-verify.
+        - `bun run test:e2e` cannot run on this machine (missing libnspr4); CI
+          is the e2e gate. Do not block on local e2e.
+
+        Record the fix-summary artifact, record the pull-request evidence once
+        the PR is open, then advance `submit`.
+    artifacts:
+      - name: fix-summary
+        schema:
+          type: object
+          required: [summary, branch, testFiles]
+          properties:
+            summary: { type: string }
+            branch: { type: string, minLength: 1 }
+            testFiles:
+              type: array
+              minItems: 1
+              items:
+                type: object
+                required: [path]
+                properties:
+                  path: { type: string }
+    evidence:
+      - name: pull-request
+        schema:
+          type: object
+          required: [url, branch]
+          properties:
+            url: { type: string, minLength: 1 }
+            branch: { type: string, minLength: 1 }
+    transitions:
+      - name: submit
+        to: verifying
+        gates:
+          - type: artifact-exists
+            config: { artifact: fix-summary }
+          - type: evidence-recorded
+            config: { name: pull-request }
+
+  - id: verifying
+    description: Local gate — the full verify suite must exit 0 on the change.
+    work:
+      mode: interactive
+      systemPrompt: |
+        Run the repo's verify gate from the root via the evidence helper (it
+        First record_dispatch for this stage, then:
+        records exit codes honestly — never hand-type them):
+
+          bash scripts/swamp/record-gate.sh <workItem> gate-verify bun run verify
+
+        Green (status succeeded) → advance `pass` into adversarial review.
+        Red → advance `fail`, fix, resubmit. The circuit breaker (maxCycles)
+        parks the item for a human if the loop thrashes.
+    evidence:
+      - name: gate-verify
+        schema:
+          type: object
+          required: [command, exitCode]
+          properties:
+            command: { type: string, minLength: 1 }
+            exitCode: { type: number }
+            status: { type: string }
+            sha: { type: string }
+    transitions:
+      - name: pass
+        to: review
+        gates:
+          - type: evidence-recorded
+            config: { name: gate-verify, requireField: { status: succeeded } }
+      - name: fail
+        to: implementing
+        gates:
+          - type: evidence-recorded
+            config: { name: gate-verify, requireField: { status: failed } }
+
+  - id: review
+    description: Adversarial review of the change — try to refute it; findings gate the merge.
+    work:
+      mode: interactive
+      systemPrompt: |
+        Adversarially review the change at the PR recorded in evidence
+        First record_dispatch for this stage, then:
+        pull-request (`gh pr diff <url>`). Your job is to refute it: correctness,
+        regressions, missed schema contracts (tests/schemas/), text-safety sinks,
+        security. Record every finding as an entry of the change-review artifact
+        with a severity (critical / high / medium / low). Do not soften findings.
+
+        Clean pass still records the artifact (empty findings or low-severity
+        informational entries) — an empty report must never be mistaken for a
+        skipped review. Then advance `approve` (gates re-check freshness and
+        blocking severities) or `rework` back to implementing.
+    artifacts:
+      - name: change-review
+        kind: findings
+        reviews: fix-summary
+    transitions:
+      - name: approve
+        to: merge
+        gates:
+          - type: artifact-fresh
+            config: { artifact: change-review, recordedThisCycle: true }
+          - type: findings-clear
+            config: { artifact: change-review, blocking: [critical, high] }
+      - name: rework
+        to: implementing
+
+  - id: merge
+    description: PR checks green on GitHub, then the owner merges.
+    work:
+      mode: interactive
+      systemPrompt: |
+        Watch the PR recorded in evidence pull-request: `gh pr checks <url>`
+        First record_dispatch for this stage, then:
+        until the CI + e2e jobs finish. CI is authoritative — a red job means
+        record ci-run with conclusion failure and loop back to implementing.
+
+        When every check is green, the OWNER merges the PR (human gate). After
+        the merge is confirmed, record the merge-approval via
+        `approve --input gateId=merge-approval`, record ci-run evidence with
+        conclusion success, then advance `merged` — and pick the next work
+        item; the loop continues.
+    evidence:
+      - name: ci-run
+        schema:
+          type: object
+          required: [prUrl, conclusion]
+          properties:
+            prUrl: { type: string, minLength: 1 }
+            headSha: { type: string }
+            conclusion: { type: string }
+    transitions:
+      - name: merged
+        to: done
+        gates:
+          - type: evidence-recorded
+            config: { name: ci-run, requireField: { conclusion: success } }
+          - type: human-approval
+            config: { id: merge-approval }
+      - name: failed
+        to: implementing
+        gates:
+          - type: evidence-recorded
+            config: { name: ci-run, requireField: { conclusion: failure } }
+
+  - id: release-prep
+    description: Owner-called point release — chore(release) bump, evidence-gated checks, dev→main PR, owner approval.
+    maxCycles: 5
+    work:
+      mode: interactive
+      systemPrompt: |
+        Prepare one point release (batched at owner discretion — this is NOT
+        First record_dispatch for this stage, then:
+        one-per-fix):
+        1. chore(release) commit bumping extension/manifest.json version AND
+           version_name plus package.json to the next version (4 segments).
+        2. Run the three release gates from the repo root via
+           scripts/swamp/record-gate.sh (it records the evidence payloads):
+           `bash scripts/swamp/record-gate.sh <workItem> gate-qa bun run qa:gate`
+           `bash scripts/swamp/record-gate.sh <workItem> gate-drift bun run check:drift`
+           `bash scripts/swamp/record-gate.sh <workItem> gate-lint bun run lint`
+           A red gate means findings queue/drift/lint problems — record it
+           honestly, then `postpone` (close this item) and loop new work items
+           for whatever blocked.
+        3. Open the dev→main PR. State the batch (which fixes ride this
+           release) in the PR body.
+        4. The OWNER merges the dev→main PR, then approves:
+           `approve --input gateId=release-approval`. Advance `approve`.
+
+        Never hand-type gate evidence — only record-gate.sh output.
+    evidence:
+      - name: gate-qa
+        schema:
+          type: object
+          required: [command, exitCode]
+          properties:
+            command: { type: string, minLength: 1 }
+            exitCode: { type: number }
+            status: { type: string }
+            sha: { type: string }
+      - name: gate-drift
+        schema:
+          type: object
+          required: [command, exitCode]
+          properties:
+            command: { type: string, minLength: 1 }
+            exitCode: { type: number }
+            status: { type: string }
+            sha: { type: string }
+      - name: gate-lint
+        schema:
+          type: object
+          required: [command, exitCode]
+          properties:
+            command: { type: string, minLength: 1 }
+            exitCode: { type: number }
+            status: { type: string }
+            sha: { type: string }
+    transitions:
+      - name: approve
+        to: tagging
+        gates:
+          - type: evidence-recorded
+            config: { name: gate-qa, requireField: { exitCode: 0 } }
+          - type: evidence-recorded
+            config: { name: gate-drift, requireField: { exitCode: 0 } }
+          - type: evidence-recorded
+            config: { name: gate-lint, requireField: { exitCode: 0 } }
+          - type: human-approval
+            config: { id: release-approval }
+      - name: postpone
+        to: done
+
+  - id: tagging
+    description: Tag the release on main and push — the tag is the release trigger.
+    work:
+      mode: interactive
+      systemPrompt: |
+        Per CONTRIBUTING rule 4: `git checkout main && git pull && git tag
+        First record_dispatch for this stage, then:
+        <version> && git push origin <version>`. Merging to main does NOT
+        release; the v* tag triggers .github/workflows/release.yml.
+        Record tag-ref evidence, then advance `publish`.
+    evidence:
+      - name: tag-ref
+        schema:
+          type: object
+          required: [tag, sha]
+          properties:
+            tag: { type: string, minLength: 1 }
+            sha: { type: string, minLength: 7 }
+    transitions:
+      - name: publish
+        to: publishing
+        gates:
+          - type: evidence-recorded
+            config: { name: tag-ref }
+
+  - id: publishing
+    description: Watch the release workflow run and record its conclusion.
+    work:
+      mode: interactive
+      systemPrompt: |
+        Watch the release.yml run for the tagged version:
+        First record_dispatch for this stage, then:
+        `gh run list --workflow release.yml` then `gh run watch <id>`.
+        Record release-run evidence with the run URL and conclusion.
+        success → advance `published`; failure → advance `failed` (loops back
+        to release-prep; a red release is investigated, never re-tagged blind).
+    evidence:
+      - name: release-run
+        schema:
+          type: object
+          required: [runUrl, conclusion]
+          properties:
+            runUrl: { type: string, minLength: 1 }
+            conclusion: { type: string }
+    transitions:
+      - name: published
+        to: done
+        gates:
+          - type: evidence-recorded
+            config: { name: release-run, requireField: { conclusion: success } }
+      - name: failed
+        to: release-prep
+        gates:
+          - type: evidence-recorded
+            config: { name: release-run, requireField: { conclusion: failure } }
+
+  - id: done
+    terminal: true
+
+  - id: aborted
+    terminal: true
+
+globalTransitions:
+  - name: abort
+    to: aborted
+    gates:
+      - type: human-approval
+        config: { id: abort-confirmation }

@@ -4,6 +4,7 @@ import {
   MAX_PULL_CYCLES,
   DOM_CLICKABLE_CAP,
   DOM_FORM_CAP,
+  FILE_BODY_CAP,
   pullTier,
   pullCaptureOpts,
   extractPullRequests,
@@ -15,8 +16,8 @@ import { CONTEXT_ACTION_NAMES, ACTION_SCHEMA_COMPACT } from "../extension/lib/mo
 import { PullRequestSchema, FollowUpSchema, PullCaptureSchema } from "./schemas/pull.js";
 
 describe("pull protocol — constants", () => {
-  it("lists the four context-only pull actions, mirroring modes.js", () => {
-    expect([...PULL_ACTION_NAMES].sort()).toEqual(["get_dom", "get_form", "read_page", "read_tab"]);
+  it("lists the five context-only pull actions, mirroring modes.js", () => {
+    expect([...PULL_ACTION_NAMES].sort()).toEqual(["get_dom", "get_form", "read_file", "read_page", "read_tab"]);
     expect(PULL_ACTION_NAMES).toEqual(CONTEXT_ACTION_NAMES);
   });
 
@@ -35,6 +36,7 @@ describe("pullTier / pullCaptureOpts", () => {
     expect(pullTier("read_page")).toBe(1);
     expect(pullTier("get_dom")).toBe(2);
     expect(pullTier("get_form")).toBe(2);
+    expect(pullTier("read_file")).toBe(1); // text-level — no capture actually happens
   });
 
   it("maps each pull kind to its capture-shape hint", () => {
@@ -42,6 +44,7 @@ describe("pullTier / pullCaptureOpts", () => {
     expect(pullCaptureOpts("get_dom")).toEqual({ pull: "dom" });
     expect(pullCaptureOpts("get_form")).toEqual({ pull: "form" });
     expect(pullCaptureOpts("read_tab")).toEqual({ pull: null });
+    expect(pullCaptureOpts("read_file")).toEqual({ pull: null }); // no tab to capture
   });
 });
 
@@ -53,12 +56,14 @@ describe("extractPullRequests", () => {
       { type: "click", selector: "#x" },
       { type: "read_page" },
       { type: "get_dom" },
+      { type: "read_file", path: "/home/workspace/notes.md" },
     ]);
     expect(out).toEqual([
       { type: "get_form" },
       { type: "read_tab", ref: "T2" },
       { type: "read_page" },
       { type: "get_dom" },
+      { type: "read_file", path: "/home/workspace/notes.md" },
     ]);
     for (const r of out) expect(PullRequestSchema.safeParse(r).success).toBe(true);
   });
@@ -67,6 +72,19 @@ describe("extractPullRequests", () => {
     expect(extractPullRequests([{ type: "read_tab" }, { type: "read_tab", ref: "  " }])).toEqual([]);
     expect(extractPullRequests(null)).toEqual([]);
     expect(extractPullRequests("read_page")).toEqual([]);
+  });
+
+  it("read_file: canonical path, MCP-native target_file alias, and empty paths all ride", () => {
+    expect(extractPullRequests([{ type: "read_file", path: " /home/workspace/a.md " }]))
+      .toEqual([{ type: "read_file", path: "/home/workspace/a.md" }]);
+    // Zo sometimes echoes the tool's native arg spelling — accept it.
+    expect(extractPullRequests([{ type: "read_file", target_file: "/home/workspace/b.md" }]))
+      .toEqual([{ type: "read_file", path: "/home/workspace/b.md" }]);
+    // Empty/absent paths are KEPT (unavailable follow-up downstream), not dropped.
+    expect(extractPullRequests([{ type: "read_file" }]))
+      .toEqual([{ type: "read_file", path: "" }]);
+    expect(extractPullRequests([{ type: "read_file", path: "../../etc/passwd" }]))
+      .toEqual([{ type: "read_file", path: "../../etc/passwd" }]);
   });
 
   it("sees actions that survive normalizeActions (the parse path)", async () => {
@@ -86,6 +104,13 @@ describe("pullHash (send-once keys)", () => {
     expect(pullHash("get_form", "h1")).toBe("get_form:h1");
     expect(pullHash("read_page", "h1")).toBe("read_page:h1");
     expect(pullHash("get_dom", "h1")).not.toBe(pullHash("get_form", "h1"));
+  });
+
+  it("keys read_file on the path, independent of any page hash (#52)", () => {
+    expect(pullHash("read_file", "/home/workspace/notes.md")).toBe("file:/home/workspace/notes.md");
+    expect(pullHash("read_file", "/home/workspace/other.md")).not.toBe(pullHash("read_file", "/home/workspace/notes.md"));
+    // …and distinct from an active-page hash collision
+    expect(pullHash("read_file", "h1")).not.toBe(pullHash("read_page", "h1"));
   });
 });
 
@@ -165,5 +190,74 @@ describe("buildPullFollowUp — active-page kinds", () => {
 
   it("accepts pageContext-shaped captures against the schema", () => {
     expect(PullCaptureSchema.safeParse(capture).success).toBe(true);
+  });
+});
+
+describe("buildPullFollowUp — read_file (#52)", () => {
+  const path = "/home/workspace/notes/rti.md";
+
+  it("renders the fenced file content under a file header", () => {
+    const fu = buildPullFollowUp("read_file", { path }, { content: "line one\nline two" });
+    expect(FollowUpSchema.safeParse(fu).success).toBe(true);
+    expect(fu.kind).toBe("content");
+    expect(fu.input).toContain("## Auto-fetched: file rti.md — /home/workspace/notes/rti.md");
+    expect(fu.input).toContain("```text\nline one\nline two\n```");
+    expect(fu.input).toContain("Continue with the user's request using this file content.");
+    // No page semantics leak in — no URL line, no page header.
+    expect(fu.input).not.toContain("URL:");
+    expect(fu.input).not.toContain("current page");
+  });
+
+  it("caps the body at the 8 KB tab-excerpt budget with an honest truncation note", () => {
+    const big = "x".repeat(FILE_BODY_CAP + 500);
+    const fu = buildPullFollowUp("read_file", { path }, { content: big });
+    expect(fu.kind).toBe("content");
+    expect(fu.input).toContain("x".repeat(FILE_BODY_CAP));
+    expect(fu.input).not.toContain("x".repeat(FILE_BODY_CAP + 1));
+    expect(fu.input).toContain(`truncated`);
+    expect(fu.input).toContain(`${big.length} chars total`);
+  });
+
+  it("unavailable on failed reads, empty content, and empty paths — never a throw", () => {
+    const failed = buildPullFollowUp("read_file", { path }, null);
+    expect(failed.kind).toBe("unavailable");
+    expect(failed.input).toContain("could not be read");
+
+    const empty = buildPullFollowUp("read_file", { path }, { content: "   \n  " });
+    expect(empty.kind).toBe("unavailable");
+
+    const noPath = buildPullFollowUp("read_file", { path: "" }, { content: "data" });
+    expect(noPath.kind).toBe("unavailable");
+    expect(noPath.input).toContain("empty or invalid");
+
+    const noTarget = buildPullFollowUp("read_file", null, { content: "data" });
+    expect(noTarget.kind).toBe("unavailable");
+  });
+
+  it("unsafe paths ride as unavailable (the path is echoed, not rejected with a throw)", () => {
+    const fu = buildPullFollowUp("read_file", { path: "/home/workspace/../../etc/passwd" }, null);
+    expect(fu.kind).toBe("unavailable");
+    expect(fu.input).toContain("/home/workspace/../../etc/passwd");
+  });
+
+  it("reason branches reuse the shared vocabulary (budget / duplicate)", () => {
+    const budget = buildPullFollowUp("read_file", { path }, { content: "data" }, { reason: "budget" });
+    expect(budget.kind).toBe("budget");
+    expect(budget.input).toContain("pull budget for this turn exhausted");
+    expect(FollowUpSchema.safeParse(budget).success).toBe(true);
+
+    const dup = buildPullFollowUp("read_file", { path }, { content: "data" }, { reason: "duplicate" });
+    expect(dup.kind).toBe("duplicate");
+    expect(dup.input).toContain("already provided above");
+  });
+
+  it("extraction + follow-up compose on the schema union", () => {
+    for (const req of extractPullRequests([
+      { type: "read_file", path },
+      { type: "read_file", target_file: path },
+      { type: "read_file" },
+    ])) {
+      expect(PullRequestSchema.safeParse(req).success).toBe(true);
+    }
   });
 });

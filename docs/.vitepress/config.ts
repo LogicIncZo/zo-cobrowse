@@ -18,6 +18,7 @@ export default defineConfig({
     logo: '/logo.png',
 
     nav: [
+      { text: 'Updates', link: '/updates' },
       { text: 'Guide', link: '/guide/getting-started', activeMatch: '/guide/' },
       { text: 'Concepts', link: '/concepts/architecture', activeMatch: '/concepts/' },
       { text: 'Reference', link: '/reference/zo-api', activeMatch: '/reference/' },
@@ -69,6 +70,7 @@ export default defineConfig({
         {
           text: 'More',
           items: [
+            { text: 'Updates', link: '/updates' },
             { text: 'Backend Relay', link: '/backend' },
             { text: 'Privacy', link: '/privacy' },
             { text: 'Contributing', link: '/contributing' },

@@ -42,6 +42,9 @@ export const ConversationSchema = z
     updatedAt: z.number(),
     messages: z.array(ChatMessageSchema),
     zoThreadId: z.string().optional(),
+    /** Pin flag (#54): pinned chats are exempt from the 8-tab LRU eviction
+     *  and sort first. Lives on the record → persists across restarts. */
+    pinned: z.boolean().optional(),
     pendingActions: z
       .object({
         reasoning: z.string(),
@@ -77,6 +80,8 @@ export const ChatSummarySchema = z.object({
   /** Zo thread id when the conversation has one (drives the history card's
    *  copy-id / Open-in-Zo actions, 0.2.8.0). Absent otherwise. */
   zoThreadId: z.string().optional(),
+  /** Pin flag (#54) — surfaced so history/search can render the state. */
+  pinned: z.boolean().optional(),
 });
 export type ChatSummary = z.infer<typeof ChatSummarySchema>;
 export const ChatSummaryArray = z.array(ChatSummarySchema);

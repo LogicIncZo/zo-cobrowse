@@ -174,6 +174,38 @@ describe("parseBangCommand — schema conformance", () => {
   });
 });
 
+describe("!export (#51)", () => {
+  it("bare !export targets the conversation", () => {
+    expect(parse("!export")).toEqual({ handled: true, kind: "export", exportTarget: "conversation" });
+    expect(parse("!export  ")).toEqual({ handled: true, kind: "export", exportTarget: "conversation" }); // trailing ws ok, leading is a different query
+  });
+
+  it("!export page / !export pdf target the page and reader view", () => {
+    expect(parse("!export page")).toEqual({ handled: true, kind: "export", exportTarget: "page" });
+    expect(parse("!export pdf")).toEqual({ handled: true, kind: "export", exportTarget: "pdf" });
+    expect(parse("!export reader")).toEqual({ handled: true, kind: "export", exportTarget: "pdf" });
+  });
+
+  it("!export <path> targets the workspace with the path preserved", () => {
+    expect(parse("!export Documents/research/rti.md")).toEqual({
+      handled: true, kind: "export", exportTarget: "workspace", exportPath: "Documents/research/rti.md",
+    });
+    expect(parse("!export notes/rti-guide.md")).toEqual({
+      handled: true, kind: "export", exportTarget: "workspace", exportPath: "notes/rti-guide.md",
+    });
+  });
+
+  it("case-insensitive targets, and the result is always schema-valid", () => {
+    expect(parse("!export PAGE")).toEqual({ handled: true, kind: "export", exportTarget: "page" });
+    expect(parse("!export PDF")).toEqual({ handled: true, kind: "export", exportTarget: "pdf" });
+  });
+
+  it("!help mentions the export line", () => {
+    const r = parse("!help");
+    if ("inlineReply" in r) expect(r.inlineReply).toContain("!export");
+  });
+});
+
 describe("BANG_COMMANDS — registry integrity", () => {
   it("every command has label + desc + buildQuery function", () => {
     for (const [name, def] of Object.entries(BANG_COMMANDS)) {
@@ -191,5 +223,48 @@ describe("BANG_COMMANDS — registry integrity", () => {
       expect(typeof q).toBe("string");
       expect(q.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("!recipe — subcommands (#220)", () => {
+  it("!recipe run carries the workspace path or local name", () => {
+    expect(parse("!recipe run recipes/rti-filing.json")).toEqual({
+      handled: true, kind: "recipe", isRecipe: true, sub: "run", target: "recipes/rti-filing.json",
+    });
+    expect(parse("!recipe run rti")).toEqual({
+      handled: true, kind: "recipe", isRecipe: true, sub: "run", target: "rti",
+    });
+  });
+
+  it("!recipe record carries the optional draft name", () => {
+    expect(parse("!recipe record rti-flow")).toEqual({
+      handled: true, kind: "recipe", isRecipe: true, sub: "record", target: "rti-flow",
+    });
+    expect(parse("!recipe record")).toEqual({
+      handled: true, kind: "recipe", isRecipe: true, sub: "record", target: "",
+    });
+  });
+
+  it("!recipe stop / list parse with empty targets", () => {
+    expect(parse("!recipe stop")).toEqual({
+      handled: true, kind: "recipe", isRecipe: true, sub: "stop", target: "",
+    });
+    expect(parse("!recipe list")).toEqual({
+      handled: true, kind: "recipe", isRecipe: true, sub: "list", target: "",
+    });
+  });
+
+  it("bare !recipe, unknown subs, and run-without-target → inline usage", () => {
+    for (const raw of ["!recipe", "!recipe bogus", "!recipe run"]) {
+      const r = parse(raw);
+      expect(r.handled).toBe(true);
+      expect(r.kind).toBe("inline");
+      if ("inlineReply" in r) expect(r.inlineReply).toContain("Usage:");
+    }
+  });
+
+  it("!help mentions the recipe line", () => {
+    const r = parse("!help");
+    if ("inlineReply" in r) expect(r.inlineReply).toContain("!recipe");
   });
 });

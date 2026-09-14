@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { readFileSync } from "fs";
 import { resolve } from "path";
-import * as vm from "node:vm";
+import { runInSandbox } from "./helpers/vm-sandbox";
 
 /**
  * Pure-logic tests for the zo.computer-style UI helpers added to sidepanel.js:
@@ -35,8 +35,7 @@ function extractFn(name: string): string {
 
 function loadPureHelpers() {
   const sandbox: any = {};
-  vm.createContext(sandbox);
-  vm.runInContext(
+  runInSandbox(
     extractFn("safeText") + "\n" +
     extractFn("reasoningSummary") + "\n" +
     extractFn("actionKey") + "\n" +

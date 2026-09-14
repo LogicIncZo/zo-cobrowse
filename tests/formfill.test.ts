@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
-import { isSensitiveForm, redactValue, reviewRows } from "../extension/lib/formfill";
-import { SensitivityVerdictSchema, ReviewRowSchema } from "./schemas/formfill";
+import { isSensitiveForm, redactValue, reviewRows, fillBatchRows } from "../extension/lib/formfill";
+import { SensitivityVerdictSchema, ReviewRowSchema, FillBatchRowSchema } from "./schemas/formfill";
 
 const F = (over: Record<string, unknown> = {}) => ({ type: "text", name: "", placeholder: "", question: "", ...over });
 
@@ -77,5 +77,84 @@ describe("reviewRows", () => {
       [F({ question: "Your name", placeholder: "Type your answer here..." })],
     );
     expect(rows[0]).toMatchObject({ target: "Your name", type: "text", secret: false });
+  });
+});
+
+describe("fillBatchRows — Run-All batch join", () => {
+  const expectRowValid = (r: unknown) => {
+    const parsed = FillBatchRowSchema.safeParse(r);
+    if (!parsed.success) throw new Error(`row shape drift: ${parsed.error.issues.map((i) => i.message).join("; ")}`);
+    return r as ReturnType<typeof fillBatchRows>[number];
+  };
+
+  it("joins fill_form values to captured metadata (placeholder/question/name/selector)", () => {
+    const fields = [
+      F({ type: "email", name: "email", placeholder: "Your email", question: "Email address" }),
+      F({ name: "fullname", question: "Full name" }),
+      F({ type: "tel", name: "phone" }),
+      F({ type: "text", selector: "#addr", name: "street" }),
+    ];
+    const actions = [{
+      type: "fill_form" as const,
+      values: [
+        { target: "Your email", value: "ada@example.com" },
+        { target: "Full name", value: "Ada" },
+        { target: "phone", value: "555-0100" },
+        { target: "#addr", value: "1 Main St", selector: "#addr" },
+      ],
+    }];
+    const rows = fillBatchRows(actions, fields).map(expectRowValid);
+    expect(rows.map((r) => r.type)).toEqual(["email", "text", "tel", "text"]); // joined meta types
+    expect(rows.every((r) => r.kind === "fill_form")).toBe(true);
+    expect(rows[0]).toMatchObject({ vi: 0, secret: false, value: "ada@example.com", redacted: "••••om" });
+    expect(rows[1].vi).toBe(1);
+  });
+
+  it("blanks secret rows — password type or sensitive target — but keeps the redacted display form", () => {
+    const actions = [{
+      type: "fill_form" as const,
+      values: [
+        { target: "Password", value: "hunter2" },
+        { target: "card number", value: "4242424242424242" },
+      ],
+    }];
+    const rows = fillBatchRows(actions, [F({ type: "password", name: "pw", placeholder: "Password" })]).map(expectRowValid);
+    expect(rows[0]).toMatchObject({ secret: true, value: "", type: "password", redacted: "••••r2" });
+    expect(rows[1]).toMatchObject({ secret: true, value: "", redacted: "••••42" });
+  });
+
+  it("labels plain fill actions from captured metadata, falls back to the selector", () => {
+    const fields = [F({ name: "email", question: "Email address", type: "email" })];
+    const actions = [
+      { type: "fill" as const, selector: "input[name=email]", value: "ada@example.com" },
+      { type: "fill" as const, selector: "#mystery", value: "x" },
+    ];
+    const rows = fillBatchRows(actions, fields).map(expectRowValid);
+    expect(rows[0]).toMatchObject({ kind: "fill", ai: 0, vi: null, target: "Email address", type: "email", secret: false });
+    expect(rows[1]).toMatchObject({ kind: "fill", target: "#mystery", type: "" });
+  });
+
+  it("blanks a plain fill whose selector or label reads as sensitive", () => {
+    const actions = [
+      { type: "fill" as const, selector: "input[name=ccnumber]", value: "4242" },
+      { type: "fill" as const, selector: "#x", value: "hunter2" },
+    ];
+    const rows = fillBatchRows(actions, [F({ type: "password", selector: "#x" })]).map(expectRowValid);
+    expect(rows[0].secret).toBe(true); // sensitive selector
+    expect(rows[0].value).toBe("");
+    expect(rows[1].secret).toBe(true); // password-type captured field
+    expect(rows[1].value).toBe("");
+  });
+
+  it("skips non-fill actions and null entries; tolerates null inputs", () => {
+    const actions: unknown[] = [
+      { type: "click", selector: "#go" },
+      null,
+      { type: "fill", selector: "#a", value: "1" },
+    ];
+    const rows = fillBatchRows(actions, null).map(expectRowValid);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: "fill", target: "#a", value: "1" });
+    expect(fillBatchRows(null, null)).toEqual([]);
   });
 });

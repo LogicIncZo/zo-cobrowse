@@ -239,6 +239,17 @@
     catch { return false; }
   }
 
+  /** Clickable-element text match shared by resolveClickTarget (Playwright
+   *  :has-text fallback) and the recipes cue ladder ('text' strategy). */
+  function resolveClickableByText(txt) {
+    const norm = String(txt || '').toLowerCase().trim();
+    if (!norm) return null;
+    for (const el of document.querySelectorAll('a, button, [role=button], [onclick], input[type=submit], input[type=button], [type=submit]')) {
+      if ((el.textContent || '').trim().toLowerCase().includes(norm)) return el;
+    }
+    return null;
+  }
+
   /** Resolve a click target: pure CSS selector preferred, but fall back to
    *  text matching when Zo emits Playwright-style :has-text("…") selectors.
    *  Returns an element or null. */
@@ -249,34 +260,182 @@
     // Extract text from Playwright :has-text("…") / :text("…").
     const m = selector.match(/:has-text\(\s*["']([^"']+)["']\s*\)|:text\(\s*["']([^"']+)["']\s*\)/i);
     const txt = m ? (m[1] || m[2]) : null;
-    if (txt) {
-      const norm = txt.toLowerCase().trim();
-      for (const el of document.querySelectorAll('a, button, [role=button], [onclick], input[type=submit], input[type=button], [type=submit]')) {
-        if ((el.textContent || '').trim().toLowerCase().includes(norm)) return el;
-      }
-    }
-    return null;
+    return txt ? resolveClickableByText(txt) : null;
   }
 
-  /** Set a select value; Zo usually sends the visible OPTION TEXT ("Visa
-   *  (Preferred)") while el.value assignment matches the value attr ("visa")
-   *  — fall back to text matching when the direct set selects nothing. */
-  function setFieldValue(el, val) {
-    el.focus();
-    el.value = '';
-    el.value = val;
-    if (el.tagName === 'SELECT' && el.selectedIndex === -1) {
-      const want = String(val == null ? '' : val).trim().toLowerCase();
-      if (want) {
-        const opts = Array.from(el.options || []);
-        const opt = opts.find((o) => (o.textContent || '').trim().toLowerCase() === want) ||
-          opts.find((o) => (o.textContent || '').trim().toLowerCase().startsWith(want));
-        if (opt) el.value = opt.value;
-      }
-    }
+  /** Fire the synthetic input/change pair every write lands with. */
+  function fireValueEvents(el) {
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
   }
+
+  /** One field-write pipeline for EVERY writer (#53): contenteditable goes
+   *  through the editor's own input pipeline (execCommand insert), plain
+   *  elements use the element's native value setter when one exists (React's
+   *  value tracker sees the change), textContent last resort. opts.select
+   *  keeps form-fill's SELECT text-match fallback: Zo usually sends the
+   *  visible OPTION TEXT ("Visa (Preferred)") while el.value assignment
+   *  matches the value attr ("visa") — fall back to text matching when the
+   *  direct set selects nothing. */
+  function writeFieldValue(el, text, opts) {
+    const o = opts || {};
+    el.focus();
+    if (el.isContentEditable) {
+      if (waInsertEditableText(el, text)) return;
+      el.textContent = text; // fallback (no execCommand: old engines/tests)
+      fireValueEvents(el);
+      return;
+    }
+    if (o.select && el.tagName === 'SELECT') {
+      el.value = '';
+      el.value = text;
+      if (el.selectedIndex === -1) {
+        const want = String(text == null ? '' : text).trim().toLowerCase();
+        if (want) {
+          const optList = Array.from(el.options || []);
+          const opt = optList.find((o) => (o.textContent || '').trim().toLowerCase() === want) ||
+            optList.find((o) => (o.textContent || '').trim().toLowerCase().startsWith(want));
+          if (opt) el.value = opt.value;
+        }
+      }
+      fireValueEvents(el);
+      return;
+    }
+    let setter = null;
+    let proto = Object.getPrototypeOf(el);
+    while (proto && !setter) {
+      const d = Object.getOwnPropertyDescriptor(proto, 'value');
+      if (d && typeof d.set === 'function') setter = d.set;
+      else proto = Object.getPrototypeOf(proto);
+    }
+    if (setter) setter.call(el, text);
+    else el.value = text;
+    fireValueEvents(el);
+  }
+
+  /** Form-fill entry — SELECT text-match semantics preserved. */
+  function setFieldValue(el, val) {
+    writeFieldValue(el, val, { select: true });
+  }
+
+  // ---- Recipe steps (#220) -------------------------------------------------
+  // The deterministic player's in-page half: resolve a step's cue ARRAY via
+  // the same ladders form-fill uses, then apply the op. Cue-miss returns a
+  // STRUCTURED result ({cueMiss, tried, candidates}) — never a throw — so the
+  // background healer can re-ground from the near-misses.
+
+  /** Try a step's cues in declared order. 'selector' → CSS; 'text' →
+   *  clickable text match; the human cues (label/aria/placeholder/question)
+   *  → the field ladder, falling back to clickable text (labels also name
+   *  buttons on some forms). Returns {el, tried} — tried lists the cues that
+   *  missed, in order, for the miss report. */
+  function resolveRecipeCues(cues) {
+    const tried = [];
+    for (const c of cues || []) {
+      let el = null;
+      if (c.strategy === 'selector') {
+        if (isValidCssSelector(c.value)) el = document.querySelector(c.value);
+      } else if (c.strategy === 'text') {
+        el = resolveClickableByText(c.value);
+      } else {
+        el = resolveFieldTarget(c.value, null) || resolveClickableByText(c.value);
+      }
+      if (el) return { el, tried };
+      tried.push(`${c.strategy}=${c.value}`);
+    }
+    return { el: null, tried };
+  }
+
+  /** Near-miss inventory for a cue-miss report: visible clickables (text +
+   *  selector) first, then form fields with their question cues — what the
+   *  healer compares the failed cues against. Caps keep prompts small. */
+  function collectCueCandidates() {
+    const out = [];
+    for (const el of document.querySelectorAll('a, button, [role=button], input[type=submit], input[type=button]')) {
+      const text = ((el.textContent || '') || (el.value || '')).trim().slice(0, 60);
+      if (!text) continue;
+      out.push({ text, selector: buildSelector(el) });
+      if (out.length >= 12) return out;
+    }
+    for (const f of document.querySelectorAll('input, textarea, select')) {
+      if (f.type === 'hidden') continue;
+      const text = nearestQuestion(f) || f.name || f.id || '';
+      if (!text) continue;
+      out.push({ text, selector: buildSelector(f) });
+      if (out.length >= 24) break;
+    }
+    return out;
+  }
+
+  /** Execute one Recipe step. dataB64 carries the attach file's bytes
+   *  (background fetches base64 via the workspace MCP); everything else is
+   *  DOM-local. navigate/human/done are background-side — a forwarded step
+   *  no-ops with success so a fallback path never reports a false failure. */
+  async function executeRecipeStep(step, dataB64) {
+    const op = step && step.type;
+    if (op === 'waitFor') {
+      const deadline = Date.now() + Math.min(step.timeoutMs || 5000, 15000);
+      const cue = step.cue ? [step.cue] : [];
+      while (Date.now() < deadline) {
+        const { el } = resolveRecipeCues(cue);
+        if (el) return { ok: true, type: 'waitFor' };
+        await sleep(200);
+      }
+      return { ok: false, type: 'waitFor', cueMiss: true, tried: cue.map((c) => `${c.strategy}=${c.value}`), error: 'waitFor timed out' };
+    }
+    if (op === 'navigate' || op === 'human' || op === 'done') {
+      return { ok: true, type: op };
+    }
+    const { el, tried } = resolveRecipeCues(step.cues);
+    if (!el) {
+      return { ok: false, type: op, cueMiss: true, tried, candidates: collectCueCandidates(), error: `no element matched cues: ${tried.join('; ')}` };
+    }
+    const res = await applyRecipeOp(el, step, dataB64);
+    // Surface the cue fallthrough on success too — shows which cues missed
+    // before the hit (debug + heuristic-quality signal).
+    return tried.length ? { ...res, tried } : res;
+  }
+
+  async function applyRecipeOp(el, step, dataB64) {
+    const op = step.type;
+    switch (op) {
+      case 'click':
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        await sleep(300);
+        el.click();
+        return { ok: true, type: 'click' };
+      case 'fill':
+        setFieldValue(el, String(step.value == null ? '' : step.value));
+        return { ok: true, type: 'fill' };
+      case 'check': {
+        const want = step.checked !== false;
+        el.checked = want;
+        fireValueEvents(el);
+        return { ok: true, type: 'check', checked: want };
+      }
+      case 'attach': {
+        if (el.tagName !== 'INPUT' || el.type !== 'file') {
+          return { ok: false, type: 'attach', error: 'cue resolved to a non-file input' };
+        }
+        const bin = atob(String(dataB64 || ''));
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const name = String(step.path || 'attachment').split('/').pop();
+        const file = new File([bytes], name, { type: 'application/octet-stream' });
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        el.files = dt.files;
+        fireValueEvents(el);
+        return { ok: true, type: 'attach', file: name };
+      }
+      case 'extract': {
+        const val = step.attribute ? el.getAttribute(step.attribute) : (el.textContent || '').trim();
+        return { ok: true, type: 'extract', value: val || '' };
+      }
+    }
+    return { ok: false, type: op, error: `Unknown recipe step: ${op}` };
+  }
+
 
   /** Execute a single action */
   async function executeAction(action) {
@@ -337,12 +496,104 @@
       case 'done':
         // Terminal action — no DOM work, just signal completion.
         return { ok: true, type: 'done', response: action.response || '' };
+      case 'recipe_step':
+        // #220: one Recipe step (cue resolution + op). step = the recipes
+        // schema step object; dataB64 = attach file bytes. Structured results.
+        return executeRecipeStep(action.step, action.dataB64);
       default:
         return { ok: false, error: `Unknown action type: ${action.type}` };
     }
   }
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // ---- Recipe recorder (#220) ---------------------------------------------
+  // While a recording session is armed, capture-phase listeners observe the
+  // user's manual flow and stream observation records to the background,
+  // which assembles a draft recipe on stop. Armed state re-arms per
+  // navigation: each fresh content script asks the background on init.
+  // Sensitive fields NEVER emit values (the event is recorded so the page
+  // collapses into a human checkpoint; the value stays with the user).
+
+  const REC_SENSITIVE_FIELD_RE = /password|card|cc[-_.\s]?num|ccv|cvc|cvv|expir|ssn|social|pin\b|passport|otp|captcha/i;
+  const REC_SENSITIVE_URL_RE = /login|signin|sign-in|signup|sign-up|register|checkout|payment|billing|password|banking/i;
+  const REC_SUBMITISH_RE = /submit|pay\b|checkout|order|place|buy|sign in|sign up|register|confirm purchase/i;
+  let recArmed = false;
+
+  function recCueSnapshot(el) {
+    const cues = [{ strategy: 'selector', value: buildSelector(el) }];
+    const q = nearestQuestion(el);
+    if (q) cues.push({ strategy: 'question', value: q.slice(0, 80) });
+    const ph = (el.getAttribute('placeholder') || '').trim();
+    if (ph) cues.push({ strategy: 'placeholder', value: ph.slice(0, 80) });
+    const aria = (el.getAttribute('aria-label') || '').trim();
+    if (aria) cues.push({ strategy: 'aria', value: aria.slice(0, 80) });
+    return cues;
+  }
+
+  function recObserve(op, el, extra) {
+    if (!recArmed) return;
+    try {
+      chrome.runtime.sendMessage({
+        type: 'RECIPE_OBS',
+        obs: {
+          op,
+          url: location.href,
+          title: document.title || '',
+          pageSensitive: REC_SENSITIVE_URL_RE.test(location.href) || !!(extra && extra.fieldSensitive),
+          cues: recCueSnapshot(el),
+          ...extra,
+        },
+      }).catch(() => { /* context gone */ });
+    } catch { /* context gone */ }
+  }
+
+  function recArm() {
+    if (recArmed) return;
+    recArmed = true;
+    document.addEventListener('click', recOnClick, true);
+    document.addEventListener('change', recOnChange, true);
+  }
+
+  function recOnClick(e) {
+    const el = e.target && e.target.closest
+      ? e.target.closest('a, button, [role=button], [onclick], input[type=submit], input[type=button]')
+      : null;
+    if (!el) return;
+    const text = ((el.textContent || '') || (el.value || '')).trim();
+    recObserve('click', el, { submitish: REC_SUBMITISH_RE.test(text) });
+  }
+
+  function recOnChange(e) {
+    const el = e.target;
+    if (!el || !el.tagName) return;
+    if (el.tagName === 'INPUT' && el.type === 'file') {
+      const f = (el.files && el.files[0]) || null;
+      recObserve('attach', el, { fileName: f ? f.name : 'attachment' });
+      return;
+    }
+    if (el.type === 'checkbox' || el.type === 'radio') {
+      recObserve('check', el, {});
+      return;
+    }
+    const isTextField = el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' ||
+      (el.tagName === 'INPUT' && !['hidden', 'submit', 'button', 'file'].includes(el.type));
+    if (!isTextField) return;
+    const surface = `${el.name || ''} ${el.id || ''} ${el.placeholder || ''} ${el.getAttribute('aria-label') || ''}`;
+    const sensitive = el.type === 'password' || REC_SENSITIVE_FIELD_RE.test(surface);
+    recObserve('fill', el, sensitive ? { fieldSensitive: true } : { value: String(el.value == null ? '' : el.value) });
+  }
+
+  function recPeek() {
+    // Ask whether a recording is live — runs once per page load so the
+    // recorder re-arms after every navigation in the session.
+    try {
+      const p = chrome.runtime.sendMessage({ type: 'RECIPE_RECORD_PEEK' });
+      if (p && p.then) p.then((res) => { if (res && res.armed) recArm(); }).catch(() => {});
+    } catch { /* context gone */ }
+  }
+  recPeek();
+
 
   // ---- Write-assist widget (feature/textarea-fill) -------------------------
   // First page-injected UI in this extension: a floating Zo icon on a focused
@@ -417,6 +668,11 @@
     .zo-wa-btn:hover { background: var(--wa-hover); }
     .zo-wa-primary { background: #2962b8; border-color: #2962b8; color: #fff; }
     .zo-wa-primary:hover { background: #1f4f96; }
+    .zo-wa-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 10px 0; }
+    .zo-wa-chip { padding: 4px 10px; border: 1px solid var(--wa-border); border-radius: 999px;
+      background: var(--wa-bg); cursor: pointer; font: inherit; font-size: 12px; color: var(--wa-btn-text); }
+    .zo-wa-chip:hover { background: var(--wa-hover); }
+    .zo-wa-follow { flex: 1; min-width: 110px; margin: 0; width: auto; }
   `;
 
   let waEnabled = true;      // enableWriteAssist setting (default on)
@@ -426,7 +682,9 @@
   let waActiveEl = null;     // textarea the icon/popover is anchored to
   let waReqId = 0;           // stale-response guard
   let waHideTimer = null;
-  let waView = { mode: 'compose', result: '', error: '', instruction: '' };
+  let waPort = null;         // #53 cobrowse-wa-stream port while a stream is live
+  let waThread = '';         // #53 short-lived per-popover Zo thread (dropped on close)
+  let waView = { mode: 'compose', result: '', error: '', instruction: '', streaming: false };
 
   function waAvailable() {
     try {
@@ -554,15 +812,17 @@
   function waOpen() {
     if (!waReady || !waActiveEl) return;
     if (waHideTimer) { clearTimeout(waHideTimer); waHideTimer = null; }
-    waView = { mode: 'compose', result: '', error: '', instruction: waView.instruction || '' };
+    waView = { mode: 'compose', result: '', error: '', instruction: waView.instruction || '', streaming: false };
     waPop.hidden = false; // shown before render so waRender can measure + position
     waRender();
   }
 
   function waClose() {
     waReqId++; // invalidate any in-flight response
+    if (waPort) { try { waPort.disconnect(); } catch { /* already dead */ } waPort = null; }
+    waThread = ''; // the thread is short-lived per popover session (#53)
     if (waPop) waPop.hidden = true;
-    waView = { mode: 'compose', result: '', error: '', instruction: '' };
+    waView = { mode: 'compose', result: '', error: '', instruction: '', streaming: false };
     if (waEligible(document.activeElement)) { waActiveEl = document.activeElement; waShowIcon(); }
     else waHideIcon();
   }
@@ -626,10 +886,48 @@
       const body = waEl('div', 'zo-wa-body zo-wa-result');
       body.textContent = waView.result;
       waPop.appendChild(body);
+      if (waView.streaming) {
+        // #53: text is still arriving — spinner + cancel, no accept/retry yet.
+        const foot = waEl('div', 'zo-wa-foot');
+        const spinWrap = waEl('div', 'zo-wa-loading');
+        spinWrap.appendChild(waEl('div', 'zo-wa-spin'));
+        foot.appendChild(spinWrap);
+        foot.appendChild(waEl('div', 'zo-wa-spacer'));
+        const cancel = waEl('button', 'zo-wa-btn');
+        cancel.type = 'button';
+        cancel.textContent = 'Cancel';
+        cancel.addEventListener('click', () => waClose());
+        foot.appendChild(cancel);
+        waPop.appendChild(foot);
+      } else {
       const ml = waActiveEl && typeof waActiveEl.maxLength === 'number' ? waActiveEl.maxLength : -1;
       if (ml > 0 && waView.result.length > ml) {
         waPop.appendChild(waEl('div', 'zo-wa-note', `Longer than the field's ${ml}-character limit.`));
       }
+      // #53 follow-up iteration chips: re-work the result on the popover's
+      // short-lived thread. Custom instruction rides the same path.
+      const chips = waEl('div', 'zo-wa-chips');
+      const mkChip = (label, instr) => {
+        const c = waEl('button', 'zo-wa-chip');
+        c.type = 'button';
+        c.textContent = label;
+        c.addEventListener('click', () => { waView.instruction = instr; waEnhance(); });
+        return c;
+      };
+      chips.appendChild(mkChip('Shorter', 'make it shorter'));
+      chips.appendChild(mkChip('Formaler', 'make it more formal'));
+      const custom = document.createElement('input');
+      custom.type = 'text';
+      custom.className = 'zo-wa-instr zo-wa-follow';
+      custom.placeholder = 'Follow-up instruction \u2014 iterate on the draft\u2026';
+      custom.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && custom.value.trim()) {
+          waView.instruction = custom.value.trim();
+          waEnhance();
+        }
+      });
+      chips.appendChild(custom);
+      waPop.appendChild(chips);
       const foot = waEl('div', 'zo-wa-foot');
       const retry = waEl('button', 'zo-wa-btn');
       retry.type = 'button';
@@ -642,6 +940,7 @@
       foot.appendChild(retry);
       foot.appendChild(accept);
       waPop.appendChild(foot);
+      }
     } else if (waView.mode === 'error') {
       waPop.appendChild(waEl('div', 'zo-wa-body zo-wa-error', waView.error || 'Something went wrong.'));
       const foot = waEl('div', 'zo-wa-foot');
@@ -657,12 +956,94 @@
     if (!waPop.hidden) waPositionPop();
   }
 
+  /** Mirror of lib/write-assist.js#parseEnhanceDelta (content scripts can't
+   *  import): what the popover may show from accumulated raw stream text —
+   *  only content inside the <write-assist> tags ever renders; narration
+   *  before the open tag and after the close tag is dropped wholesale. */
+  function waParseDelta(raw) {
+    const t = String(raw == null ? '' : raw);
+    const open = t.indexOf('<write-assist>');
+    if (open === -1) return '';
+    let body = t.slice(open + '<write-assist>'.length);
+    const close = body.indexOf('</write-assist>');
+    if (close !== -1) body = body.slice(0, close);
+    return body.replace(/^[ \t]*\r?\n/, '').trimStart();
+  }
+
   function waEnhance() {
     if (!waActiveEl) return;
     const el = waActiveEl;
     const reqId = ++waReqId;
+    const priorResult = waView.result;
     waView.mode = 'loading';
+    waView.streaming = false;
     waRender();
+    // #53: preferred path — a streaming port. Cancel is port.disconnect()
+    // (waClose does this); the reqId guard supersedes stale callbacks.
+    let port = null;
+    try {
+      port = (chrome.runtime && typeof chrome.runtime.connect === 'function')
+        ? chrome.runtime.connect({ name: 'cobrowse-wa-stream' })
+        : null;
+    } catch { port = null; }
+    if (port) {
+      waPort = port;
+      const finish = () => {
+        waPort = null;
+        try { port.disconnect(); } catch { /* already dead */ }
+      };
+      port.onMessage.addListener((m) => {
+        if (!m || reqId !== waReqId || waActiveEl !== el) return; // stale / superseded
+        if (m.type === 'WA_DELTA') {
+          if (waView.mode !== 'result') { waView.mode = 'result'; waView.streaming = true; }
+          waView.result = waParseDelta(m.raw);
+          waRender();
+        } else if (m.type === 'WA_DONE') {
+          finish();
+          waThread = (m.conversationId && String(m.conversationId)) || waThread;
+          waView.mode = 'result';
+          waView.streaming = false;
+          waView.result = String(m.text || '');
+          waRender();
+        } else if (m.type === 'WA_ERROR') {
+          finish();
+          waView.mode = 'error';
+          waView.streaming = false;
+          waView.error = (m && m.error) || 'Enhance failed.';
+          waRender();
+        }
+      });
+      port.onDisconnect.addListener(() => {
+        if (reqId !== waReqId || waActiveEl !== el) return;
+        if (waPort !== port) return;
+        waPort = null;
+        waView.mode = 'error';
+        waView.streaming = false;
+        waView.error = 'Extension unavailable \u2014 try reloading the page.';
+        waRender();
+      });
+      const msg = {
+        type: 'WA_ENHANCE',
+        text: waGetText(el),
+        instruction: waView.instruction || '',
+        field: waFieldInfo(el),
+        page: { url: location.href, title: document.title },
+        conversationId: waThread || undefined,
+        // Follow-up iteration (#53): an existing thread + a prior result makes
+        // this turn a revision of that result rather than a fresh rewrite.
+        priorText: (waThread && priorResult) ? priorResult : undefined,
+      };
+      try {
+        port.postMessage(msg);
+      } catch {
+        finish();
+        waView.mode = 'error';
+        waView.error = 'Extension unavailable \u2014 try reloading the page.';
+        waRender();
+      }
+      return;
+    }
+    // Fallback: the threadless one-shot (ports unavailable / older runtimes).
     const payload = {
       type: 'ENHANCE_TEXT',
       text: waGetText(el),
@@ -697,32 +1078,11 @@
     });
   }
 
-  /** Framework-safe write-back. Textareas: use the element's own native value
-   *  setter (so React's value tracker sees the change), then fire input +
-   *  change. Contenteditable editors (CodeMirror/ProseMirror/Lexical): go
-   *  through the editor's own input pipeline (select-all + execCommand
-   *  insertText/insertLineBreak) so its internal state stays in sync — a
-   *  direct textContent write would be clobbered by the next editor update. */
+  /** Write-assist write-back (#53): the same unified pipeline as form-fill,
+   *  without SELECT semantics. See writeFieldValue — native setter (React
+   *  safe) / execCommand for editors / textContent fallback. */
   function setEnhancedValue(el, text) {
-    el.focus();
-    if (el.isContentEditable) {
-      if (waInsertEditableText(el, text)) return;
-      el.textContent = text; // fallback (no execCommand: old engines/tests)
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-      return;
-    }
-    let setter = null;
-    let proto = Object.getPrototypeOf(el);
-    while (proto && !setter) {
-      const d = Object.getOwnPropertyDescriptor(proto, 'value');
-      if (d && typeof d.set === 'function') setter = d.set;
-      else proto = Object.getPrototypeOf(proto);
-    }
-    if (setter) setter.call(el, text);
-    else el.value = text;
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
+    writeFieldValue(el, text);
   }
 
   /** Select-all + insert via execCommand, one insertText per line with
@@ -846,6 +1206,13 @@
   // Listen for messages from background/service worker
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     switch (request.type) {
+      case 'RECIPE_RECORD_STATE':
+        // #220 recorder: live tabs arm/disarm immediately on broadcast (new
+        // pages arm via the recPeek round-trip instead).
+        if (request.armed) recArm();
+        else recArmed = false;
+        sendResponse({ ok: true });
+        break;
       case 'CAPTURE_CONTEXT':
         sendResponse(isAlive() ? captureContext(request.tier, { pull: request.pull }) : { error: 'Extension context unavailable' });
         break;

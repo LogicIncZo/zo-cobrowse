@@ -9,6 +9,8 @@ import {
   closeChatTab,
   activateChatTab,
   pruneChatTabs,
+  togglePinConversation,
+  orderTabsPinnedFirst,
   tabTitleFor,
   renameConversation,
   searchConversations,
@@ -18,6 +20,7 @@ import {
   ChatSummaryArray,
   RenameResultSchema,
   ConversationSchema,
+  ChatSummarySchema,
 } from "./schemas/chat-tabs.js";
 
 function expectValid<T>(schema: { safeParse: (v: unknown) => { success: boolean; data?: T; error?: { message: string } } }, v: unknown, what: string): T {
@@ -90,6 +93,72 @@ describe("openChatTab", () => {
     const s = openChatTab(createTabsState(), "  ");
     expect(s.openIds).toEqual([]);
     expect(s.activeId).toBeNull();
+  });
+});
+
+describe("pinning (#54)", () => {
+  it("togglePinConversation flips the flag on the conversation record", () => {
+    const convos = { a: conv("a"), b: conv("b") };
+    const r1 = togglePinConversation(convos, "a");
+    expect(r1.pinned).toBe(true);
+    expect(r1.convos.a.pinned).toBe(true);
+    expect(r1.convos.b.pinned).toBeUndefined();
+    // input map untouched (spread-copied), like renameConversation
+    expect(convos.a.pinned).toBeUndefined();
+    const r2 = togglePinConversation(r1.convos, "a");
+    expect(r2.pinned).toBe(false);
+    expect(r2.convos.a.pinned).toBe(false);
+    expectValid(RenameResultSchema, { convos: r1.convos, changed: true }, "pin result rides RenameResult shape");
+  });
+
+  it("togglePinConversation is a no-op on unknown ids", () => {
+    const convos = { a: conv("a") };
+    const r = togglePinConversation(convos, "nope");
+    expect(r.pinned).toBe(false);
+    expect(r.convos).toBe(convos);
+  });
+
+  it("pinned chats are never evicted at the LRU cap", () => {
+    let s = createTabsState();
+    for (const id of ["a", "b", "c", "d", "e", "f", "g", "h"]) s = openChatTab(s, id);
+    // Pin 'b' + 'd' (mid-pack — they'd be first out if not protected).
+    const pinnedIds = ["b", "d"];
+    s = openChatTab(s, "i", { pinnedIds });
+    expect(s.openIds).toContain("b");
+    expect(s.openIds).toContain("d");
+    expect(s.openIds).not.toContain("a"); // oldest unpinned goes first
+    expect(s.openIds.length).toBe(8);
+    // Keep overflowing: pinned survive every round.
+    s = openChatTab(s, "j", { pinnedIds });
+    s = openChatTab(s, "k", { pinnedIds });
+    expect(s.openIds).toContain("b");
+    expect(s.openIds).toContain("d");
+    // c then e went first (oldest unpinned, position order); b/d keep theirs.
+    expect(s.openIds).toEqual(["b", "d", "f", "g", "h", "i", "j", "k"]);
+  });
+
+  it("a pinned set + active can exceed the cap rather than evict protection", () => {
+    let s = createTabsState();
+    for (const id of ["a", "b", "c"]) s = openChatTab(s, id);
+    // maxOpen 2, everything except 'c' (the would-be victim) pinned.
+    const s2 = openChatTab(s, "c", { maxOpen: 2, pinnedIds: ["a", "b"] });
+    expect(s2.openIds).toEqual(["a", "b", "c"]); // all survive
+    expect(s2.activeId).toBe("c");
+  });
+
+  it("orderTabsPinnedFirst stably partitions pinned first (display only)", () => {
+    expect(orderTabsPinnedFirst(["a", "b", "c", "d"], ["c", "a"])).toEqual(["a", "c", "b", "d"]);
+    expect(orderTabsPinnedFirst(["a", "b"], [])).toEqual(["a", "b"]);
+    expect(orderTabsPinnedFirst(["a", "b"], ["a", "b"])).toEqual(["a", "b"]);
+    expect(orderTabsPinnedFirst(undefined, ["a"])).toEqual([]);
+  });
+
+  it("schema accepts pinned on conversations and summaries", () => {
+    expectValid(ConversationSchema, conv("a", { pinned: true }), "pinned conversation");
+    expectValid(ChatSummarySchema, {
+      id: "a", title: "Chat a", snippet: "hello", createdAt: 1, updatedAt: 1,
+      messageCount: 1, isActive: false, pinned: true,
+    }, "pinned summary");
   });
 });
 
@@ -331,6 +400,15 @@ describe("chat tabs — markup + sidepanel wiring", () => {
 
   it("renames + searches via the lib ops in the history view", () => {
     expect(spCode).toMatch(/import \{[^}]*(renameConversation|searchConversations)[^}]*\} from ['"]\.\/lib\/chat-tabs\.js['"]/);
+  });
+
+  it("renders the pin glyph + context menu and routes opens through the pinned-aware wrapper (#54)", () => {
+    expect(spCode).toContain("chat-tab-pin");
+    expect(spCode).toContain("openTabContextMenu");
+    expect(spCode).toContain("togglePinConversationById");
+    expect(spCode).toContain("Export Markdown");
+    expect(spCode).toContain("pinnedChatIds");
+    expect(spCode).not.toMatch(/tabsState = openChatTab\(tabsState/); // all sites use openTab()
   });
 });
 
