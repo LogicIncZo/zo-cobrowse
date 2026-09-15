@@ -323,7 +323,7 @@ try {
 
 // ---- Init ----
 chrome.storage.sync.get(
-  ['zoApiUrl', 'zoModel', 'zoPersonaId', 'zoActiveMode', 'enableScreenshots', 'enableWriteAssist', 'enabledMenus', 'cobrowse_handoff_budget'],
+  ['zoApiUrl', 'zoModel', 'zoPersonaId', 'zoActiveMode', 'enableScreenshots', 'enableWriteAssist', 'enabledMenus', 'cobrowse_handoff_budget', 'zoWebOrigin'],
   (result) => {
     if (result.zoApiUrl) config.zoApiUrl = result.zoApiUrl;
     if (result.zoModel) config.zoModel = result.zoModel;
@@ -334,6 +334,9 @@ chrome.storage.sync.get(
       if (result.enabledMenus) config.enabledMenus = { ...config.enabledMenus, ...result.enabledMenus };
     // #158: a stored handoff budget overrides the config default.
     if (result.cobrowse_handoff_budget) config.cobrowse_handoff_budget = { ...config.cobrowse_handoff_budget, ...result.cobrowse_handoff_budget };
+    // #233: the panel reads zoWebOrigin from GET_CONFIG — load it at startup
+    // so the ↗ chip works on first open without waiting for a storage change.
+    if (result.zoWebOrigin !== undefined) config.zoWebOrigin = result.zoWebOrigin;
   }
 );
 // Sensitive config from storage.local (not synced)
@@ -646,6 +649,7 @@ function sanitizedConfig() {
     enableWriteAssist: config.enableWriteAssist,
     enabledMenus: config.enabledMenus,
     zoSpaceEndpoint: config.zoSpaceEndpoint,
+    zoWebOrigin: config.zoWebOrigin || '',
     hasToken: !!config.zoAccessToken,
     zoConversationId: zoConversationId,
   };
