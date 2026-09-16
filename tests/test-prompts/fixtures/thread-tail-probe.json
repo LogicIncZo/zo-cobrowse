@@ -1,0 +1,87 @@
+{
+  "probedAt": "2026-09-16T19:14:49.236Z",
+  "verdict": "GO",
+  "a2Ok": true,
+  "freshDegrades": true,
+  "r2Honest": true,
+  "transcripts": [
+    {
+      "id": "A1 fresh-full",
+      "note": "seed the thread with the full protocol",
+      "sentWithThread": null,
+      "ms": 18954,
+      "rawOutput": "```json\n{\"actions\":[{\"click\":{\"selector\":\"#nav-profile\"}},{\"done\":{\"response\":\"Clicked the Profile link in the sidebar.\"}}]}\n```",
+      "parsed": {
+        "isActionEnvelope": true,
+        "actions": [
+          {
+            "type": "click",
+            "selector": "#nav-profile"
+          },
+          {
+            "type": "done",
+            "response": "Clicked the Profile link in the sidebar."
+          }
+        ],
+        "plainText": null
+      }
+    },
+    {
+      "id": "A2 thread-stub",
+      "note": "envelope demand only — does the thread carry the protocol AND the NEW page pointer?",
+      "sentWithThread": "con_cCk8Eov3jxfGwVDj",
+      "ms": 10463,
+      "rawOutput": "```json\n{\"actions\":[{\"click\":{\"selector\":\"#nav-security\"}},{\"done\":{\"response\":\"Clicked the Security link in the sidebar.\"}}]}\n```",
+      "parsed": {
+        "isActionEnvelope": true,
+        "actions": [
+          {
+            "type": "click",
+            "selector": "#nav-security"
+          },
+          {
+            "type": "done",
+            "response": "Clicked the Security link in the sidebar."
+          }
+        ],
+        "plainText": null
+      }
+    },
+    {
+      "id": "A2' fresh-stub",
+      "note": "control: same stub WITHOUT the thread — expected to degrade",
+      "sentWithThread": null,
+      "ms": 68892,
+      "rawOutput": "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n```json\n{\n  \"actions\": [\n    {\n      \"type\": \"blocked\",\n      \"reason\": \"no_active_browser_session\",\n      \"detail\": \"No page is loaded anywhere I can drive: view_webpage returns 'No active browser session', the sandbox agent-browser is on about:blank, and the Thinkpad agent-browser is on about:blank. There is no 'Security' link to click.\",\n      \"needs\": \"page_url\",\n      \"note\": \"Send the URL (or reopen the page) and I will snapshot it, locate the 'Security' link by its exact label, click it, and return the resulting page.\"\n    }\n  ]\n}\n```",
+      "parsed": {
+        "isActionEnvelope": false,
+        "actions": [],
+        "plainText": null
+      }
+    },
+    {
+      "id": "R1 thread-full",
+      "note": "baseline: contract tail on the thread",
+      "sentWithThread": "con_cCk8Eov3jxfGwVDj",
+      "ms": 39629,
+      "rawOutput": "The page has four items under the \"Account Settings\" heading:\n\n- **Profile** — sidebar link (`#nav-profile`)\n- **Email preferences** — listed in content, no interactive element exposed\n- **Security** — sidebar link (`#nav-security`)\n- **Sign out** — button (`#signout-btn`)\n\nNot a real page, though: `https://example.com/account/settings` returns 404 — example.com is IANA's documentation placeholder domain and only serves the \"Example Domain\" stub. The section list above is from the last snapshot of this Co-browse session, not a fresh read.[^1]\n\n[^1]: https://example.com/account/settings",
+      "parsed": {
+        "isActionEnvelope": false,
+        "actions": [],
+        "plainText": "The page has four items under the \"Account Settings\" heading:\n\n- **Profile** — sidebar link (`#nav-profile`)\n- **Email preferences** — listed in content, no interactive element exposed\n- **Security** — sidebar link (`#nav-security`)\n- **Sign out** — button (`#signout-btn`)\n\nNot a real page, though: `https://example.com/account/settings` returns 404 — example.com is IANA's documentation placeholder"
+      }
+    },
+    {
+      "id": "R2 thread-stub",
+      "note": "stub read turn: no not-attached contract — honest fetch or hallucination?",
+      "sentWithThread": "con_cCk8Eov3jxfGwVDj",
+      "ms": 16972,
+      "rawOutput": "The page shows four sections under the \"Account Settings\" heading:\n\n- **Profile** — sidebar link (`#nav-profile`)\n- **Email preferences** — text in the page body, no interactive element exposed\n- **Security** — sidebar link (`#nav-security`)\n- **Sign out** — button (`#signout-btn`)\n\nThat's read from this session's last snapshot of the page. A live fetch isn't possible: `https://example.com/account/settings` returns 404 — example.com is IANA's documentation placeholder and only serves the \"Example Domain\" stub, so there's no real settings page behind the title.",
+      "parsed": {
+        "isActionEnvelope": false,
+        "actions": [],
+        "plainText": "The page shows four sections under the \"Account Settings\" heading:\n\n- **Profile** — sidebar link (`#nav-profile`)\n- **Email preferences** — text in the page body, no interactive element exposed\n- **Security** — sidebar link (`#nav-security`)\n- **Sign out** — button (`#signout-btn`)\n\nThat's read from this session's last snapshot of the page. A live fetch isn't possible: `https://example.com/account"
+      }
+    }
+  ]
+}

@@ -145,6 +145,24 @@ describe("protocol-skill install loop (#235)", () => {
     expect(mcpCalls.slice(callsBefore)).toEqual([]);
   });
 
+  it("#237: a read follow-up on an established thread rides the stub tail on the wire", async () => {
+    const rec = connectRecorder();
+    rec.post({ sessionId: 7, type: "ASK_ZO", userQuery: "and now?", modeId: "cobrowse", chatId: "chat-7", conversationId: "con_thread123" });
+    await waitUntil(() => rec.seen.some((m) => m.type === "STREAM_DONE"), 8000);
+    const req = zoAskCalls()[zoAskCalls().length - 1];
+    expect(req.body.input).toContain("Continue on this thread. Answer the request directly in plain markdown.");
+    expect(req.body.input).not.toContain("Page content is NOT attached");
+  });
+
+  it("#237: a read turn WITHOUT a thread keeps the full honest tail", async () => {
+    const rec = connectRecorder();
+    rec.post({ sessionId: 8, type: "ASK_ZO", userQuery: "what is this page?", modeId: "cobrowse", chatId: "chat-8", effectiveTier: 0 });
+    await waitUntil(() => rec.seen.some((m) => m.type === "STREAM_DONE"), 8000);
+    const req = zoAskCalls()[zoAskCalls().length - 1];
+    expect(req.body.input).toContain("Page content is NOT attached");
+    expect(req.body.input).not.toContain("Continue on this thread");
+  });
+
   it("total install failure keeps the full inline tail (never-lighter invariant)", async () => {
     // Fresh version + broken BOTH write paths: write_file errors AND the
     // fallback ask returns HTTP 500 → installed:false → grammar stays inline.

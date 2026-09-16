@@ -13,7 +13,7 @@ import {
   parseInstalledVersion,
   needsInstall,
 } from "../extension/lib/protocol-skill.js";
-import { BUILTIN_MODES, ACTION_SCHEMA_COMPACT } from "./../extension/lib/modes.js";
+import { BUILTIN_MODES, ACTION_SCHEMA_COMPACT, NOT_ATTACHED_CONTRACT, PLAIN_RESPONSE_HINT } from "./../extension/lib/modes.js";
 import { SHARED_SAFETY_RULES, buildPrompt, describePrompt } from "../extension/lib/prompt.js";
 import { DescribedPromptSchema, ProtocolSkillStateSchema } from "./schemas/prompt.js";
 
@@ -164,5 +164,36 @@ describe("buildPrompt — slim protocol tail (#235)", () => {
   it("describePrompt passes protocolSkill:null when the option is absent", () => {
     const d = describePrompt(BUILTIN_MODES.ask, makeCtx(), "q");
     expect(d.protocolSkill).toBe(null);
+  });
+});
+
+describe("buildPrompt — established-thread stub read tail (#237)", () => {
+  it("read follow-up on an established thread rides the stub (no contract, no hint)", () => {
+    const p = buildPrompt(BUILTIN_MODES.cobrowse, makeCtx(), "What changed since last turn?", { effectiveTier: 0, establishedThread: true });
+    expect(p).toContain("Continue on this thread. Answer the request directly in plain markdown.");
+    expect(p).not.toContain(NOT_ATTACHED_CONTRACT);
+    expect(p).not.toContain(PLAIN_RESPONSE_HINT);
+    // Exactly one "attached" mention — the tab/page pointer, never the contract (#70).
+    expect(p).not.toMatch(/NOT attached/i);
+  });
+
+  it("first turns and threadless callers keep the full honest tail", () => {
+    const p = buildPrompt(BUILTIN_MODES.cobrowse, makeCtx(), "What is this page?", { effectiveTier: 0 });
+    expect(p).toContain(NOT_ATTACHED_CONTRACT);
+    expect(p).toContain(PLAIN_RESPONSE_HINT);
+    expect(p).not.toContain("Continue on this thread");
+  });
+
+  it("tier >= 1 downgraded follow-ups stub too (page content still attaches)", () => {
+    const p = buildPrompt(BUILTIN_MODES.cobrowse, makeCtx(), "Summarize this page", { establishedThread: true });
+    expect(p).toContain("Continue on this thread");
+    expect(p).toContain("Hello world"); // the attached content rides
+    expect(p).not.toContain("Answer the request directly using the page content provided.");
+  });
+
+  it("action turns are unaffected by establishedThread (#235 owns those)", () => {
+    const p = buildPrompt(BUILTIN_MODES.cobrowse, makeCtx(), "Click the login button", { establishedThread: true });
+    expect(p).toContain(ACTION_SCHEMA_COMPACT);
+    expect(p).not.toContain("Continue on this thread");
   });
 });
