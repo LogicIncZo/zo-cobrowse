@@ -52,6 +52,23 @@
 
 `bun scripts/security/sink-inventory.ts` prints the message roster, every HTML sink, every token-flow site, sync-writes, logs, and fetch constructions. Baseline at this round: **134 sites, 0 external surfaces, 0 page-message listeners.** Diff a rerun against this doc when touching `extension/`.
 
+## 8. Prompt injection via captured page content — threat class (owner question, 2026-09-17)
+
+The vector **exists by design**: the product feeds page content to Zo, and a hostile page controls that content — visible text, link/button labels, form placeholders and question text, even the `<title>`. The model cannot distinguish attacker-authored text from trusted UI, so an opened page can always *attempt* instruction injection. The security question is what a successful injection can then DO:
+
+**Contained by code (injection-proof, not prompt-hoping):**
+- The page has no channel into the extension itself (§2 — proven on the wire by `e2e/25`); injection only *persuades the model*, whose sole actuator is the action protocol.
+- `normalizeActions` drops anything outside the known verbs; dangerous classes have hard code backstops that prompt text cannot talk out of — sensitive-form fills park for confirmation, submit-ish clicks never auto-execute on flagged pages, the post-fill no-click rule (`filledPages`) is enforced in `executeActions`, and handoff boundary mode parks click/fill.
+- Every executed action is user-visible (action cards, a visibly navigating tab, visibly changing fields); `done()` renders to the user. The extension has no silent exfil channel (§4/§5 — token header-only, endpoints are user config, no page→extension messaging).
+- The pull loop is context-only with a 3-cycle budget.
+
+**Residual risks (accepted, documented):**
+- **Social engineering via `done()`** — attacker text can persuade the model to relay phishing content as assistant prose in a trusted surface. No capability breach; the user reads attacker content from a trusted mouth. Same residual as every browser-agent product.
+- **Thread poisoning** — hostile content persists in the per-chat Zo thread (`conversation_id`), shaping later turns on other pages. Bounded by the same visibility rules.
+- **Zo-side tools** — the model's server-side toolchain (fetch, workspace writes) is technically persuadable by injected text; that surface belongs to Zo's agent, not this extension, and is outside extension code.
+
+**Capture hardening (fixed in this round's follow-up):** tier-2 capture used to include the first 100 chars of every form field's current value (`content.js#captureContext`). No shipped prompt path rendered that value (`compactForm` and the get_form/heal renderers are structure-only, and the healer stripped values defensively), so the leak was latent — but the value sat in the captured context object (memory + persisted conversations) waiting for a future renderer, and it raised injection stakes by putting possibly-sensitive page data in the model's context. **Fix:** capture now applies the shared sensitive-field rule at the source — `type=password` fields and name/placeholder/question matches on `REC_SENSITIVE_FIELD_RE` emit `value: ''` + `sensitive: true`; structure still rides (it gates the sensitive-form confirm). Non-sensitive values (e.g. a search box) keep riding as useful context.
+
 ## Findings ledger
 
 | # | Severity | Item | Disposition |
@@ -60,5 +77,6 @@
 | 2 | Low | `options.js#escapeHtml` missing `'` | **Fixed in-round** (defense-in-depth) |
 | 3 | Design | CDP `userGesture: true` + fail-open `unverifiedForm` gate | **Accepted** — the shipped #26 contract; generalization chartered as #47 |
 | 4 | Blocker-if-enabled | `relay.ts` has no auth | **Recorded** — dormant; blocks any #15 enablement |
+| 5 | Medium (latent) | Capture carried field values up to 100 chars — incl. sensitive fields — into the context object | **Fixed** — capture-time redaction (§8); prompt paths were already value-free |
 
 `bun run verify` + e2e green (incl. the new adversarial spec); prompt evals untouched — no prompt changes in this round.

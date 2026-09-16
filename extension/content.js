@@ -11,6 +11,13 @@
 
   const PAGE_DEAD = /^(about:|chrome-extension:|file:)/;
 
+  // Sensitive-field detection — shared by captureContext (#243: captured form
+  // context must never carry sensitive values) and the recipe recorder
+  // (sensitive fields never emit values / collapse pages into checkpoints).
+  const REC_SENSITIVE_FIELD_RE = /password|card|cc[-_.\s]?num|ccv|cvc|cvv|expir|ssn|social|pin\b|passport|otp|captcha/i;
+  const REC_SENSITIVE_URL_RE = /login|signin|sign-in|signup|sign-up|register|checkout|payment|billing|password|banking/i;
+  const REC_SUBMITISH_RE = /submit|pay\b|checkout|order|place|buy|sign in|sign up|register|confirm purchase/i;
+
   function isAlive() {
     return !PAGE_DEAD.test(location.protocol);
   }
@@ -47,6 +54,8 @@
       if (el.type === 'hidden') return;
       const rect = el.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) return;
+      const surface = `${el.name || el.id || ''} ${el.placeholder || ''} ${nearestQuestion(el)}`;
+      const sensitive = el.type === 'password' || REC_SENSITIVE_FIELD_RE.test(surface);
       formFields.push({
         tag: el.tagName.toLowerCase(),
         type: el.type || 'text',
@@ -54,7 +63,12 @@
         selector: buildSelector(el),
         placeholder: el.placeholder || '',
         question: nearestQuestion(el),
-        value: el.value?.substring(0, 100) || '',
+        // #243: sensitive fields NEVER emit their value into the captured
+        // context — same rule the recipe recorder applies. Today's prompt
+        // paths don't render captured values, but the value must not sit in
+        // the context object waiting for a future renderer to leak it.
+        value: sensitive ? '' : (el.value?.substring(0, 100) || ''),
+        ...(sensitive ? { sensitive: true } : {}),
       });
     });
 
@@ -515,9 +529,6 @@
   // Sensitive fields NEVER emit values (the event is recorded so the page
   // collapses into a human checkpoint; the value stays with the user).
 
-  const REC_SENSITIVE_FIELD_RE = /password|card|cc[-_.\s]?num|ccv|cvc|cvv|expir|ssn|social|pin\b|passport|otp|captcha/i;
-  const REC_SENSITIVE_URL_RE = /login|signin|sign-in|signup|sign-up|register|checkout|payment|billing|password|banking/i;
-  const REC_SUBMITISH_RE = /submit|pay\b|checkout|order|place|buy|sign in|sign up|register|confirm purchase/i;
   let recArmed = false;
 
   function recCueSnapshot(el) {
