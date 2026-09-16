@@ -74,4 +74,32 @@ open the side panel on a normal website.
 - [ ] **Origin validation** — saving a garbage origin ("not a url") flags a clear
       error and persists nothing; a valid http(s) URL saves with "✅ Saved!".
 
+## 0.3.0 additions (protocol skill + slim tails, prompt-budget gate)
+
+- [ ] **📜 Protocol-skill chip** — after a Co-browse ACTION send (e.g. "click the first
+      link"), the prompt-inspector meta row shows `📜 protocol skill ✓ vX.Y.Z.W — slim
+      tail` once the skill has installed into the workspace (first action turn of a
+      browser session; the mock/live workspace needs the write to succeed). Before it
+      verifies — or after a failed install — the chip reads `📜 protocol skill
+      unverified — inline tail (<reason>)` and the preview shows the full grammar.
+- [ ] **Slim-tail preview honesty** — with the chip in the ✓ state, the inspector's
+      prompt preview names `cobrowse-protocol-skill` and does NOT contain
+      `click{selector}`; toggling to a read query ("summarize this page") removes the
+      📜 line entirely (reads skip the skill path).
+- [ ] **Stub tail on follow-ups (#237)** — second READ question in the SAME chat
+      produces a preview whose tail is `Continue on this thread. Answer the request
+      directly in plain markdown.` (no "Page content is NOT attached" line); a fresh
+      chat's first read question still shows the full not-attached contract.
+- [ ] **No regression on tuned Modes** — Settings → Prompts: give Co-browse a custom
+      instruction; a slim-tail action turn must still include that custom line
+      (user-tuned instructions are never dropped by the skill slim).
+
+## 0.3.0 walkthrough log (#244)
+
+Round scaffold: walk every section above on a FRESH profile and an EXISTING profile,
+logging `pass/fail + commit SHA + notes` per row in `docs/qa/usability-walkthrough-0.3.0.md`
+(create it at walkthrough time — sections: base checklist → 0.2.7 → 0.2.8 → 0.3.0).
+Every friction point found files per the QA playbook with a concrete UX proposal;
+quick wins fix in-slate, larger redesigns triage to the backlog with rationale.
+
 Log results (pass/fail + commit SHA) in the release PR description.
