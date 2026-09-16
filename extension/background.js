@@ -1360,10 +1360,14 @@ async function _askZoStreamImpl(port, msg) {
   // section at tier 0 — pixels ride even though the DOM is capped out.
   // #235: action turns check the protocol-skill install (verified read-back
   // lets buildPrompt slim the tail); read/downgraded turns skip entirely.
+  // #237: an established per-chat thread (echo already arrived) lets read
+  // follow-ups ride the stub tail. Handoff/heal turns use their own
+  // assemblers (_followUpInput bypasses buildPrompt) — exempt by design.
   const protocolSkill = mode.expectJson && !shouldDowngradeToJsonDisabled(mode, userQuery)
     ? await ensureProtocolSkill()
     : null;
-  const prompt = msg._followUpInput || buildPrompt(mode, pageContext, userQuery, { effectiveTier, ...(msg.shotOnly ? { screenshotOnly: true } : {}), tabContexts: loop.tabContexts, skills: msg.skills, workspaceFiles: msg.workspaceFiles, ...(protocolSkill ? { protocolSkill } : {}) });
+  const establishedThread = !!loop.threadId;
+  const prompt = msg._followUpInput || buildPrompt(mode, pageContext, userQuery, { effectiveTier, ...(msg.shotOnly ? { screenshotOnly: true } : {}), tabContexts: loop.tabContexts, skills: msg.skills, workspaceFiles: msg.workspaceFiles, ...(protocolSkill ? { protocolSkill } : {}), ...(establishedThread ? { establishedThread: true } : {}) });
 
   try {
     const response = await fetch(config.zoApiUrl, {
@@ -1913,10 +1917,10 @@ async function askZo(pageContext, userQuery, modelName, personaId, modeId, custo
   const protocolSkill = mode.expectJson && !shouldDowngradeToJsonDisabled(mode, userQuery)
     ? await ensureProtocolSkill()
     : null;
-  const prompt = buildPrompt(mode, pageContext, userQuery, { effectiveTier, ...(shotOnly ? { screenshotOnly: true } : {}), skills, workspaceFiles, ...(protocolSkill ? { protocolSkill } : {}) });
+  const threadId = msgThreadId(conversationId);
+  const prompt = buildPrompt(mode, pageContext, userQuery, { effectiveTier, ...(shotOnly ? { screenshotOnly: true } : {}), skills, workspaceFiles, ...(protocolSkill ? { protocolSkill } : {}), ...(threadId ? { establishedThread: true } : {}) });
   // Per-chat threading: the sidepanel sends the chat's stored thread id; the
   // global stays as the fallback for ambient callers (context menu, omnibox).
-  const threadId = msgThreadId(conversationId);
 
   try {
     const response = await fetch(config.zoApiUrl, {

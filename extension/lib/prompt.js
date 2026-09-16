@@ -234,10 +234,20 @@ function _compose(mode, pageContext, userQuery, opts) {
   push('sep', '');
 
   if (jsonDisabled) {
-    push('tail', tier === 0
-      ? `${NOT_ATTACHED_CONTRACT} Answer the request directly.`
-      : 'Answer the request directly using the page content provided.');
-    push('tail', PLAIN_RESPONSE_HINT);
+    // #237 (spike GO — tests/test-prompts/probe-thread-tail.json): on an
+    // ESTABLISHED thread (the conversation_id echo already arrived) Zo retains
+    // the context contract, so read/downgraded follow-ups ride a stub instead
+    // of re-stating it. First turns and threadless callers (handoff/heal use
+    // their own assemblers) keep the full honest tail.
+    const stub = opts && opts.establishedThread;
+    if (stub) {
+      push('tail', 'Continue on this thread. Answer the request directly in plain markdown.');
+    } else {
+      push('tail', tier === 0
+        ? `${NOT_ATTACHED_CONTRACT} Answer the request directly.`
+        : 'Answer the request directly using the page content provided.');
+      push('tail', PLAIN_RESPONSE_HINT);
+    }
   } else {
     const tail = actionTail(opts, mode, wantJson);
     if (tail.instructions) push('tail', tail.instructions);
@@ -247,9 +257,11 @@ function _compose(mode, pageContext, userQuery, opts) {
   // NOT_ATTACHED_CONTRACT is the one canonical sentence (#236): turns that
   // already carry it (the read-downgrade tier-0 tail, Lean's instructions)
   // suppress the generic copy via exact-inclusion match below. Skipped when
-  // there is no page pointer at all.
+  // there is no page pointer at all — and on #237 established-thread stub
+  // turns (the thread already holds the contract).
   if (tier === 0 && !noPagePointer) {
-    const alreadyDisclaimed = parts.some((p) => p.text.includes(NOT_ATTACHED_CONTRACT));
+    const stub = opts && opts.establishedThread;
+    const alreadyDisclaimed = stub || parts.some((p) => p.text.includes(NOT_ATTACHED_CONTRACT));
     if (!alreadyDisclaimed) {
       push('tail', NOT_ATTACHED_CONTRACT);
     }
