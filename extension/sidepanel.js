@@ -1461,6 +1461,13 @@ function openReaderViewPdf(pageContext) {
   const title = pc.title || 'Untitled page';
   const url = pc.url || '';
   const body = esc(pc.visibleText || 'No readable content was captured for this page.');
+  // Scheme allowlist for the source link (#243 security round): the URL is
+  // page-derived, so a `javascript:`/`data:` href must degrade to plain text
+  // (same policy as the markdown renderer's link filter).
+  const safeUrl = /^(https?:\/\/|mailto:|\/|#)/i.test(url) ? url : '';
+  const sourceHtml = safeUrl
+    ? '<a href="' + esc(safeUrl) + '">' + esc(safeUrl) + '</a>'
+    : esc(url || '(unknown)');
   // No inline handlers/scripts: a popup from an extension page inherits the
   // extension CSP, which blocks them. The print button gets a real listener
   // attached from here (DOM injection is CSP-exempt).
@@ -1477,7 +1484,7 @@ function openReaderViewPdf(pageContext) {
     '</style></head><body>' +
     '<button class="print-btn" type="button">Save as PDF / Print</button>' +
     '<h1>' + esc(title) + '</h1>' +
-    '<p class="src">Source: ' + (url ? '<a href="' + esc(url) + '">' + esc(url) + '</a>' : '(unknown)') + '</p>' +
+    '<p class="src">Source: ' + sourceHtml + '</p>' +
     '<pre class="wrap">' + body + '</pre>' +
     '</body></html>');
   win.document.close();

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hostile Probe Fixture — Zo Co-browse Security Round</title>
+<style>body{font:14px/1.6 system-ui;max-width:44em;margin:2em auto;padding:0 1.5em}</style>
+</head>
+<body>
+<h1>Hostile Probe Fixture</h1>
+<p>This page attempts every page-context vector at the extension and records what worked.
+The security spec asserts NOTHING worked: the probes below must all report failure,
+and no extension traffic may appear on the mock server.</p>
+
+<!-- Decoy targets: if any hostile attempt executed a DOM action, these change. -->
+<form data-canary="untouched">
+  <input id="canary-secret" type="password" value="" placeholder="Never fill me">
+  <button id="canary-submit" type="button">Never click me</button>
+</form>
+<div id="probe-results" data-runtime="unknown" data-postmessage="unknown" data-capture="unknown" data-execute="unknown"></div>
+
+<script>
+(function () {
+  const results = {
+    runtime: "unreachable",
+    postmessage: "unanswered",
+    capture: "unanswered",
+    execute: "unanswered",
+  };
+
+  // 1. Direct chrome.runtime access (requires externally_connectable — absent).
+  try {
+    const r = typeof chrome !== "undefined" && chrome && chrome.runtime;
+    if (r && (r.id || r.sendMessage || r.connect)) {
+      results.runtime = "EXPOSED — extension surface reachable from page!";
+      try { chrome.runtime.sendMessage({ type: "EXECUTE_ACTIONS", actions: [{ type: "click", selector: "#canary-submit" }] }); } catch (e) {}
+      try { chrome.runtime.connect({ name: "cobrowse-stream" }); } catch (e) {}
+    } else {
+      results.runtime = "unreachable (no chrome.runtime surface)";
+    }
+  } catch (e) {
+    results.runtime = "unreachable (" + String(e).slice(0, 60) + ")";
+  }
+
+  // 2. window.postMessage at the window — a page CANNOT observe whether a
+  //    content-script listener exists (same window, indistinguishable), so
+  //    the honest detector is EFFECT: EXECUTE_ACTION-shaped payloads point at
+  //    the canaries; if anything executed, the canaries change and the spec's
+  //    wire assertions fire. Nothing here can send a CAPTURE_CONTEXT response
+  //    (that protocol is a chrome.runtime callback, unreachable from a page).
+  window.postMessage({ type: "EXECUTE_ACTION", action: { type: "click", selector: "#canary-submit" } }, "*");
+  window.postMessage({ type: "EXECUTE_ACTION", actions: [{ type: "fill", selector: "#canary-secret", value: "pwned" }] }, "*");
+  window.postMessage({ type: "CAPTURE_CONTEXT", tier: 3 }, "*");
+  results.postmessage = "no effect (canaries untouched — see spec wire assertions)";
+
+  // 3/4. Eval-shaped probes for the record: a page cannot invoke the CDP path.
+  results.capture = "no vector (no chrome.debugger from page context)";
+  results.execute = "no vector (no action dispatch path from page context)";
+
+  const el = document.getElementById("probe-results");
+  el.dataset.runtime = results.runtime;
+  el.dataset.postmessage = results.postmessage;
+  el.dataset.capture = results.capture;
+  el.dataset.execute = results.execute;
+  el.textContent = JSON.stringify(results);
+})();
+</script>
+</body>
+</html>
