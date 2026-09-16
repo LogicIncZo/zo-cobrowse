@@ -1,6 +1,6 @@
 {
   "id": "cobrowse-fill-search",
-  "promptHash": "235f6c6ccd92eb5a76b6c65e00b2789d46585909c182164bdf150cfe71889ffe",
-  "fetchedAt": "2026-09-14T12:45:40.930Z",
-  "output": "{\"actions\":[{\"fill\":{\"selector\":\"#search-box\",\"value\":\"Zo Computer\"}},{\"done\":{\"response\":\"Filled the search box with 'Zo Computer'. I did not click the search button — per the fill-only rule, form submissions are left for you to review and trigger. The field is populated and ready; click Search when you're set.\"}}]}"
+  "promptHash": "4aafb9a7f100e222ee0cd08359e5728a40981ab4ad3118c6588012ee90d97ab7",
+  "fetchedAt": "2026-09-16T18:07:33.832Z",
+  "output": "```json\n{\n  \"actions\": [\n    { \"fill\": { \"selector\": \"input[name=\\\"q\\\"]\", \"value\": \"Zo Computer\" } },\n    { \"done\": { \"response\": \"Filled the search box with \\\"Zo Computer\\\". I stopped short of clicking search so you can review the value and hit the button yourself.\" } }\n  ]\n}\n```"
 }
