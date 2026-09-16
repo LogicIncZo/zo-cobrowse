@@ -131,3 +131,5 @@ and green; `ACTION_SCHEMA_COMPACT` length guard re-pinned to the measured ceilin
 ## Discipline
 
 Any trim lands with before/after totals from this table + a `bun run evals:live` refresh (case ids stable). No intuition-driven rewording.
+
+**Enforced (#238):** the committed per-mode × shape totals are ceilings — `bun scripts/prompt-budget/prompt-budget.ts` (stage 4 of `bun run verify`) fails when any shape exceeds its pinned ceiling by more than 2%. Intentional growth = a `scripts/prompt-budget/ceilings.json` bump in the same PR, review-visible.

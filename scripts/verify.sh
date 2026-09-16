@@ -4,6 +4,7 @@
 #   1. unit/integration test suite   (bun test)
 #   2. release readiness checks      (bun run lint -> scripts/check-release.sh)
 #   3. per-entry transpile check     (bun build of every extension entry point)
+#   4. prompt-budget gate            (#238 — committed ceilings, +2% tolerance)
 # Exits non-zero on the first failing stage so it can gate commits/CI.
 #
 # Used by: bun run verify  (and the committed pre-commit hook in scripts/hooks/)
@@ -41,13 +42,13 @@ if ! command -v bun >/dev/null 2>&1; then
   exit 1
 fi
 
-step "1/3  Test suite (bun test tests/)"
+step "1/4  Test suite (bun test tests/)"
 run_stage "tests" bun test tests/
 
-step "2/3  Release readiness checks (bun run lint)"
+step "2/4  Release readiness checks (bun run lint)"
 run_stage "lint" bun run lint
 
-step "3/3  Transpile check (bun build of every extension entry point)"
+step "3/4  Transpile check (bun build of every extension entry point)"
 transpile_fail=0
 for f in extension/*.js; do
   [ -e "$f" ] || continue
@@ -60,6 +61,9 @@ for f in extension/*.js; do
   fi
 done
 [ "$transpile_fail" -eq 0 ] || fail=1
+
+step "4/4  Prompt-budget gate (#238 — per-mode × shape ceilings)"
+run_stage "budget" bun scripts/prompt-budget/prompt-budget.ts
 
 echo ""
 if [ "$fail" -eq 0 ]; then
