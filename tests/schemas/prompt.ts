@@ -10,6 +10,8 @@ export const SECTION_IDS = [
   "system",
   "page",
   "tabs",
+  "skills",
+  "files",
   "content",
   "elements",
   "forms",
@@ -28,6 +30,20 @@ export const PromptSectionSchema = z.object({
 });
 export type PromptSection = z.infer<typeof PromptSectionSchema>;
 
+/**
+ * #235 protocol-skill install state, surfaced on describePrompt output (and
+ * rendered by the inspector). `installed` true = the slim tail engaged on a
+ * verified read-back; the inspector shows install state alongside the tail.
+ */
+export const ProtocolSkillStateSchema = z.object({
+  installed: z.boolean(),
+  version: z.string().optional(),
+  checkedVersion: z.string().optional(),
+  via: z.enum(["mcp", "ask"]).optional(),
+  reason: z.string().optional(),
+});
+export type ProtocolSkillState = z.infer<typeof ProtocolSkillStateSchema>;
+
 export const DescribedPromptSchema = z.object({
   prompt: z.string(),
   sections: z.array(PromptSectionSchema),
@@ -35,6 +51,7 @@ export const DescribedPromptSchema = z.object({
   intent: z.enum(["action", "read"]),
   expectJson: z.boolean(),
   downgradeApplied: z.boolean(),
+  protocolSkill: ProtocolSkillStateSchema.nullable().optional(),
   approxTokens: z.number().int().min(0),
 }).passthrough();
 export type DescribedPrompt = z.infer<typeof DescribedPromptSchema>;

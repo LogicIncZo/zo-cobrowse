@@ -226,8 +226,12 @@ export function createFakeChrome(): any {
     },
     openOptionsPage: () => {},
     getURL: (path: string) => `chrome-extension://test-extension-id/${path}`,
+    /** Manifest version is MUTABLE via _setManifestVersion (install-state
+     * tests simulate an extension update bumping the version). */
+    getManifest: () => ({ name: "zo-cobrowse", version: runtime._manifestVersion }),
     /** Most recent connect() listener-side port (the background's end). */
     _lastPeer: null as FakePort | null,
+    _manifestVersion: "0.2.9.0",
   };
 
 // ---- tabs ----

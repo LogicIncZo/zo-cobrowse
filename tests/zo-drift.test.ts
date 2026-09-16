@@ -67,7 +67,11 @@ describe('diffTools', () => {
 describe('classifyToolDrift', () => {
   test('removal/change of a required tool is hard drift', () => {
     const findings = classifyToolDrift({ added: [], removed: REQUIRED_MCP_TOOLS.slice(), changed: [] });
-    expect(findings).toHaveLength(1);
+    expect(findings).toHaveLength(REQUIRED_MCP_TOOLS.length);
+    for (const tool of REQUIRED_MCP_TOOLS) {
+      expect(findings.find((f) => f.key === `mcp:tool-removed:${tool}`)).toMatchObject({ severity: 'hard' });
+    }
+    // bash stays the canonical hard-drift example…
     expect(findings[0]).toMatchObject({ key: 'mcp:tool-removed:bash', severity: 'hard' });
     const changed = classifyToolDrift({
       added: [],

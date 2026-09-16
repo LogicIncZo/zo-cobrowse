@@ -42,6 +42,7 @@ import {
   textMatches,
   textNotMatches,
   promptMatches,
+  promptNotMatches,
 } from "./checkers.ts";
 import type { Check } from "./checkers.ts";
 
@@ -182,6 +183,27 @@ export const CASES: EvalCase[] = [
     build: () => buildPrompt(BUILTIN_MODES.cobrowse, pageCtx(2), "Summarize what this page is about"),
     live: true,
     checks: [noActionEnvelope(), nonEmpty()],
+  },
+  {
+    // #235: when the protocol skill is VERIFIED installed, the inline grammar
+    // slims to a skill pointer + envelope demand + safety rules. Graded
+    // STATICALLY (live:false) — live, the eval workspace has no skill
+    // installed, so a pointer-only prompt is a state the extension never
+    // produces; behavior parity under the slim tail is covered by the
+    // integration suite + the e2e slim-tail scenario against the mock.
+    id: "cobrowse-skill-slim",
+    kind: "mode",
+    what: "slim tail (skill installed): pointer + envelope + safety rules, grammar moved server-side",
+    build: () => buildPrompt(BUILTIN_MODES.cobrowse, pageCtx(2), "Click the first link on the page", { protocolSkill: { installed: true, version: "eval" } }),
+    live: false,
+    checks: [
+      promptMatches(/cobrowse-protocol-skill/, "names the installed protocol skill"),
+      promptMatches(/Skills\/zo-cobrowse/, "points at the install location"),
+      promptMatches(/Respond with JSON \{"actions":\[\.\.\.\]\}/, "keeps the envelope demand inline"),
+      promptMatches(/password\/card\/CVV/, "keeps the safety rules inline"),
+      promptNotMatches(/click\{selector\}/, "grammar no longer rides inline"),
+      promptNotMatches(/read_file\{path\}/, "pull-action annotations moved server-side"),
+    ],
   },
 
   // ── Read modes ─────────────────────────────────────────────────────────────
