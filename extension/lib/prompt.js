@@ -14,7 +14,7 @@
 // by tests. Also re-used by tests/test-prompts/capture.ts (killing the old
 // hand-mirrored copy).
 
-import { ACTION_SCHEMA_COMPACT, PLAIN_RESPONSE_HINT } from './modes.js';
+import { ACTION_SCHEMA_COMPACT, NOT_ATTACHED_CONTRACT, PLAIN_RESPONSE_HINT } from './modes.js';
 import { shouldDowngradeToJsonDisabled, detectIntent } from './intent.js';
 import { buildTabManifest, isBlankPage } from './tab-contexts.js';
 import { buildSkillLines, buildFileLines } from './pickers.js';
@@ -210,7 +210,7 @@ function _compose(mode, pageContext, userQuery, opts) {
 
   if (jsonDisabled) {
     push('tail', tier === 0
-      ? 'Only the page URL and title are attached — fetch the page yourself if you need its content. Answer the request directly.'
+      ? `${NOT_ATTACHED_CONTRACT} Answer the request directly.`
       : 'Answer the request directly using the page content provided.');
     push('tail', PLAIN_RESPONSE_HINT);
   } else {
@@ -218,13 +218,14 @@ function _compose(mode, pageContext, userQuery, opts) {
     push('tail', wantJson ? `${ACTION_SCHEMA_COMPACT}${SHARED_SAFETY_RULES}` : PLAIN_RESPONSE_HINT);
   }
   // Tier-0 honesty: when no page content rides, say so — exactly ONCE (#70).
-  // Suppressed when an earlier part already disclaimed (Lean's instructions
-  // carry their own not-attached contract; the read-downgrade tier-0 short
-  // variant covers downgraded turns). Skipped when there is no page pointer.
+  // NOT_ATTACHED_CONTRACT is the one canonical sentence (#236): turns that
+  // already carry it (the read-downgrade tier-0 tail, Lean's instructions)
+  // suppress the generic copy via exact-inclusion match below. Skipped when
+  // there is no page pointer at all.
   if (tier === 0 && !noPagePointer) {
-    const alreadyDisclaimed = parts.some((p) => /NOT attached|Only the page URL and title are attached/i.test(p.text));
+    const alreadyDisclaimed = parts.some((p) => p.text.includes(NOT_ATTACHED_CONTRACT));
     if (!alreadyDisclaimed) {
-      push('tail', "Page content was not attached this turn — only the URL and title above. If you need the page's content, fetch it yourself (web fetch, or read_page).");
+      push('tail', NOT_ATTACHED_CONTRACT);
     }
   }
 

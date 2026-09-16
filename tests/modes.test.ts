@@ -8,6 +8,7 @@ import {
   migrateMergedOverrides,
   TIER,
   ACTION_SCHEMA_COMPACT,
+  NOT_ATTACHED_CONTRACT,
   resolveMode,
   presetToMode,
   normalizeActions,
@@ -72,9 +73,11 @@ describe("BUILTIN_MODES — tier invariants", () => {
 
   it("lean instructions contract: no content attached, self-fetch, never act, notes on request", () => {
     expect(BUILTIN_MODES.lean.instructions).toMatch(/NOT attached/i);
-    expect(BUILTIN_MODES.lean.instructions).toMatch(/fetch the URL yourself/i);
+    expect(BUILTIN_MODES.lean.instructions).toMatch(/fetch the page yourself/i);
     expect(BUILTIN_MODES.lean.instructions).toMatch(/Never return browser actions/i);
     expect(BUILTIN_MODES.lean.instructions).toMatch(/note/i);
+    // #236: the contract is the shared sentence, not lean-private prose.
+    expect(BUILTIN_MODES.lean.instructions.startsWith(NOT_ATTACHED_CONTRACT)).toBe(true);
   });
 
   it("all read-only modes (ask/extract/visual/lean) stream plain markdown", () => {
@@ -128,9 +131,9 @@ describe("ACTION_SCHEMA_COMPACT", () => {
     expect(ACTION_SCHEMA_COMPACT).not.toMatch(/password/i);
   });
 
-  it("cobrowse instructions carry pacing rules but NOT the restated safety rules (#71 trim)", () => {
-    expect(BUILTIN_MODES.cobrowse.instructions).toMatch(/fill_form/);
+  it("cobrowse instructions carry pacing rules but NOT the restated safety rules (#71) nor the fill_form preference (#236: schema-only)", () => {
     expect(BUILTIN_MODES.cobrowse.instructions).toMatch(/visible section/);
+    expect(BUILTIN_MODES.cobrowse.instructions).not.toMatch(/fill_form/);
     expect(BUILTIN_MODES.cobrowse.instructions).not.toMatch(/never click ANY button/i);
     expect(BUILTIN_MODES.cobrowse.instructions).not.toMatch(/password/i);
   });
@@ -145,8 +148,9 @@ describe("ACTION_SCHEMA_COMPACT", () => {
 
   it("is much shorter than the legacy commented JSON block (sanity)", () => {
     // The old schema block was ~600 chars / ~130 tokens. #26's fill_form +
-    // sensitive-form rules legitimately grew it; the guard stays tight.
-    expect(ACTION_SCHEMA_COMPACT.length).toBeLessThan(760);
+    // sensitive-form rules legitimately grew it; #236's terse pull annotations
+    // brought it to 401 — the guard re-pins to that ceiling (+10% headroom).
+    expect(ACTION_SCHEMA_COMPACT.length).toBeLessThan(440);
   });
 
   it("demands ACTIONS only — not a {reasoning, actions} envelope (declubbing)", () => {

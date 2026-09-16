@@ -10,7 +10,7 @@ import {
   safeText,
   SECTION_LABELS,
 } from "../extension/lib/prompt.js";
-import { BUILTIN_MODES, TIER, ACTION_SCHEMA_COMPACT, PLAIN_RESPONSE_HINT } from "../extension/lib/modes.js";
+import { BUILTIN_MODES, TIER, ACTION_SCHEMA_COMPACT, NOT_ATTACHED_CONTRACT, PLAIN_RESPONSE_HINT } from "../extension/lib/modes.js";
 import { SHARED_SAFETY_RULES } from "../extension/lib/prompt.js";
 import { DescribedPromptSchema } from "./schemas/prompt.js";
 
@@ -195,35 +195,36 @@ describe("buildPrompt — intent-aware JSON/markdown downgrade", () => {
 // content was provided, and must license Zo to fetch the URL itself.
 
 describe("buildPrompt — tier-0 honesty", () => {
-  it("tier-0 turns append the content-not-attached clarifier", () => {
+  it("tier-0 turns append the content-not-attached clarifier (the one canonical contract, #236)", () => {
     const p = buildPrompt(BUILTIN_MODES.ask, makeCtx(), "q", { effectiveTier: 0 });
-    expect(p).toContain("Page content was not attached this turn");
-    expect(p).toContain("fetch it yourself");
+    expect(p).toContain(NOT_ATTACHED_CONTRACT);
+    expect(p).toContain("Fetch the page yourself");
   });
 
   it("clarifier is absent at tier >= 1", () => {
     const p = buildPrompt(BUILTIN_MODES.ask, makeCtx(), "q");
-    expect(p).not.toContain("Page content was not attached this turn");
+    expect(p).not.toContain(NOT_ATTACHED_CONTRACT);
   });
 
   it("clarifier is skipped when there is no page pointer (blank page)", () => {
     const p = buildPrompt(BUILTIN_MODES.ask, { url: "about:blank", title: "about:blank" }, "q");
-    expect(p).not.toContain("Page content was not attached this turn");
+    expect(p).not.toContain(NOT_ATTACHED_CONTRACT);
   });
 
   it("downgrade tail uses the tier-0 variant (no 'page content provided' lie)", () => {
     const p = buildPrompt(BUILTIN_MODES.cobrowse, makeCtx(), "Summarize this page", { effectiveTier: 0 });
-    expect(p).toContain("Only the page URL and title are attached");
+    expect(p).toContain(NOT_ATTACHED_CONTRACT);
+    expect(p).toContain("Answer the request directly.");
     expect(p).not.toContain("using the page content provided");
   });
 
-  it("tier-0 carries exactly ONE content-not-attached disclaimer (#70 dedupe)", () => {
-    // Downgraded action mode: the short variant disclaims → generic tail suppressed.
+  it("tier-0 carries exactly ONE content-not-attached disclaimer (#70 dedupe, #236 structural)", () => {
+    // Downgraded action mode: the tail carries the contract → generic suppressed.
     const downgraded = buildPrompt(BUILTIN_MODES.cobrowse, makeCtx(), "Summarize this page", { effectiveTier: 0 });
-    expect(downgraded).toContain("Only the page URL and title are attached");
-    expect(downgraded).not.toContain("Page content was not attached this turn");
-    const disclaimers = downgraded.match(/attached/gi)?.length ?? 0;
-    expect(disclaimers).toBe(1);
+    expect(downgraded).toContain(NOT_ATTACHED_CONTRACT);
+    expect((downgraded.match(/attached/gi) || []).length).toBe(1);
+    // ...and the guard defers to the shared sentence, not a regex over prose.
+    expect((downgraded.match(/Page content is NOT attached/g) || []).length).toBe(1);
   });
 
   it("downgrade tail keeps the content wording at tier >= 1", () => {
@@ -253,12 +254,13 @@ describe("buildPrompt — Lean mode", () => {
     expect(p).not.toContain(ACTION_SCHEMA_COMPACT);
   });
 
-  it("contract instructions ride verbatim; the generic tier-0 tail is NOT duplicated (#70)", () => {
+  it("contract instructions ride verbatim; the generic tier-0 tail is NOT duplicated (#70, #236)", () => {
     const p = buildPrompt(mode, makeCtx(), "note this page for later");
-    expect(p).toContain("The page content is NOT attached");
+    expect(p).toContain(NOT_ATTACHED_CONTRACT);
     expect(p).toContain("Never return browser actions");
-    // Lean's instructions already disclaim — the generic tail must stay silent.
-    expect(p).not.toContain("Page content was not attached this turn");
+    // Lean's instructions carry the one canonical contract — exactly one copy.
+    expect((p.match(/Page content is NOT attached/g) || []).length).toBe(1);
+    expect((p.match(/attached/gi) || []).length).toBe(1);
   });
 
   it("describePrompt reports tier 0 and a schema-valid structure", () => {

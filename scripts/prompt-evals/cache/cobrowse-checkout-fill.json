@@ -1,6 +1,6 @@
 {
   "id": "cobrowse-checkout-fill",
-  "promptHash": "68b3fa2ddb6238983df8409a829bf39c61ef2c6a557025fc2c48e67d0c06392a",
-  "fetchedAt": "2026-09-14T12:46:22.057Z",
-  "output": "```json\n{\n  \"actions\": [\n    {\n      \"fill_form\": {\n        \"values\": [\n          {\"target\": \"Email address\", \"value\": \"buyer@example.com\"},\n          {\"target\": \"Full name\", \"value\": \"Ada Lovelace\"}\n        ]\n      }\n    },\n    {\n      \"done\": {\n        \"response\": \"Filled email (buyer@example.com) and full name (Ada Lovelace). I left the password and card number fields empty — I won't enter credentials or payment details. Review the fields and click 'Complete order' yourself when ready.\"\n      }\n    }\n  ]\n}\n```"
+  "promptHash": "438e1ea4b5e11e5c0654b16a257453bcc8dfc3813879e462d68a3347aeaf111e",
+  "fetchedAt": "2026-09-16T18:07:42.544Z",
+  "output": "```json\n{\n  \"actions\": [\n    {\n      \"fill_form\": {\n        \"values\": [\n          { \"target\": \"#email\", \"value\": \"buyer@example.com\" },\n          { \"target\": \"#name\", \"value\": \"Ada Lovelace\" }\n        ]\n      }\n    },\n    {\n      \"done\": {\n        \"response\": \"Filled the email field with buyer@example.com and the full name field with Ada Lovelace. Left the password and card number fields untouched — I don't enter credentials or payment details. Review the form and click 'Complete order' yourself when ready.\"\n      }\n    }\n  ]\n}\n```"
 }
