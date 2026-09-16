@@ -263,7 +263,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function escapeHtml(str) {
-    return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // #243: escape single quotes too — this helper is one edit away from a
+    // single-quoted attribute context, and the omission costs nothing here.
+    return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
   // Load config — sensitive fields from storage.local, rest from storage.sync
