@@ -12,6 +12,7 @@ import {
   saveConversationState,
 } from './lib/context-policy.js';
 import { describePrompt } from './lib/prompt.js';
+import { SKILL_STATE_KEY } from './lib/protocol-skill.js';
 import { assignRefs, ensureActiveTabRef, isBlankPage, thinTabExcerpts } from './lib/tab-contexts.js';
 import { visionModelSuggestion, modelVisionSupport, findModelEntry } from './lib/vision.js';
 import { extractUrls, MAX_LINK_CHIPS } from './lib/links.js';
@@ -1769,7 +1770,7 @@ function schedulePromptInspector() {
   clearTimeout(promptInspectorTimer);
   promptInspectorTimer = setTimeout(renderPromptInspector, 150);
 }
-function renderPromptInspector() {
+async function renderPromptInspector() {
   const summary = document.getElementById('prompt-inspector-summary');
   const meta = document.getElementById('prompt-inspector-meta');
   const pre = document.getElementById('prompt-preview');
@@ -1813,12 +1814,23 @@ function renderPromptInspector() {
     effTier = 3;
     effReason = '📷 Image toggle — screenshot forced this turn';
   }
+  // #235: mirror the background's protocol-skill state so the preview shows
+  // the SAME tail the send will use (slim pointer only on a verified install).
+  // Read straight from session storage — the same key the background writes.
+  let skillState = null;
+  if (mode.expectJson && typeof chrome !== 'undefined' && chrome?.storage?.session?.get) {
+    try {
+      const bag = await chrome.storage.session.get(SKILL_STATE_KEY);
+      skillState = bag?.[SKILL_STATE_KEY] || null;
+    } catch { /* unavailable — preview stays conservative (full tail) */ }
+  }
   const described = describePrompt(mode, currentContext, query, {
     effectiveTier: effTier,
     ...(shotArmed && !domContextOn ? { screenshotOnly: true } : {}),
     tabContexts: previewTabContexts({ includeActive: effTier === 0 && domContextOn }),
     skills: pickedSkills,
     workspaceFiles: pickedFiles,
+    ...(skillState ? { protocolSkill: skillState } : {}),
   });
 
   summary.textContent = `🔎 Prompt preview · ~${described.approxTokens} tokens`;
@@ -1837,6 +1849,13 @@ function renderPromptInspector() {
   // when a capture really produced a data URL (vision gate + captureVisibleTab).
   if (described.sections.some(s => s.id === 'screenshot')) {
     meta.appendChild(chip('📷', 'screenshot attached'));
+  }
+  // #235: protocol-skill install state next to the tail it controls.
+  if (described.protocolSkill) {
+    const ps = described.protocolSkill;
+    meta.appendChild(chip('📜', ps.installed
+      ? `protocol skill ✓${ps.version ? ` v${ps.version}` : ''} — slim tail`
+      : `protocol skill unverified — inline tail${ps.reason ? ` (${ps.reason})` : ''}`));
   }
   const reasonSpan = document.createElement('span');
   reasonSpan.textContent = effReason;

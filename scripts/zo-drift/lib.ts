@@ -21,8 +21,9 @@ import { z } from 'zod';
 export const ASK_REQUEST_FIELDS = ['input', 'model_name', 'conversation_id', 'persona_id'] as const;
 // lib/vision.js gates tier-3 screenshots on this /models/catalog field.
 export const VISION_FIELD = 'supports_images';
-// MCP tools invoked at runtime by the extension (composer pickers use bash).
-export const REQUIRED_MCP_TOOLS = ['bash'] as const;
+// MCP tools invoked at runtime by the extension (composer pickers use bash;
+// #235 protocol-skill install writes via write_file + verifies via read_file).
+export const REQUIRED_MCP_TOOLS = ['bash', 'write_file'] as const;
 // Every path in the REST surface is exercised somewhere (ask, catalog via the
 // vision gate, models/available via the picker, personas via the dropdown).
 export const REQUIRED_OPENAPI_PATHS = ['/zo/ask', '/models/catalog', '/models/available', '/personas/available'] as const;

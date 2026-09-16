@@ -14,7 +14,8 @@
 // by tests. Also re-used by tests/test-prompts/capture.ts (killing the old
 // hand-mirrored copy).
 
-import { ACTION_SCHEMA_COMPACT, NOT_ATTACHED_CONTRACT, PLAIN_RESPONSE_HINT } from './modes.js';
+import { ACTION_SCHEMA_COMPACT, BUILTIN_MODES, NOT_ATTACHED_CONTRACT, PLAIN_RESPONSE_HINT } from './modes.js';
+import { SKILL_POINTER, ACTION_ENVELOPE_DEMAND } from './protocol-skill.js';
 import { shouldDowngradeToJsonDisabled, detectIntent } from './intent.js';
 import { buildTabManifest, isBlankPage } from './tab-contexts.js';
 import { buildSkillLines, buildFileLines } from './pickers.js';
@@ -96,6 +97,30 @@ export function compactForm(f) {
   const q = (f.question || '').replace(/\s+/g, ' ').trim().slice(0, 60);
   const qs = q ? ` — ${q}` : '';
   return `[${f.tag || 'input'}${sel}${ty}${p}]${qs}`;
+}
+
+/**
+ * The action-turn tail (#235). Full by default — instructions + grammar +
+ * semantics inline (ACTION_SCHEMA_COMPACT) with the safety rules. When the
+ * protocol skill is VERIFIED installed (opts.protocolSkill.installed —
+ * background read-back), the tail slims to a skill pointer + envelope demand;
+ * the safety rules NEVER move server-side (the tail is never lighter than the
+ * verified install, and the #26 gate stays in-prompt on every turn).
+ *
+ * The builtin pacing instructions drop too — they are canon IN the skill —
+ * but only when they are still byte-identical to the builtin: a user's tuned
+ * instructions always ride, whatever the install state.
+ */
+function actionTail(opts, mode, wantJson) {
+  const slim = wantJson && opts && opts.protocolSkill && opts.protocolSkill.installed;
+  if (!slim) {
+    return { instructions: mode.instructions, protocol: `${ACTION_SCHEMA_COMPACT}${SHARED_SAFETY_RULES}` };
+  }
+  const instructionsKept = mode.instructions !== BUILTIN_MODES.cobrowse.instructions;
+  return {
+    instructions: instructionsKept ? mode.instructions : null,
+    protocol: `${SKILL_POINTER} ${ACTION_ENVELOPE_DEMAND}. ${SHARED_SAFETY_RULES}`,
+  };
 }
 
 /**
@@ -214,8 +239,9 @@ function _compose(mode, pageContext, userQuery, opts) {
       : 'Answer the request directly using the page content provided.');
     push('tail', PLAIN_RESPONSE_HINT);
   } else {
-    push('tail', mode.instructions);
-    push('tail', wantJson ? `${ACTION_SCHEMA_COMPACT}${SHARED_SAFETY_RULES}` : PLAIN_RESPONSE_HINT);
+    const tail = actionTail(opts, mode, wantJson);
+    if (tail.instructions) push('tail', tail.instructions);
+    push('tail', wantJson ? tail.protocol : PLAIN_RESPONSE_HINT);
   }
   // Tier-0 honesty: when no page content rides, say so — exactly ONCE (#70).
   // NOT_ATTACHED_CONTRACT is the one canonical sentence (#236): turns that
@@ -229,7 +255,7 @@ function _compose(mode, pageContext, userQuery, opts) {
     }
   }
 
-  return { parts, tier, intent: detectIntent(userQuery), expectJson: wantJson, downgradeApplied: jsonDisabled };
+  return { parts, tier, intent: detectIntent(userQuery), expectJson: wantJson, downgradeApplied: jsonDisabled, protocolSkill: (opts && opts.protocolSkill) || null };
 }
 
 /**
@@ -319,5 +345,5 @@ export function describePrompt(mode, pageContext, userQuery, opts) {
         : 'Instructions';
   }
 
-  return { prompt, sections, tier, intent, expectJson, downgradeApplied, approxTokens: estimateTokens(prompt) };
+  return { prompt, sections, tier, intent, expectJson, downgradeApplied, protocolSkill: (opts && opts.protocolSkill) || null, approxTokens: estimateTokens(prompt) };
 }
