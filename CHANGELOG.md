@@ -6,6 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.3.0.0] — 2026-09-18
+
+Feature slate release — the 0.3.0 prompt lane, the Recipes flagship, the 0.2.9 quick-wins train (never separately tagged), and the #243/#244 review rounds. First release since v0.2.8.15.
+
+### Added — 0.3.0 prompt-optimization lane (#235–#239, PRs #247–#251)
+- **Versioned "cobrowse protocol" Zo skill (#235, flagship).** The action-protocol prompt ships as a versioned workspace skill installed via MCP `write_file`; the per-turn prompt tail slims to a pointer (assistant turn context ~259 → ~89 tokens).
+- **Prompt trim round 2 (#236).** One not-attached contract (was ×3), schema-only `fill_form` preference (was ×2), terse pull-action annotations, persona-variant dedup.
+- **Established-thread minimal tail (#237).** Spike-gated: follow-up turns on a live Zo thread send a stub instruction tail instead of the full static instructions.
+- **Prompt-budget CI gate (#238).** `bun run verify` stage 4 enforces committed per-mode × per-shape token ceilings — silent prompt growth now fails the gate.
+- **`persona_id` spike (#239).** Live-verified GO: `create_persona{name,prompt}` → id, server-side system prompt composes with inline text (probe committed).
+
+### Added — Recipes: repeatable multi-page workflows (#220 + #228)
+- Typed Recipe schema with the machine-checked **no-auto-submit invariant** (`submitish` requires a preceding `human` step), validated at authoring AND replay time.
+- Deterministic background player — no LLM per step; cue arrays resolved by the form-fill ladders; `human` checkpoints (captcha/OTP/payment/submit) park the run with resume-by-evidence.
+- Cue-miss healer (one redacted re-ground turn → patched cues + patch version), **record mode** (learn a recipe from a manual run; sensitive pages collapse to one `human` checkpoint), and **generate-at-runtime fill values** (`generate{prompt,maxChars,contextFile,review}` — #228, with a review preview card and hard park-not-clip cap).
+
+### Added — 0.2.9 quick-wins train (#52/#54/#51/#53)
+- **`read_file` pull action (#52)** — on-demand workspace file contents via MCP, live JSON-array shape handled.
+- **Chat tabs round 2 (#54)** — pin, restore-on-restart, tab-menu export.
+- **Export delta (#51)** — `/export` bang, page export, reader-view PDF, `SAVE_CONVERSATION` workspace write.
+- **Write-assist round 3 (#53)** — streaming into the popover, follow-up chips (Shorter/Formaler/custom) on a short-lived thread, one unified field-write pipeline.
+
+### Security
+- **#243 attack-surface review round** (PR #253): 7-surface verdicts, output-sink inventory, adversarial prompt-injection e2e — trust boundary holds; verdicts in `docs/qa/security-review.md`. In-round hardening: **capture never sends sensitive field values** (the #26 gate's redaction now applies to context capture too) + prompt-injection threat section.
+
+### Fixed
+- **↗ Open-in-Zo renders on a fresh panel open (#233, PR #241).** `zoWebOrigin` is loaded at service-worker startup and exposed via `GET_CONFIG` instead of only the `storage.onChanged` path.
+- **Esc-cancel no longer leaves a ghost streaming message (#234, PR #242).** User-initiated cancels drop the aborted turn's frozen "processing…" pill; chat-switch cancels keep it.
+
+### Docs & tooling
+- Sept-2026 competitive refresh of the sidepanel-AI field (PR #262): slate re-audit + new gap issues #258–#261.
+- 0.2.8 stabilization bash closed with exit record + waivers; QA-agent findings queue drained (`v0.2.8.1`–`v0.2.8.15`); Swamp factory machine + coverage sweep + `/updates` docs page.
+
 ## [0.2.8.15] — 2026-09-13
 
 ### Fixed — stabilization bash point release
