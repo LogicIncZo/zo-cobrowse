@@ -301,7 +301,7 @@ describe("healPrompt / parseRecipeHealResponse", () => {
 
 // ---- recorder pure halves (PR4) --------------------------------------------
 
-import { assembleDraftRecipe, generateRecipePrompt, parseGeneratedRecipe } from "../extension/lib/recipes.js";
+import { assembleDraftRecipe, generateRecipePrompt, parseGeneratedRecipe, recipeSaveTarget, serializeRecipe, driftedFromWorkspace } from "../extension/lib/recipes.js";
 
 describe("assembleDraftRecipe", () => {
   const T = 1757800000000;
@@ -520,5 +520,35 @@ describe("recipeProgress — surfaced warnings (#270)", () => {
     expect(recipeProgress(run, T0 + 60_000)).toContain('⚠ checkpoint "Pay by hand" skipped');
     const clean: any = { status: "running", stepIndex: 1, stepsTotal: 3, evidence: [], startedAt: T0 };
     expect(recipeProgress(clean, T0 + 60_000)).not.toContain("⚠");
+  });
+});
+
+// ---- R2: workspace write-back (#256) ----------------------------------------
+
+describe("recipeSaveTarget", () => {
+  it("defaults to /home/workspace/recipes/<slug>.json", () => {
+    expect(recipeSaveTarget("RTI filing")).toEqual({ ok: true, path: "/home/workspace/recipes/rti-filing.json" });
+    expect(recipeSaveTarget("!!!").ok).toBe(true); // degenerate name → 'recipe' fallback slug
+  });
+  it("confines a caller-supplied path to the workspace", () => {
+    expect(recipeSaveTarget("x", "/home/workspace/recipes/deep/thing.json")).toEqual({ ok: true, path: "/home/workspace/recipes/deep/thing.json" });
+    const bad = recipeSaveTarget("x", "/etc/passwd");
+    expect(bad.ok).toBe(false);
+    expect((bad as any).error).toContain("must be inside");
+    expect(recipeSaveTarget("x", "../../escape.json").ok).toBe(false);
+  });
+});
+
+describe("serializeRecipe + driftedFromWorkspace", () => {
+  const base = { id: "r", name: "R", version: "1.0.0", params: [], steps: [{ type: "done" }] };
+
+  it("serializes pretty-printed with a trailing newline", () => {
+    expect(serializeRecipe(base)).toBe(JSON.stringify(base, null, 2) + "\n");
+  });
+  it("content drifts bump; provenance-only diffs do not; garbage counts as drift", () => {
+    const wsCopy = serializeRecipe({ ...base, origin: "/home/workspace/recipes/r.json", updatedAt: 123 });
+    expect(driftedFromWorkspace(base, wsCopy)).toBe(false); // origin/updatedAt ignored
+    expect(driftedFromWorkspace({ ...base, steps: [{ type: "done", message: "x" }] }, wsCopy)).toBe(true);
+    expect(driftedFromWorkspace(base, "not json at all")).toBe(true);
   });
 });

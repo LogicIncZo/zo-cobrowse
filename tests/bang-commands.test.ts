@@ -268,3 +268,14 @@ describe("!recipe — subcommands (#220)", () => {
     if ("inlineReply" in r) expect(r.inlineReply).toContain("!recipe");
   });
 });
+
+describe("!recipe save — R2 write-back (#256)", () => {
+  it("parses the name, optional path, and --force", () => {
+    expect(parse("!recipe save rti")).toEqual({
+      handled: true, kind: "recipe", isRecipe: true, sub: "save", target: "rti",
+    });
+    expect(parse("!recipe save rti recipes/x.json --force")).toEqual({
+      handled: true, kind: "recipe", isRecipe: true, sub: "save", target: "rti recipes/x.json --force",
+    });
+  });
+});

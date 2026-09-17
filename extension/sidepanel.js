@@ -5372,6 +5372,27 @@ sendQuery = async function() {
         reenable();
         return;
       }
+      if (bang.sub === 'save') {
+        // R2 (#256): write a local recipe back to workspace JSON. An existing
+        // target refuses until --force confirms the overwrite (the library
+        // UI's confirm card lands with R3's popup).
+        const parts = String(bang.target || '').trim().split(/\s+/).filter(Boolean);
+        const force = parts.includes('--force');
+        const args = parts.filter((w) => w !== '--force');
+        const rName = args[0] || '';
+        const rPath = args[1];
+        if (!rName) {
+          addMessage('error', 'Usage: `!recipe save <name> [path] [--force]` — e.g. `!recipe save rti` writes `/home/workspace/recipes/rti.json`.');
+          reenable();
+          return;
+        }
+        const resp = await chrome.runtime.sendMessage({ type: 'RECIPE_SAVE', name: rName, path: rPath, confirm: force }).catch(() => null);
+        if (resp?.ok) addMessage('system', `⬆️ Saved **${safeText(rName)}** v${safeText(resp.version)} → \`${safeText(resp.path)}\``);
+        else if (resp?.exists) addMessage('system', `⚠️ \`${safeText(resp.path)}\` already exists. Re-run with \`!recipe save ${safeText(rName)}${rPath ? ' ' + safeText(rPath) : ''} --force\` to overwrite.`);
+        else addMessage('error', resp?.error || 'Could not save the recipe.');
+        reenable();
+        return;
+      }
       if (bang.sub === 'stop') {
         const rec = await chrome.runtime.sendMessage({ type: 'RECIPE_RECORD_PEEK' }).catch(() => null);
         if (rec?.armed) {

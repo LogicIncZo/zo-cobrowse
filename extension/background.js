@@ -95,6 +95,9 @@ import {
   generateRecipePrompt,
   parseGeneratedRecipe,
   generateValuePrompt,
+  recipeSaveTarget,
+  serializeRecipe,
+  driftedFromWorkspace,
 } from './lib/recipes.js';
 import { createSessionCache } from './lib/sw-cache.js';
 import { createDebugLog } from './lib/debug-log.js';
@@ -545,6 +548,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     case 'RECIPE_STATUS': {
       recipeGet(request.runId ? { runId: request.runId } : { chatId: request.chatId }).then((run) => sendResponse({ ok: true, run }));
+      return true;
+    }
+    case 'RECIPE_SAVE': {
+      // R2 (#256): {name, path?, confirm?} → {ok, path, version} | {ok:false,
+      // exists:true, path} (overwrite needs confirm) | {ok:false, error}.
+      recipeSave(request).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
       return true;
     }
     case 'RECIPE_LIST': {
@@ -2980,6 +2989,44 @@ async function recipeStop({ runId, reason } = {}) {
   run.updatedAt = Date.now();
   const saved = await recipePut(run);
   return { ok: true, run: saved };
+}
+
+// R2 (#256): write a local-library recipe back to workspace JSON. The gate
+// order matters: only validated recipes ever reach write_file (rule 2 of the
+// 0.3.1 slate — a written file can never contain a state the player would
+// refuse). Existence probing reuses read_file (the loader's transport); a
+// content-drifted overwrite bumps the patch version first so the workspace
+// copy stays the newest artifact.
+async function recipeSave({ name, path, confirm } = {}) {
+  const lib = await recipeLibrary.load();
+  const key = safeText(name);
+  const recipe = lib[key];
+  if (!recipe) return { ok: false, error: `no local recipe named "${key}" (!recipe list shows what's saved)` };
+  const verdict = validateRecipe(recipe);
+  if (!verdict.ok) return { ok: false, error: `invalid recipe: ${verdict.errors[0]}`, errors: verdict.errors };
+  const target = recipeSaveTarget(recipe.name || key, path);
+  if (!target.ok) return { ok: false, error: target.error };
+  if (!config.zoAccessToken) return { ok: false, error: 'Zo access token not configured.' };
+
+  const probe = await readWorkspaceFile(target.path);
+  const exists = probe.ok;
+  if (exists && confirm !== true) {
+    return { ok: false, exists: true, path: target.path, error: `${target.path} already exists — confirm the overwrite` };
+  }
+
+  let out = recipe;
+  if (exists && driftedFromWorkspace(recipe, probe.content)) {
+    out = { ...recipe, version: bumpVersion(recipe.version, 'patch') };
+  }
+  const stamped = { ...out, origin: target.path, updatedAt: Date.now() };
+  try {
+    await mcpToolCall('write_file', { target_file: target.path, content: serializeRecipe(stamped) });
+  } catch (err) {
+    return { ok: false, error: `write_file failed: ${err?.message || err}` };
+  }
+  lib[key] = stamped;
+  await recipeLibrary.save(lib);
+  return { ok: true, path: target.path, version: stamped.version };
 }
 
 async function recipeList() {
