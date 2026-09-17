@@ -385,10 +385,19 @@
    *  (background fetches base64 via the workspace MCP); everything else is
    *  DOM-local. navigate/human/done are background-side — a forwarded step
    *  no-ops with success so a fallback path never reports a false failure. */
-  async function executeRecipeStep(step, dataB64) {
+  async function executeRecipeStep(step, dataB64, sensitive) {
     const op = step && step.type;
     if (op === 'waitFor') {
       const deadline = Date.now() + Math.min(step.timeoutMs || 5000, 15000);
+      if (step.url && !step.cue) {
+        // #267: URL-condition wait — poll this page's URL. Not a cue miss
+        // (nothing to heal); a plain timeout parks the run.
+        while (Date.now() < deadline) {
+          if (String(location.href).includes(step.url)) return { ok: true, type: 'waitFor' };
+          await sleep(200);
+        }
+        return { ok: false, type: 'waitFor', error: `waitFor: URL never matched ${step.url}` };
+      }
       const cue = step.cue ? [step.cue] : [];
       while (Date.now() < deadline) {
         const { el } = resolveRecipeCues(cue);
@@ -404,16 +413,27 @@
     if (!el) {
       return { ok: false, type: op, cueMiss: true, tried, candidates: collectCueCandidates(), error: `no element matched cues: ${tried.join('; ')}` };
     }
-    const res = await applyRecipeOp(el, step, dataB64);
+    const res = await applyRecipeOp(el, step, dataB64, sensitive);
     // Surface the cue fallthrough on success too — shows which cues missed
     // before the hit (debug + heuristic-quality signal).
     return tried.length ? { ...res, tried } : res;
   }
 
-  async function applyRecipeOp(el, step, dataB64) {
+  async function applyRecipeOp(el, step, dataB64, sensitive) {
     const op = step.type;
     switch (op) {
       case 'click':
+        if (sensitive) {
+          // #266: probe before clicking — a form's submit control is never
+          // auto-clicked on a sensitive page, declared or not; the player
+          // parks the run. Inline twin of
+          // lib/formfill.js#isSensitiveSubmitProbe (no ES modules here).
+          const pText = String((el.textContent || '') || (el.value || '')).trim();
+          const pForm = !!(el.form || el.closest('form'));
+          if (pForm && (el.type === 'submit' || /submit|pay|checkout|order|place|buy/i.test(pText))) {
+            return { ok: false, type: 'click', refused: 'sensitive-submit', probeText: pText.slice(0, 80) };
+          }
+        }
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         await sleep(300);
         el.click();
@@ -513,7 +533,9 @@
       case 'recipe_step':
         // #220: one Recipe step (cue resolution + op). step = the recipes
         // schema step object; dataB64 = attach file bytes. Structured results.
-        return executeRecipeStep(action.step, action.dataB64);
+        // sensitive (#266) = the player armed this page — click targets get
+        // probed before clicking.
+        return executeRecipeStep(action.step, action.dataB64, action.sensitive);
       default:
         return { ok: false, error: `Unknown action type: ${action.type}` };
     }
@@ -532,6 +554,7 @@
   let recArmed = false;
 
   function recCueSnapshot(el) {
+    if (!el) return [];
     const cues = [{ strategy: 'selector', value: buildSelector(el) }];
     const q = nearestQuestion(el);
     if (q) cues.push({ strategy: 'question', value: q.slice(0, 80) });
@@ -564,6 +587,9 @@
     recArmed = true;
     document.addEventListener('click', recOnClick, true);
     document.addEventListener('change', recOnChange, true);
+    // #268: record this page's navigation so multi-page recordings replay
+    // their navigations (assembly dedupes + derives expectUrl).
+    recObserve('navigate', null, {});
   }
 
   function recOnClick(e) {
@@ -584,7 +610,8 @@
       return;
     }
     if (el.type === 'checkbox' || el.type === 'radio') {
-      recObserve('check', el, {});
+      // #270: carry the direction — a recorded uncheck must replay as one.
+      recObserve('check', el, { checked: !!el.checked });
       return;
     }
     const isTextField = el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' ||

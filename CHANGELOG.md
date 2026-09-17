@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.3.0.1] — 2026-09-18
+
+### Fixed — stabilization round 1 (recipes player + recorder)
+
+QA round over the v0.3.0.0 release: full deterministic gates (verify 4/4, evals 22/22, unit 1394/0, qa-matrix 9/9, e2e 63) + a recipes spec-vs-impl conformance review lane. Findings filed as #266–#270, all fixed in PR #271:
+
+- **Sensitive-page submit probe covers recipe clicks (#266, P1).** The probe was structurally inert for `recipe_step` actions — an UNdeclared submit-text click on a payment page would auto-click. The player now arms `sensitive` on the action; both executors probe the resolved target before clicking and refuse a form's submit control; the run parks `blocked`.
+- **`waitFor{url}` implemented (#267).** Both executors poll the tab URL; the timeout is a plain failure that no longer burns the healer one-shot.
+- **Recorder captures navigations (#268).** Learned multi-page recipes re-navigate on replay; consecutive same-page navigations dedupe; `expectUrl` is origin+path per spec (query churn tolerated, host now verified).
+- **Done summary persists (#269).** The evidence list lands on the run's conversation as a system message and survives reload.
+- **Conformance polish (#270).** Force resume records an unverified-postcondition warning (surfaced on the progress line); recorded checkbox direction replays correctly; `RecipeRun.warnings` in the schema. The question-cue validate warning is deferred to R2/R3 with rationale on the issue.
+
 ## [0.3.0.0] — 2026-09-18
 
 Feature slate release — the 0.3.0 prompt lane, the Recipes flagship, the 0.2.9 quick-wins train (never separately tagged), and the #243/#244 review rounds. First release since v0.2.8.15.

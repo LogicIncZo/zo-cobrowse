@@ -2135,3 +2135,30 @@ describe("chat tabs round 2 — restore-on-restart (#54)", () => {
     expect(bus.storage.local._store["cobrowse_convos"]["c-pin"].pinned).toBe(true);
   });
 });
+
+describe("recipe terminal summary persists on the run's conversation (#269)", () => {
+  it("a done RECIPE_UPDATE renders the note AND persists it exactly once", async () => {
+    const conv: any = Object.values(bus.storage.local._store.cobrowse_convos || {})[0];
+    const run: any = {
+      runId: "rec-it-269", recipeId: "rcp-269", name: "Persist me", origin: "local:persist",
+      version: "1.0.0", chatId: conv.id, status: "done", stepIndex: 1, stepsTotal: 1,
+      params: {}, evidence: [{ key: "reg", label: "Registration", value: "X1", ts: 1 }],
+      healCount: 0, startedAt: 1, createdAt: 1, updatedAt: 1,
+    };
+    await bus.runtime.sendMessage({ type: "RECIPE_UPDATE", run });
+    await new Promise((r) => setTimeout(r, 30));
+    const msgs = panelWin.document.querySelector("#messages");
+    const sys = msgs ? msgs.querySelectorAll(".msg-system") : [];
+    expect(sys.length).toBeGreaterThan(0);
+    const persisted = (): any[] => {
+      const c: any = Object.values(bus.storage.local._store.cobrowse_convos).find((x: any) => x.id === conv.id);
+      return (c.messages || []).filter((m: any) => m.role === "system" && String(m.text).includes("Recipe done — Persist me"));
+    };
+    expect(persisted().length).toBe(1);
+    expect(persisted()[0].text).toContain("**Registration:** X1");
+    // A re-push (what a fresh panel session re-render looks like) must not duplicate.
+    await bus.runtime.sendMessage({ type: "RECIPE_UPDATE", run });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(persisted().length).toBe(1);
+  });
+});

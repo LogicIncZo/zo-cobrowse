@@ -479,3 +479,46 @@ describe("generateValuePrompt", () => {
     expect(p).not.toContain("characters");
   });
 });
+
+// ---- Stabilization round 1 (#268/#270) -------------------------------------
+
+describe("assembleDraftRecipe — recorder navigations (#268)", () => {
+  const nav = (url: string) => ({ op: "navigate", url, title: "T", pageSensitive: false, cues: [] });
+
+  it("emits navigate steps with origin+pathname expectUrl and dedupes reloads", () => {
+    const draft = assembleDraftRecipe([
+      nav("https://a.example/form"),
+      nav("https://a.example/form"), // page reload — must dedupe
+      { op: "fill", url: "https://a.example/form", title: "F", pageSensitive: false, cues: [{ strategy: "question", value: "Applicant name" }], value: "Ada" },
+      nav("https://b.example/done?token=zzz"), // query churn — dropped from expectUrl
+    ], "multi-page");
+    expect(draft.ok).toBe(true);
+    const navs = (draft.recipe as any).steps.filter((st: any) => st.type === "navigate");
+    expect(navs).toHaveLength(2);
+    expect(navs[0].expectUrl).toBe("https://a.example/form");
+    expect(navs[1].expectUrl).toBe("https://b.example/done"); // origin+path, no search
+    expect(navs[1].url).toBe("https://b.example/done?token=zzz"); // full url kept for the jump
+  });
+
+  it("carries the recorded checkbox direction (#270)", () => {
+    const draft = assembleDraftRecipe([
+      nav("https://a.example/form"),
+      { op: "check", url: "https://a.example/form", title: "F", pageSensitive: false, cues: [{ strategy: "question", value: "Terms" }], checked: false },
+      { op: "check", url: "https://a.example/form", title: "F", pageSensitive: false, cues: [{ strategy: "question", value: "Newsletter" }], checked: true },
+    ], "checkboxes");
+    expect(draft.ok).toBe(true);
+    const checks = (draft.recipe as any).steps.filter((st: any) => st.type === "check");
+    expect(checks).toHaveLength(2);
+    expect(checks[0].checked).toBe(false);
+    expect(checks[1].checked).toBe(true);
+  });
+});
+
+describe("recipeProgress — surfaced warnings (#270)", () => {
+  it("appends the latest warning to live and terminal lines", () => {
+    const run: any = { status: "running", stepIndex: 1, stepsTotal: 3, evidence: [], startedAt: T0, warnings: ['checkpoint "Pay by hand" skipped — postcondition not verified (manual fallback)'] };
+    expect(recipeProgress(run, T0 + 60_000)).toContain('⚠ checkpoint "Pay by hand" skipped');
+    const clean: any = { status: "running", stepIndex: 1, stepsTotal: 3, evidence: [], startedAt: T0 };
+    expect(recipeProgress(clean, T0 + 60_000)).not.toContain("⚠");
+  });
+});

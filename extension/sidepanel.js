@@ -372,7 +372,17 @@ async function finishInit() {
           const evidence = (run.status === 'done' && (run.evidence || []).length)
             ? `\n\n${run.evidence.map((e) => `- **${safeText(e.label)}:** ${safeText(e.value)}`).join('\n')}`
             : '';
-          const line = addMessage('system', `${icon} Recipe ${run.status} — ${safeText(run.name)}${reason}${evidence}`);
+          const note = `${icon} Recipe ${run.status} — ${safeText(run.name)}${reason}${evidence}`;
+          const line = addMessage('system', note);
+          // #269: the summary (with the evidence list) persists on the run's
+          // conversation — addMessage skips system roles, so push directly.
+          // Deduped: the terminal guard is per-panel-session, not global.
+          const runConv = conversations[run.chatId];
+          if (runConv && !runConv.messages.some((m) => m.role === 'system' && m.text === note)) {
+            runConv.messages.push({ role: 'system', text: note, timestamp: Date.now() });
+            if (runConv.messages.length > MAX_HISTORY) runConv.messages = runConv.messages.slice(-MAX_HISTORY);
+            saveConversationById(run.chatId);
+          }
           if (run.status === 'paused' || run.status === 'blocked') {
             const body = line.querySelector('.msg-body') || line;
             const btn = document.createElement('button');
