@@ -60,6 +60,9 @@ const flush = () => new Promise((r) => setTimeout(r, 25));
 
 beforeAll(async () => {
   bus.storage.local._store.zoAccessToken = MOCK_ZO_TOKEN;
+  // #233: seeded BEFORE the background import so the startup storage.sync.get
+  // load (not just the onChanged listener) picks it up.
+  bus.storage.sync._store.zoWebOrigin = "https://me.zo.computer";
   fm.install();
   fm.handle(() => sseResponse(zoSseText({ text: "Hello world" })));
   (globalThis as any).chrome = bus;
@@ -73,6 +76,9 @@ describe("background message router", () => {
     expect(cfg.zoApiUrl).toBe("https://api.zo.computer/zo/ask");
     expect(cfg.hasToken).toBe(true);
     expect(cfg.zoActiveMode).toBe("cobrowse");
+    // #233: GET_CONFIG must carry zoWebOrigin so a freshly opened panel can
+    // build ↗ Open-in-Zo links without a storage change arriving later.
+    expect(cfg.zoWebOrigin).toBe("https://me.zo.computer");
   });
 
   it("registers the 5 context menu items at import", () => {
