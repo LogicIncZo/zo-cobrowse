@@ -125,6 +125,33 @@ describe("content.js — full-script message flow", () => {  let win: any;
       expect(events).toContain("submit-click");
     });
 
+    it("recipe_step waitFor honors a url condition (#267)", async () => {
+      const ok = await target.dispatch({ type: "EXECUTE_ACTION", action: { type: "recipe_step", step: { type: "waitFor", url: "example.test/article" } } });
+      expect(ok).toEqual({ ok: true, type: "waitFor" });
+    });
+
+    it("recipe_step waitFor url timeout is NOT a cue miss (#267)", async () => {
+      const res = await target.dispatch({ type: "EXECUTE_ACTION", action: { type: "recipe_step", step: { type: "waitFor", url: "/never.html", timeoutMs: 250 } } });
+      expect(res.ok).toBe(false);
+      expect(res.cueMiss).toBeUndefined();
+      expect(String(res.error)).toContain("never matched");
+    }, 5000);
+
+    it("recipe_step click on a sensitive page refuses a form's submit control (#266)", async () => {
+      const before = events.filter((e) => e === "submit-click").length;
+      const res = await target.dispatch({ type: "EXECUTE_ACTION", action: { type: "recipe_step", sensitive: true, step: { type: "click", cues: [{ strategy: "text", value: "Submit" }] } } });
+      expect(res.ok).toBe(false);
+      expect(res.refused).toBe("sensitive-submit");
+      expect(res.probeText).toBe("Submit");
+      expect(events.filter((e) => e === "submit-click").length).toBe(before); // never clicked
+    });
+
+    it("recipe_step click on a sensitive page still plays non-submit targets (#266)", async () => {
+      const res = await target.dispatch({ type: "EXECUTE_ACTION", action: { type: "recipe_step", sensitive: true, step: { type: "click", cues: [{ strategy: "text", value: "Next page" }] } } });
+      expect(res.ok).toBe(true);
+      expect(res.refused).toBeUndefined();
+    });
+
     it("extract returns textContent, or an attribute when asked", async () => {
       const res = await target.dispatch({ type: "EXECUTE_ACTION", action: { type: "extract", selector: "#submit-btn" } });
       expect(res.ok).toBe(true);
@@ -812,6 +839,35 @@ describe("write-assist round 3 — streaming popover (#53)", () => {
     // waClose hides the popover (the last render stays in the hidden host —
     // the next waShowCompose resets the view); the popover must not be visible.
     expect(pop.hidden).toBe(true);
+  });
+
+  it("an armed recorder emits a navigate observation on (re)arm (#268)", async () => {
+    const sent: any[] = [];
+    const chromeObj: any = {
+      runtime: {
+        onMessage: new FakeEvent(),
+        sendMessage: (msg: any) => {
+          if (msg?.type === "RECIPE_RECORD_PEEK") return Promise.resolve({ ok: true, armed: true });
+          if (msg?.type === "RECIPE_OBS") { sent.push(msg.obs); return Promise.resolve({ ok: true }); }
+          return Promise.resolve({ ok: true });
+        },
+        getURL: (p: string) => `chrome-extension://test/${p}`,
+      },
+      storage: {
+        sync: { get: (_k: any, cb?: Function) => { const r = { enableWriteAssist: false }; if (cb) cb(r); return Promise.resolve(r); } },
+        onChanged: { addListener: () => {}, removeListener: () => {} },
+      },
+    };
+    const win: any = new Window({ url: "https://flow.example/step-2" });
+    win.document.write("<!DOCTYPE html><html><head><title>S2</title></head><body><p>step two</p></body></html>");
+    stubNonZeroRects(win);
+    loadContentScript(win, chromeObj);
+    await tick();
+    await tick();
+    const nav = sent.find((o) => o.op === "navigate");
+    expect(nav).toBeTruthy();
+    expect(nav.url).toBe("https://flow.example/step-2");
+    expect(nav.cues).toEqual([]);
   });
 
   it("a runtime without connect falls back to the threadless one-shot (regression)", async () => {

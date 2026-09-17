@@ -301,6 +301,62 @@ describe("recipes player (#220)", () => {
     expect(notifications.find((n) => n.id === `recipe-${blocked.runId}`)?.opts.title).toBe("Recipe run blocked");
   });
 
+  it("P1 (#266): an UNdeclared submit click on a sensitive page refuses in-page and parks", async () => {
+    bus.storage.local._store.cobrowse_recipes.undecl = makeRecipe({
+      id: "rcp-undecl", name: "Undeclared submit",
+      steps: [
+        { type: "click", cues: [{ strategy: "text", value: "Place order" }] }, // no submitish flag
+        { type: "done" },
+      ],
+    });
+    captureBehavior = () => ({ url: "https://fixture.example/checkout", title: "Checkout", formFields: [{ tag: "input", type: "password", name: "pw" }] });
+    let sawSensitive: unknown;
+    executeBehavior = (action) => {
+      sawSensitive = action.sensitive;
+      // The content executor's refusal shape (lib/formfill.js#isSensitiveSubmitProbe twin).
+      return { ok: false, type: "click", refused: "sensitive-submit", probeText: "Place order" };
+    };
+    const res = await start({ localName: "undecl" });
+    const blocked = await settle(res.run.runId, ["blocked"]);
+    expect(blocked.status).toBe("blocked");
+    expect(blocked.stopReason).toContain("the submit stays yours");
+    expect(sawSensitive).toBe(true); // the flag rides the action so the executor can probe
+  });
+
+  it("P1 (#266): a non-submit click on a sensitive page still plays", async () => {
+    bus.storage.local._store.cobrowse_recipes.sensok = makeRecipe({
+      id: "rcp-sensok", name: "Sensitive ok",
+      steps: [
+        { type: "click", cues: [{ strategy: "text", value: "Details" }] },
+        { type: "done" },
+      ],
+    });
+    captureBehavior = () => ({ url: "https://fixture.example/checkout", title: "Checkout", formFields: [{ tag: "input", type: "password", name: "pw" }] });
+    executeBehavior = (action) => ({ ok: true, type: action.step?.type ?? action.type });
+    const res = await start({ localName: "sensok" });
+    const done = await settle(res.run.runId, ["done"]);
+    expect(done.status).toBe("done");
+  });
+
+  it("P3 (#270): force resume records the unverified-postcondition warning", async () => {
+    bus.storage.local._store.cobrowse_recipes.fwarn = makeRecipe({
+      id: "rcp-fwarn", name: "Force warn",
+      steps: [
+        { type: "human", title: "Do it by hand", instructions: "Finish the step.", resumeOn: { url: "/nowhere" } },
+        { type: "done" },
+      ],
+    });
+    captureBehavior = () => ({ url: "https://fixture.example/form", title: "Fixture page", formFields: [] });
+    executeBehavior = (action) => ({ ok: true, type: action.step?.type ?? action.type });
+    const res = await start({ localName: "fwarn" });
+    const waiting = await settle(res.run.runId, ["waiting_human"]);
+    const ok = await bus.runtime.sendMessage({ type: "RECIPE_RESUME", runId: waiting.runId, force: true });
+    expect(ok.ok).toBe(true);
+    const done = await settle(waiting.runId, ["done"]);
+    expect(done.status).toBe("done");
+    expect((done.warnings || []).some((w: string) => w.includes("postcondition not verified"))).toBe(true);
+  });
+
   it("cue-miss spends the healer one-shot; a useless reply parks the run blocked", async () => {
     bus.storage.local._store.cobrowse_recipes.missy = makeRecipe({
       id: "rcp-miss", name: "Missy",

@@ -27,6 +27,22 @@ export function isSensitiveForm(fields, url) {
   return { sensitive: reasons.length > 0, reasons };
 }
 
+// The #26 submit backstop's probe test, shared by executeActions, the recipe
+// player's refused-result check, and unit tests. A click is a form submit
+// when the target lives in a form AND is type=submit or carries submit-ish
+// text. Content scripts can't import ES modules — their inline copies
+// (content.js + the serialized twin) must stay character-identical to this.
+export const SUBMIT_TEXT_RE = /submit|pay|checkout|order|place|buy/i;
+
+/**
+ * @param {{form?:boolean,type?:string,text?:string}|null} probe — click-target facts
+ * @returns {boolean}
+ */
+export function isSensitiveSubmitProbe(probe) {
+  return !!probe && !!probe.form
+    && (probe.type === 'submit' || SUBMIT_TEXT_RE.test(String(probe.text || '')));
+}
+
 /** Mask for display. Never used as a value — values come only from the model/user. */
 export function redactValue(value) {
   const v = String(value == null ? '' : value);
