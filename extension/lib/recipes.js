@@ -287,16 +287,18 @@ export function bumpVersion(version, kind = 'patch') {
 export function recipeProgress(run, now = Date.now()) {
   const mins = Math.max(0, Math.floor((now - run.startedAt) / 60000));
   const evidence = `${run.evidence.length} evidence`;
+  // #270: surfaced warnings (e.g. a force-resumed checkpoint) stay visible.
+  const warn = (run.warnings && run.warnings.length) ? ` · ⚠ ${run.warnings[run.warnings.length - 1]}` : '';
   const terminal = ['done', 'aborted', 'blocked', 'paused'];
   if (terminal.includes(run.status)) {
     const reason = run.status === 'blocked' && run.stopReason ? ` — ${run.stopReason}` : '';
-    return `${run.status}${reason} · ${evidence} · ${mins}m`;
+    return `${run.status}${reason}${warn} · ${evidence} · ${mins}m`;
   }
   const step = `step ${run.stepIndex + 1}/${run.stepsTotal}`;
   if (run.status === 'waiting_human') {
-    return `waiting for you — ${run.humanTitle || 'checkpoint'} · ${step} · ${evidence} · ${mins}m`;
+    return `waiting for you — ${run.humanTitle || 'checkpoint'} · ${step} · ${evidence} · ${mins}m${warn}`;
   }
-  return `${run.status} · ${step} · ${evidence} · ${mins}m`;
+  return `${run.status} · ${step} · ${evidence} · ${mins}m${warn}`;
 }
 
 // ---- Healer pure halves (#220) --------------------------------------------
@@ -389,7 +391,9 @@ function cleanCues(cues) {
 }
 
 function safeExpectUrl(url) {
-  try { return new URL(url).pathname + new URL(url).search; } catch { return url; }
+  // #268: origin + path (spec §4) — query churn shouldn't break navigate
+  // verify, and the host now matters (a same-path different-host page fails).
+  try { const u = new URL(url); return u.origin + u.pathname; } catch { return url; }
 }
 
 function safeHost(url) {
@@ -422,10 +426,15 @@ export function assembleDraftRecipe(obs, name, now = Date.now()) {
   };
 
   let i = 0;
+  let lastNav = '';
   while (i < events.length) {
     const ev = events[i];
     if (ev.op === 'navigate') {
-      steps.push({ type: 'navigate', url: ev.url, expectUrl: safeExpectUrl(ev.url) });
+      // #268: the recorder emits one navigation per page load — dedupe
+      // consecutive same-page navigations (reload would double them).
+      const expect = safeExpectUrl(ev.url);
+      if (expect !== lastNav) steps.push({ type: 'navigate', url: ev.url, expectUrl: expect });
+      lastNav = expect;
       i += 1;
       continue;
     }
@@ -457,7 +466,9 @@ export function assembleDraftRecipe(obs, name, now = Date.now()) {
         break;
       }
       case 'check':
-        if (cues.length) steps.push({ type: 'check', cues });
+        // #270: preserve the recorded direction (an unchecked box must
+        // replay as uncheck, not as the default check).
+        if (cues.length) steps.push({ type: 'check', cues, ...(ev.checked === undefined ? {} : { checked: !!ev.checked }) });
         break;
       case 'click': {
         if (!cues.length) break;

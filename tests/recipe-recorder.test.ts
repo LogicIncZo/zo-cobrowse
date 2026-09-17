@@ -149,9 +149,13 @@ describe("content.js recipe recorder (#220)", () => {
     // NOT armed:
     fresh.document.querySelector("#x")!.dispatchEvent(new fresh.Event("change", { bubbles: true }));
     expect(localSends.filter((s) => s.type === "RECIPE_OBS")).toHaveLength(0);
-    // Armed:
+    // Armed — arming itself records the page's navigation (#268), then the
+    // change event flows through.
     sandbox.__cap2.recArm();
     fresh.document.querySelector("#x")!.dispatchEvent(new fresh.Event("change", { bubbles: true }));
-    expect(localSends.filter((s) => s.type === "RECIPE_OBS")).toHaveLength(1);
+    const obs = localSends.filter((s) => s.type === "RECIPE_OBS");
+    expect(obs).toHaveLength(2);
+    expect(obs[0].obs.op).toBe("navigate"); // #268: the arming page records its navigation
+    expect(obs[1].obs.op).toBe("fill");
   });
 });

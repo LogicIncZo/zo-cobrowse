@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { isSensitiveForm, redactValue, reviewRows, fillBatchRows } from "../extension/lib/formfill";
+import { isSensitiveForm, isSensitiveSubmitProbe, redactValue, reviewRows, fillBatchRows } from "../extension/lib/formfill";
 import { SensitivityVerdictSchema, ReviewRowSchema, FillBatchRowSchema } from "./schemas/formfill";
 
 const F = (over: Record<string, unknown> = {}) => ({ type: "text", name: "", placeholder: "", question: "", ...over });
@@ -156,5 +156,21 @@ describe("fillBatchRows — Run-All batch join", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ kind: "fill", target: "#a", value: "1" });
     expect(fillBatchRows(null, null)).toEqual([]);
+  });
+});
+
+describe("isSensitiveSubmitProbe (#266 — recipe click backstop)", () => {
+  it("flags a form's submit control by type and by submit-ish text", () => {
+    expect(isSensitiveSubmitProbe({ form: true, type: "submit", text: "" })).toBe(true);
+    expect(isSensitiveSubmitProbe({ form: true, type: "button", text: "Place order" })).toBe(true);
+    expect(isSensitiveSubmitProbe({ form: true, type: "button", text: "PAY NOW" })).toBe(true);
+    expect(isSensitiveSubmitProbe({ form: true, type: "button", text: "<button>Checkout</button>" })).toBe(true);
+  });
+  it("does not flag non-submit clicks or page elements outside a form", () => {
+    expect(isSensitiveSubmitProbe({ form: true, type: "button", text: "Next section" })).toBe(false);
+    expect(isSensitiveSubmitProbe({ form: false, type: "button", text: "Place order" })).toBe(false);
+    expect(isSensitiveSubmitProbe({ form: true, type: "radio", text: "" })).toBe(false);
+    expect(isSensitiveSubmitProbe(null)).toBe(false);
+    expect(isSensitiveSubmitProbe({})).toBe(false);
   });
 });

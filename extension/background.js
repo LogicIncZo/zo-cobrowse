@@ -29,7 +29,7 @@ import {
   pullCaptureOpts,
   MAX_PULL_CYCLES,
 } from './lib/pull.js';
-import { isSensitiveForm } from './lib/formfill.js';
+import { isSensitiveForm, isSensitiveSubmitProbe } from './lib/formfill.js';
 import { conversationToMarkdown, slugifyTitle } from './lib/export.js';
 import {
   createRun as handoffCreateRunPure,
@@ -2830,8 +2830,12 @@ async function recipePlayStep(runId) {
   }
 
   // Sensitive-page arming for click steps: payment submits are NEVER
-  // auto-clicked, declared or not — they park. The sensitive backstop inside
-  // executeActions stays armed for the same reason (SUBMIT_TEXT_RE probing).
+  // auto-clicked, declared or not. Declared (submitish:true) steps park here;
+  // UNdeclared clicks ride with the sensitive flag so the executor can probe
+  // the resolved target — a form's submit control refuses in-page (#266) and
+  // the refusal parks below. (The #26 backstop inside executeActions cannot
+  // cover this: it gates on action.type === 'click', and this action is a
+  // recipe_step.)
   let sensitive = false;
   if (step.type === 'click') {
     const pre = await captureFormFields(run.tabId);
@@ -2842,9 +2846,13 @@ async function recipePlayStep(runId) {
     }
   }
 
-  const res = await executeActions([{ type: 'recipe_step', step, dataB64 }], run.tabId, { recipe: true, sensitive });
+  const res = await executeActions([{ type: 'recipe_step', step, dataB64, sensitive }], run.tabId, { recipe: true, sensitive });
   const r = (res.results && res.results[0]) || { ok: false, error: res.error || 'no result' };
   if (!r.ok) {
+    if (r.refused === 'sensitive-submit') {
+      await recipeBlock(runId, 'sensitive/payment page — the submit stays yours (declare it inside the human checkpoint)');
+      return;
+    }
     if (r.cueMiss) {
       // Cue-miss → exactly one re-ground turn (the healer) patches the cues,
       // bumps the version, caches the healed copy, and retries. No heal
@@ -2943,6 +2951,11 @@ async function recipeResume(request = {}) {
           return { ok: false, error: 'resume condition not met — the expected element is not on the page', run };
         }
       }
+    }
+    if (force) {
+      // #270: the manual fallback is honest — record that the postcondition
+      // was never verified (the spec's "continue with a warning recorded").
+      run.warnings = [...(run.warnings || []), `checkpoint "${safeText(step.title)}" skipped — postcondition not verified (manual fallback)`];
     }
     run.stepIndex += 1;
     run.humanTitle = undefined;
@@ -3321,10 +3334,6 @@ async function captureFormFields(tabId) {
   return null;
 }
 
-// Submit-looking button text for the backstop (probe.type 'submit' alone
-// misses <button>Place order</button> without an explicit type attribute).
-const SUBMIT_TEXT_RE = /submit|pay|checkout|order|place|buy/i;
-
 // Co-browse contract (user rule): after Zo fills a form on a page, it NEVER
 // clicks ANY action button on that page (submit/OK/Next/Create/Continue/…) —
 // the user reviews and clicks. tabId → URL of the last fill; cleared when the
@@ -3391,9 +3400,7 @@ async function executeActions(actions, tabId, opts = {}) {
     // Prompt-side rule alone can be ignored by the model; this cannot.
     if (opts.sensitive && action.type === 'click') {
       const probe = await probeClickTarget(tabId, action.selector);
-      const isSubmit = probe && probe.form &&
-        (probe.type === 'submit' || SUBMIT_TEXT_RE.test(probe.text || ''));
-      if (isSubmit) {
+      if (isSensitiveSubmitProbe(probe)) {
         // #163: on a handoff run the refusal is a PARK, not a failure — the
         // user still performs it from the review card, so it must reach the
         // run's park log / "Parked for the user" count like any boundary stop.
@@ -3691,6 +3698,20 @@ function executeDomAction(action) {
         };
         if (rOp === 'waitFor') {
           const deadline = Date.now() + Math.min(rStep.timeoutMs || 5000, 15000);
+          if (rStep.url && !rStep.cue) {
+            // #267: URL-condition wait — poll the tab's own URL. Not a cue
+            // miss (nothing to heal); a plain timeout parks the run.
+            const pollUrl = () => {
+              if (String(location.href).includes(rStep.url)) { resolve({ ok: true, type: 'waitFor' }); return; }
+              if (Date.now() >= deadline) {
+                resolve({ ok: false, type: 'waitFor', error: `waitFor: URL never matched ${rStep.url}` });
+                return;
+              }
+              setTimeout(pollUrl, 200);
+            };
+            pollUrl();
+            break;
+          }
           const poll = () => {
             const { el, tried } = rResolveCues(rStep.cue ? [rStep.cue] : []);
             if (el) { resolve({ ok: true, type: 'waitFor' }); return; }
@@ -3715,6 +3736,18 @@ function executeDomAction(action) {
         (async () => {
           switch (rOp) {
             case 'click':
+              if (action.sensitive) {
+                // #266: probe before clicking — a form's submit control is
+                // never auto-clicked on a sensitive page. Inline twin of
+                // lib/formfill.js#isSensitiveSubmitProbe (this function is
+                // serialized and cannot import).
+                const pForm = !!(rEl.form || rEl.closest('form'));
+                const pText = String((rEl.textContent || '') || (rEl.value || '')).trim();
+                const pSubmit = pForm && (rEl.type === 'submit' || /submit|pay|checkout|order|place|buy/i.test(pText));
+                if (pSubmit) {
+                  return { ok: false, type: 'click', refused: 'sensitive-submit', probeText: pText.slice(0, 80) };
+                }
+              }
               rEl.scrollIntoView({ block: 'center' });
               rEl.click();
               return { ok: true, type: 'click' };

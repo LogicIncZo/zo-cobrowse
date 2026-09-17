@@ -203,6 +203,9 @@ export const RecipeRun = z.object({
   evidence: z.array(RecipeEvidence),
   healCount: z.number().int().nonnegative(),
   stopReason: z.string().optional(),
+  // #270: recorded irregularities (e.g. a force-resumed checkpoint whose
+  // postcondition was never verified) — surfaced on the progress line.
+  warnings: z.array(z.string()).optional(),
   humanTitle: z.string().optional(), // title of the pending human checkpoint
   // #228: a generated fill awaiting the user's review (generate.review true).
   // The player parks waiting_human with the draft here; RECIPE_RESUME carries
