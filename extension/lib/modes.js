@@ -5,6 +5,23 @@
 // Imported by background.js + sidepanel.js (ESM) and directly by tests.
 
 /**
+ * Shared persona sentence-head — every built-in Mode starts its systemPrompt
+ * from this one constant (#236 dedup; the per-mode variants below carry only
+ * their distinct clause).
+ */
+export const ZO_PERSONA = 'You are Zo';
+
+/**
+ * The single "page not attached" contract (#236 structural dedup). It used to
+ * live in THREE places — lean's instructions, the read-downgrade tier-0 tail,
+ * and the generic tier-0 clarifier — with a regex guard in prompt.js stopping
+ * two of them from co-appearing. Every tier-0 turn now states it at most once,
+ * from this one sentence; prompt.js's guard matches on exact inclusion.
+ */
+export const NOT_ATTACHED_CONTRACT =
+  'Page content is NOT attached — only the URL and title above. Fetch the page yourself if you need its content.';
+
+/**
  * Compact action protocol — shipped only when a Mode sets expectJson:true.
  * One line vs the old ~130-token commented JSON block.
  */
@@ -16,17 +33,16 @@
 // is rendered into a separate Thought bubble; it is never asked for here.
 // The no-secrets / never-click-after-fill safety rules used to ride here AND
 // in cobrowse.instructions (restated every turn). They now live in ONE place:
-// lib/prompt.js's SHARED_SAFETY_RULES, composed once (#71 trim).
+// lib/prompt.js's SHARED_SAFETY_RULES, composed once (#71 trim). The five
+// pull actions share one trailing "context only" tag instead of per-action
+// annotations (#236 trim).
 export const ACTION_SCHEMA_COMPACT =
   'Respond with JSON {"actions":[...]}. ' +
   'Actions: click{selector} | fill{selector,value} | ' +
   'fill_form{values:[{target,value}]} — batch-fill by question/label/placeholder text (PREFER for 2+ fields) | ' +
   'extract{selector,attribute} | navigate{url} | scroll{direction,amount?} | wait{ms} | done{response}' +
-  ' | read_tab{ref} — request full content of a referenced tab (context only)' +
-  ' | read_page — fetch full text of the current page (context only)' +
-  ' | get_dom — fetch all interactive elements of the current page (context only)' +
-  ' | get_form — fetch all form fields of the current page (context only)' +
-  ' | read_file{path} — fetch the full text of a workspace file by its absolute /home/workspace path (context only). ';
+  ' | read_tab{ref} | read_page | get_dom | get_form | read_file{path}' +
+  ' — the pull actions fetch context only. ';
 
 /**
  * Fallback instructions for Modes that don't define their own.
@@ -52,8 +68,10 @@ export const BUILTIN_MODES = {
     id: 'cobrowse',
     name: 'Co-browse',
     icon: '🤖',
-    systemPrompt: "You are Zo — the user's AI co-browsing assistant. You see the page they're on and can control the browser.",
-    instructions: 'Act on the page to fulfill the request. Use the ELEMENTS list when targeting clicks/fills. Prefer fill_form for multi-field forms (target = the field\'s question text). On one-question-per-screen forms, fill only the visible section per turn and let the user review + advance.',
+    systemPrompt: `${ZO_PERSONA} — the user's AI co-browsing assistant. You see the page and can control the browser.`,
+    // fill_form preference lives ONLY in ACTION_SCHEMA_COMPACT (#236 — it used
+    // to be restated here on every action turn).
+    instructions: 'Act on the page to fulfill the request. Use the ELEMENTS list when targeting clicks/fills. On one-question-per-screen forms, fill only the visible section per turn and let the user review + advance.',
     contextTier: TIER.ELEMENTS,
     textBudget: 4000,
     expectJson: true,
@@ -63,7 +81,7 @@ export const BUILTIN_MODES = {
     id: 'ask',
     name: 'Ask',
     icon: '💬',
-    systemPrompt: "You are Zo — the user's browser companion. You see the page they're on. Keep responses concise and scannable.",
+    systemPrompt: `${ZO_PERSONA} — the user's browser companion. You see the page. Keep responses concise and scannable.`,
     // Summarize/Research merged into Ask (2026-08 rationalization): they were
     // tier-1 readers differing only in query phrasing, and every canned entry
     // (!summarize, !research, shortcut, starter chip) carries its own phrasing.
@@ -77,7 +95,7 @@ export const BUILTIN_MODES = {
     id: 'extract',
     name: 'Extract',
     icon: '📥',
-    systemPrompt: "You are Zo — the user's data extraction assistant. Extract structured data from the page into clean tables or JSON.",
+    systemPrompt: `${ZO_PERSONA} — the user's data extraction assistant.`,
     instructions: 'Extract all structured data: tables, lists, contacts, prices, dates, links. Be exhaustive. Output the extracted data directly as markdown tables or a JSON code block.',
     contextTier: TIER.ELEMENTS,
     textBudget: 4000,
@@ -102,10 +120,12 @@ export const BUILTIN_MODES = {
     id: 'lean',
     name: 'Lean',
     icon: '🪶',
-    systemPrompt: "You are Zo — the user's AI companion. You receive only the current page's URL and title plus the user's request; you do NOT see the page itself.",
+    systemPrompt: `${ZO_PERSONA} — the user's AI companion. You do NOT see the page itself.`,
     // URL-only Mode (see docs/superpowers/specs/2026-08-29-lean-mode-design.md):
     // Zo works entirely server-side — fetches the page itself, never acts.
-    instructions: 'The page content is NOT attached. If you need the page, fetch the URL yourself with your web tools; if it is inaccessible, paywalled, or geoblocked, say so plainly instead of guessing. Never return browser actions — this Mode cannot control the page. When the request is note-shaped (note/remember/file/save this), write the note and cross-reference your memory.',
+    // The not-attached contract opens the instructions (NOT_ATTACHED_CONTRACT,
+    // #236 — the one canonical copy; prompt.js's generic clarifier defers to it).
+    instructions: NOT_ATTACHED_CONTRACT + ' If the page is inaccessible, paywalled, or geoblocked, say so plainly instead of guessing. Never return browser actions — this Mode cannot control the page. When the request is note-shaped (note/remember/file/save this), write the note and cross-reference your memory.',
     contextTier: TIER.POINTER,
     textBudget: 1000, // inert at tier 0 — no text is ever attached
     expectJson: false,

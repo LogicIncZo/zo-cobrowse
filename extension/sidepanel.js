@@ -12,6 +12,7 @@ import {
   saveConversationState,
 } from './lib/context-policy.js';
 import { describePrompt } from './lib/prompt.js';
+import { SKILL_STATE_KEY } from './lib/protocol-skill.js';
 import { assignRefs, ensureActiveTabRef, isBlankPage, thinTabExcerpts } from './lib/tab-contexts.js';
 import { visionModelSuggestion, modelVisionSupport, findModelEntry } from './lib/vision.js';
 import { extractUrls, MAX_LINK_CHIPS } from './lib/links.js';
@@ -694,13 +695,13 @@ function bindEvents() {
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); closeTabAutocomplete(); sendQuery(); }
     // Esc cancels an in-flight stream (Zo: "Press Esc to stop").
-    if (e.key === 'Escape' && streamSession.active) { cancelStream(); e.preventDefault(); }
+    if (e.key === 'Escape' && streamSession.active) { cancelStream({ removeMsg: true }); e.preventDefault(); }
   });
   // Esc works anywhere in the panel, not just with the composer focused
   // (#133). Bubble phase: component Escape handlers (autocomplete popups,
   // rename input, review card) run first — skip keys they consumed.
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && streamSession.active && !e.defaultPrevented) cancelStream();
+    if (e.key === 'Escape' && streamSession.active && !e.defaultPrevented) cancelStream({ removeMsg: true });
   });
 
   // Mic button — STT
@@ -1460,6 +1461,13 @@ function openReaderViewPdf(pageContext) {
   const title = pc.title || 'Untitled page';
   const url = pc.url || '';
   const body = esc(pc.visibleText || 'No readable content was captured for this page.');
+  // Scheme allowlist for the source link (#243 security round): the URL is
+  // page-derived, so a `javascript:`/`data:` href must degrade to plain text
+  // (same policy as the markdown renderer's link filter).
+  const safeUrl = /^(https?:\/\/|mailto:|\/|#)/i.test(url) ? url : '';
+  const sourceHtml = safeUrl
+    ? '<a href="' + esc(safeUrl) + '">' + esc(safeUrl) + '</a>'
+    : esc(url || '(unknown)');
   // No inline handlers/scripts: a popup from an extension page inherits the
   // extension CSP, which blocks them. The print button gets a real listener
   // attached from here (DOM injection is CSP-exempt).
@@ -1476,7 +1484,7 @@ function openReaderViewPdf(pageContext) {
     '</style></head><body>' +
     '<button class="print-btn" type="button">Save as PDF / Print</button>' +
     '<h1>' + esc(title) + '</h1>' +
-    '<p class="src">Source: ' + (url ? '<a href="' + esc(url) + '">' + esc(url) + '</a>' : '(unknown)') + '</p>' +
+    '<p class="src">Source: ' + sourceHtml + '</p>' +
     '<pre class="wrap">' + body + '</pre>' +
     '</body></html>');
   win.document.close();
@@ -1769,7 +1777,7 @@ function schedulePromptInspector() {
   clearTimeout(promptInspectorTimer);
   promptInspectorTimer = setTimeout(renderPromptInspector, 150);
 }
-function renderPromptInspector() {
+async function renderPromptInspector() {
   const summary = document.getElementById('prompt-inspector-summary');
   const meta = document.getElementById('prompt-inspector-meta');
   const pre = document.getElementById('prompt-preview');
@@ -1813,12 +1821,23 @@ function renderPromptInspector() {
     effTier = 3;
     effReason = '📷 Image toggle — screenshot forced this turn';
   }
+  // #235: mirror the background's protocol-skill state so the preview shows
+  // the SAME tail the send will use (slim pointer only on a verified install).
+  // Read straight from session storage — the same key the background writes.
+  let skillState = null;
+  if (mode.expectJson && typeof chrome !== 'undefined' && chrome?.storage?.session?.get) {
+    try {
+      const bag = await chrome.storage.session.get(SKILL_STATE_KEY);
+      skillState = bag?.[SKILL_STATE_KEY] || null;
+    } catch { /* unavailable — preview stays conservative (full tail) */ }
+  }
   const described = describePrompt(mode, currentContext, query, {
     effectiveTier: effTier,
     ...(shotArmed && !domContextOn ? { screenshotOnly: true } : {}),
     tabContexts: previewTabContexts({ includeActive: effTier === 0 && domContextOn }),
     skills: pickedSkills,
     workspaceFiles: pickedFiles,
+    ...(skillState ? { protocolSkill: skillState } : {}),
   });
 
   summary.textContent = `🔎 Prompt preview · ~${described.approxTokens} tokens`;
@@ -1837,6 +1856,13 @@ function renderPromptInspector() {
   // when a capture really produced a data URL (vision gate + captureVisibleTab).
   if (described.sections.some(s => s.id === 'screenshot')) {
     meta.appendChild(chip('📷', 'screenshot attached'));
+  }
+  // #235: protocol-skill install state next to the tail it controls.
+  if (described.protocolSkill) {
+    const ps = described.protocolSkill;
+    meta.appendChild(chip('📜', ps.installed
+      ? `protocol skill ✓${ps.version ? ` v${ps.version}` : ''} — slim tail`
+      : `protocol skill unverified — inline tail${ps.reason ? ` (${ps.reason})` : ''}`));
   }
   const reasonSpan = document.createElement('span');
   reasonSpan.textContent = effReason;
@@ -4199,13 +4225,19 @@ async function sendQueryFromLabel(label) {
 // Cancel the in-flight stream (Zo's "Press Esc to stop"). Disconnects the
 // port, clears the session, removes any thinking indicator, and re-enables
 // input so the panel is never stuck.
-function cancelStream() {
+// opts.removeMsg (#234): also drop the in-flight message element. An aborted
+// turn never gets a footer, so its frozen "◷ Ns — processing…" pill would
+// otherwise linger as a ghost. Only user-initiated cancels (Esc) pass this —
+// internal cancels (chat switch/close) keep the element; its chat re-renders
+// from history when the user returns.
+function cancelStream(opts = {}) {
   if (!streamSession.active) return;
   streamSession.active = false;
   clearThinkingTimeout();
   stopStreamTimer();
   const thinking = msgsEl?.querySelector('.msg-thinking');
   if (thinking) thinking.remove();
+  if (opts.removeMsg && streamSession.msgEl) streamSession.msgEl.remove();
   if (streamPort) { try { streamPort.disconnect(); } catch {} streamPort = null; }
   streamSession.msgEl = null;
   streamSession.fullText = '';

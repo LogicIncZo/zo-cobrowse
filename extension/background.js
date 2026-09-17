@@ -9,6 +9,8 @@ import {
   isContextAction,
 } from './lib/modes.js';
 import { buildPrompt } from './lib/prompt.js';
+import { shouldDowngradeToJsonDisabled } from './lib/intent.js';
+import { BUNDLED_SKILL_PATH, PROTOCOL_SKILL_PATH, SKILL_STATE_KEY, injectVersion, parseInstalledVersion } from './lib/protocol-skill.js';
 import { parseZoOutput, stripCodeFence } from './lib/parse-output.js';
 // safeText stays the local one (line ~156) — do NOT import it here.
 import {
@@ -323,7 +325,7 @@ try {
 
 // ---- Init ----
 chrome.storage.sync.get(
-  ['zoApiUrl', 'zoModel', 'zoPersonaId', 'zoActiveMode', 'enableScreenshots', 'enableWriteAssist', 'enabledMenus', 'cobrowse_handoff_budget'],
+  ['zoApiUrl', 'zoModel', 'zoPersonaId', 'zoActiveMode', 'enableScreenshots', 'enableWriteAssist', 'enabledMenus', 'cobrowse_handoff_budget', 'zoWebOrigin'],
   (result) => {
     if (result.zoApiUrl) config.zoApiUrl = result.zoApiUrl;
     if (result.zoModel) config.zoModel = result.zoModel;
@@ -334,6 +336,9 @@ chrome.storage.sync.get(
       if (result.enabledMenus) config.enabledMenus = { ...config.enabledMenus, ...result.enabledMenus };
     // #158: a stored handoff budget overrides the config default.
     if (result.cobrowse_handoff_budget) config.cobrowse_handoff_budget = { ...config.cobrowse_handoff_budget, ...result.cobrowse_handoff_budget };
+    // #233: the panel reads zoWebOrigin from GET_CONFIG — load it at startup
+    // so the ↗ chip works on first open without waiting for a storage change.
+    if (result.zoWebOrigin !== undefined) config.zoWebOrigin = result.zoWebOrigin;
   }
 );
 // Sensitive config from storage.local (not synced)
@@ -646,6 +651,7 @@ function sanitizedConfig() {
     enableWriteAssist: config.enableWriteAssist,
     enabledMenus: config.enabledMenus,
     zoSpaceEndpoint: config.zoSpaceEndpoint,
+    zoWebOrigin: config.zoWebOrigin || '',
     hasToken: !!config.zoAccessToken,
     zoConversationId: zoConversationId,
   };
@@ -1356,7 +1362,16 @@ async function _askZoStreamImpl(port, msg) {
   // buildPrompt falls back to the Mode's configured tier.
   // #69: msg.shotOnly (DOM toggle off + 📷 armed) renders the ## Screenshot
   // section at tier 0 — pixels ride even though the DOM is capped out.
-  const prompt = msg._followUpInput || buildPrompt(mode, pageContext, userQuery, { effectiveTier, ...(msg.shotOnly ? { screenshotOnly: true } : {}), tabContexts: loop.tabContexts, skills: msg.skills, workspaceFiles: msg.workspaceFiles });
+  // #235: action turns check the protocol-skill install (verified read-back
+  // lets buildPrompt slim the tail); read/downgraded turns skip entirely.
+  // #237: an established per-chat thread (echo already arrived) lets read
+  // follow-ups ride the stub tail. Handoff/heal turns use their own
+  // assemblers (_followUpInput bypasses buildPrompt) — exempt by design.
+  const protocolSkill = mode.expectJson && !shouldDowngradeToJsonDisabled(mode, userQuery)
+    ? await ensureProtocolSkill()
+    : null;
+  const establishedThread = !!loop.threadId;
+  const prompt = msg._followUpInput || buildPrompt(mode, pageContext, userQuery, { effectiveTier, ...(msg.shotOnly ? { screenshotOnly: true } : {}), tabContexts: loop.tabContexts, skills: msg.skills, workspaceFiles: msg.workspaceFiles, ...(protocolSkill ? { protocolSkill } : {}), ...(establishedThread ? { establishedThread: true } : {}) });
 
   try {
     const response = await fetch(config.zoApiUrl, {
@@ -1903,10 +1918,13 @@ async function askZo(pageContext, userQuery, modelName, personaId, modeId, custo
   const mode = resolveMode(modeId || config.zoActiveMode || DEFAULT_MODE_ID, customModes || {}, modeOverrides || {});
   const resolvedPersonaId = personaId || config.zoPersonaId || '';
 
-  const prompt = buildPrompt(mode, pageContext, userQuery, { effectiveTier, ...(shotOnly ? { screenshotOnly: true } : {}), skills, workspaceFiles });
+  const protocolSkill = mode.expectJson && !shouldDowngradeToJsonDisabled(mode, userQuery)
+    ? await ensureProtocolSkill()
+    : null;
+  const threadId = msgThreadId(conversationId);
+  const prompt = buildPrompt(mode, pageContext, userQuery, { effectiveTier, ...(shotOnly ? { screenshotOnly: true } : {}), skills, workspaceFiles, ...(protocolSkill ? { protocolSkill } : {}), ...(threadId ? { establishedThread: true } : {}) });
   // Per-chat threading: the sidepanel sends the chat's stored thread id; the
   // global stays as the fallback for ambient callers (context menu, omnibox).
-  const threadId = msgThreadId(conversationId);
 
   try {
     const response = await fetch(config.zoApiUrl, {
@@ -2136,6 +2154,119 @@ async function readWorkspaceFile(pathInput) {
   } catch (err) {
     return { ok: false, error: err?.message || String(err) };
   }
+}
+
+// ---- protocol-skill install (#235) ------------------------------------------
+// The extension bundles a versioned "cobrowse protocol" Zo skill and installs
+// it into the user's workspace so action turns slim their tail to a skill
+// pointer + envelope demand. Pure halves (paths, version parse/inject, slim
+// tail text) live in lib/protocol-skill.js + lib/prompt.js; this is the
+// impure half: bundled-artifact fetch, MCP read/write, one-shot ask fallback,
+// session state. Per the slate invariant the slim tail engages ONLY on a
+// verified read-back at the current extension version.
+
+let protocolSkillMemo = null; // per-worker memo over the session-storage state
+
+async function readSkillState() {
+  try {
+    const bag = await chrome.storage.session.get(SKILL_STATE_KEY);
+    return bag[SKILL_STATE_KEY] || protocolSkillMemo;
+  } catch {
+    return protocolSkillMemo; // session storage unavailable (tests) — memo only
+  }
+}
+
+async function writeSkillState(state) {
+  protocolSkillMemo = state;
+  try {
+    await chrome.storage.session.set({ [SKILL_STATE_KEY]: state });
+  } catch { /* memo is the fallback */ }
+}
+
+/**
+ * Versioned install: read the installed copy → write when missing/stale →
+ * verify by canary read-back. MCP write_file first; the proven one-shot
+ * agent-write prompt (save-page pattern) is the fallback. Total failure pins
+ * the checked version so the session stops retrying and keeps the inline tail.
+ */
+async function installProtocolSkill(extVersion) {
+  let bundled;
+  try {
+    const r = await fetch(chrome.runtime.getURL(BUNDLED_SKILL_PATH));
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    bundled = await r.text();
+    if (!bundled.trim()) throw new Error('empty artifact');
+  } catch (err) {
+    return { installed: false, checkedVersion: extVersion, reason: `bundled artifact unreadable: ${err?.message || err}` };
+  }
+  const content = injectVersion(bundled, extVersion);
+  // read_file returns a JSON array [fileText, fileRefLine] (live-verified
+  // #52 shape) — unwrap before parsing the frontmatter version.
+  const readInstalled = async () => {
+    const result = await mcpToolCall('read_file', { target_file: PROTOCOL_SKILL_PATH });
+    const raw = toolText(result);
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && typeof parsed[0] === 'string') return parsed[0];
+    } catch { /* plain text — use as-is */ }
+    return raw;
+  };
+  // Already at this version? Skip the write.
+  try {
+    if (parseInstalledVersion(await readInstalled()) === extVersion) {
+      return { installed: true, checkedVersion: extVersion, version: extVersion, via: 'mcp' };
+    }
+  } catch { /* missing or MCP hiccup → (re)install below */ }
+  try {
+    await mcpToolCall('write_file', { target_file: PROTOCOL_SKILL_PATH, content });
+    if (parseInstalledVersion(await readInstalled()) === extVersion) {
+      return { installed: true, checkedVersion: extVersion, version: extVersion, via: 'mcp' };
+    }
+    return { installed: false, checkedVersion: extVersion, reason: 'read-back verification failed' };
+  } catch (err) {
+    try {
+      await oneShotWorkspaceWrite(PROTOCOL_SKILL_PATH, content);
+      if (parseInstalledVersion(await readInstalled()) === extVersion) {
+        return { installed: true, checkedVersion: extVersion, version: extVersion, via: 'ask' };
+      }
+    } catch { /* fall through */ }
+    return { installed: false, checkedVersion: extVersion, reason: err?.message || String(err) };
+  }
+}
+
+/**
+ * One-shot agent-write fallback — mirrors savePageToWorkspace's non-streaming
+ * write prompt (deliberately NOT a buildPrompt/askZo call: no recursion, no
+ * thread, no conversation id).
+ */
+async function oneShotWorkspaceWrite(path, content) {
+  const prompt = `Write the following content to the file at path \`${path}\` in my workspace. Create the directory if it does not exist. Use write_file or equivalent. Do not respond with anything other than a confirmation with the file path.\n\n---CONTENT START---\n${content}\n---CONTENT END---`;
+  const resp = await fetch(config.zoApiUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${config.zoAccessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ input: prompt, model_name: config.zoModel || undefined }),
+  });
+  if (!resp.ok) throw new Error(`Zo API error: ${resp.status}`);
+  await resp.json().catch(() => ({}));
+}
+
+/**
+ * Checked once per extension version per session (chrome.storage.session —
+ * survives MV3 worker restarts): verified installs pin for the session; a
+ * version bump (extension update) re-checks on the next action turn.
+ */
+async function ensureProtocolSkill() {
+  const extVersion = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getManifest)
+    ? chrome.runtime.getManifest().version : null;
+  if (!extVersion || !config.zoAccessToken) return null;
+  const state = await readSkillState();
+  if (state && state.checkedVersion === extVersion) return state;
+  const next = await installProtocolSkill(extVersion);
+  await writeSkillState(next);
+  return next;
 }
 
 async function listPersonas() {

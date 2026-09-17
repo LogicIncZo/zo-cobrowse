@@ -19,6 +19,10 @@ import { extname, join, resolve } from "node:path";
 const PORT = Number(process.env.E2E_PORT || 3179);
 const SITE_DIR = resolve(new URL(".", import.meta.url).pathname, "../fixtures/site");
 const requests = []; // {ts, method, url, body}
+// #235: the virtual /home/workspace/Skills/zo-cobrowse/SKILL.md + a one-shot
+// write_file failure arm (module scope — state must survive across requests).
+let skillFile = null;
+let skillWriteFail = false;
 
 // ---- Lane E demo/coverage state ----
 // Handoff runs are stateful across turns: a turn-1 prompt carries the
@@ -160,6 +164,37 @@ const server = http.createServer(async (req, res) => {
     return res.end('{"ok":true}');
   }
 
+  // ---- #235 protocol-skill workspace control ----
+  // GET  /__skill          — the stored virtual SKILL.md (null when missing)
+  // PUT  /__skill          — store a body as the installed copy (stale-seeding)
+  // DELETE /__skill        — remove it (fresh-workspace state)
+  // PUT  /__skill?mode=writefail — arm the next write_file to error once
+  // (skillFile/skillWriteFail live at module scope, next to `requests`.)
+  if (url.pathname === "/__skill") {
+    if (req.method === "GET") {
+      res.writeHead(200, { "content-type": "application/json", ...cors });
+      return res.end(JSON.stringify({ content: skillFile, writeFail: skillWriteFail }));
+    }
+    if (req.method === "PUT") {
+      const chunks = [];
+      for await (const c of req) chunks.push(c);
+      if (url.searchParams.get("mode") === "writefail") {
+        skillWriteFail = true;
+      } else {
+        skillFile = Buffer.concat(chunks).toString("utf-8");
+        skillWriteFail = false;
+      }
+      res.writeHead(200, { "content-type": "application/json", ...cors });
+      return res.end('{"ok":true}');
+    }
+    if (req.method === "DELETE") {
+      skillFile = null;
+      skillWriteFail = false;
+      res.writeHead(200, { "content-type": "application/json", ...cors });
+      return res.end('{"ok":true}');
+    }
+  }
+
   // #25: no-auth model catalog — carries supports_images per model.
   if (url.pathname === "/models/catalog") {
     res.writeHead(200, { "content-type": "application/json", ...cors });
@@ -206,6 +241,14 @@ const server = http.createServer(async (req, res) => {
       // #220: the recipes player loads its artifact from the workspace. Route
       // by path; every other path keeps the #52 notes fixture.
       const targetFile = String(body.params.arguments?.target_file || "");
+      // #235: the protocol-skill install reads the virtual workspace copy —
+      // missing → isError (mirrors the live read_failed shape).
+      if (targetFile === "/home/workspace/Skills/zo-cobrowse/SKILL.md") {
+        if (skillFile == null) {
+          return json({ jsonrpc: "2.0", id: body.id, result: { isError: true, content: [{ type: "text", text: "code: read_failed" }] } });
+        }
+        return json({ jsonrpc: "2.0", id: body.id, result: { isError: false, content: [{ type: "text", text: JSON.stringify([skillFile, `kind='file_ref' path='${targetFile}' media_type=None label=None`]) }] } });
+      }
       if (targetFile.includes("notes/source.md")) {
         const wrappedNotes = JSON.stringify(["E2E-SOURCE-CONTENT: the draft notes behind the application.", "kind='file_ref' path='" + targetFile + "' media_type=None label=None"]);
         return json({ jsonrpc: "2.0", id: body.id, result: { isError: false, content: [{ type: "text", text: wrappedNotes }] } });
@@ -239,7 +282,18 @@ const server = http.createServer(async (req, res) => {
       ]);
       return json({ jsonrpc: "2.0", id: body.id, result: { isError: false, content: [{ type: "text", text: wrapped }] } });
     }
-    if (body.method === "tools/call" && body.params?.name === "bash") {
+      // #235: the protocol-skill install writes here; a one-shot-error mode
+      // exercises the ask-write fallback.
+      if (body.method === "tools/call" && body.params?.name === "write_file") {
+        const targetFile = String(body.params.arguments?.target_file || "");
+        if (targetFile === "/home/workspace/Skills/zo-cobrowse/SKILL.md" && !skillWriteFail) {
+          skillFile = String(body.params.arguments?.content || "");
+          skillWriteFail = false;
+          return json({ jsonrpc: "2.0", id: body.id, result: { isError: false, content: [{ type: "text", text: "ok" }] } });
+        }
+        return json({ jsonrpc: "2.0", id: body.id, result: { isError: true, content: [{ type: "text", text: "write_file unavailable" }] } });
+      }
+      if (body.method === "tools/call" && body.params?.name === "bash") {
       const cmd = String(body.params.arguments?.cmd || "");
       const bash = (stdout) => `CmdResult(stdout='__ZO_BEGIN__\\n${stdout}\\n__ZO_END__\\n', stderr='', returncode=0)`;
       if (cmd.includes("SKILL.md")) {
@@ -289,6 +343,17 @@ const server = http.createServer(async (req, res) => {
       body = JSON.parse(bodyText);
     } catch {}
     requests.push({ ts: Date.now(), method: "POST", url: "/zo/ask", body });
+    // #235: the one-shot agent-write fallback posts the skill content with the
+    // save-page CONTENT START fence — a non-streaming JSON reply, and the
+    // virtual workspace file actually stores it (the real agent would write).
+    if (String(body.input || "").includes("---CONTENT START---")) {
+      const m = String(body.input).match(/---CONTENT START---\n([\s\S]*?)\n---CONTENT END---/);
+      if (m && String(body.input).includes("/home/workspace/Skills/zo-cobrowse/SKILL.md")) {
+        skillFile = m[1];
+        res.writeHead(200, { "content-type": "application/json", ...cors });
+        return res.end(JSON.stringify({ output: "written" }));
+      }
+    }
 
     // Write-assist one-shot (feature/textarea-fill): the in-page widget's
     // #220 recorder: the LLM cleanup pass for a recorded draft is a

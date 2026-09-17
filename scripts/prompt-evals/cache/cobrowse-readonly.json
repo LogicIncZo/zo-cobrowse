@@ -1,6 +1,6 @@
 {
   "id": "cobrowse-readonly",
-  "promptHash": "fc3b6c526100ce71490d1bb710a012846916a1bc5e5da9c5184929983a9a879d",
-  "fetchedAt": "2026-08-28T23:45:09.747Z",
-  "output": "This is a test page for the Zo co-browsing extension. It's structured like a typical SaaS landing page:\n\n- **Header/nav**: Links to Pricing, Features, Docs, and About, with a search box (a `q` input) in the top right.\n- **Hero**: Headline \"Build Smarter with Zo\" with a subheading describing the platform.\n- **Three feature cards**: Instant DuckDB Queries, Web Research Automation, and Custom Skill Builder — each with a \"Learn More\" link.\n- **Footer**: Copyright notice plus Privacy Policy and Terms of Service links.\n\nIn short, it's a demo/mock landing page (\"Build Smarter with Zo\") used to verify that the co-browse assistant can see page structure — nav, hero, cards, forms, footer — and summarize it."
+  "promptHash": "64b12c087449a85ba9dcad5c7cae234556ba296e49199a9df810d793d6068064",
+  "fetchedAt": "2026-09-16T18:07:55.554Z",
+  "output": "This is a demo/test page for Zo's co-browsing capability, built to look like a typical product marketing site.\n\n**Structure:**\n- **Header nav** — links to Pricing, Features, Docs, About\n- **Hero** — headline \"Build Smarter with Zo\" plus a subheading, with a search box in the top right\n- **Three feature cards** — Instant DuckDB Queries, Web Research Automation, Custom Skill Builder, each with a \"Learn More\" link\n- **Footer** — copyright, Privacy Policy, Terms of Service\n\nThe content is placeholder marketing copy rather than a real product page — the purpose is to give a browsing agent a mix of the things it needs to handle: navigation links, a form input (`input[name=\"q\"]`, type=search), and repeated CTA elements.\n\n**Note on the search form:** it's a bare search input with no visible submit button or `action` target shown in the element list, so it may be a non-functional stub."
 }

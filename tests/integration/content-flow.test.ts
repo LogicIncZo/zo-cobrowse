@@ -226,6 +226,36 @@ describe("content.js — full-script message flow", () => {  let win: any;
       expect(ctx.formFields.every((f: any) => f.placeholder === "Type your answer here..." || f.placeholder === "name@example.com")).toBe(true);
     });
 
+    it("never captures sensitive field values (#243 capture redaction)", async () => {
+      const pw = bWin.document.createElement("input");
+      pw.type = "password";
+      pw.id = "pw-field";
+      pw.name = "account_password";
+      pw.value = "hunter2-secret";
+      bWin.document.body.appendChild(pw);
+      const card = bWin.document.createElement("input");
+      card.type = "text";
+      card.id = "card-num";
+      card.name = "cc-number";
+      card.value = "4111 1111 1111 1111";
+      bWin.document.body.appendChild(card);
+      bWin.document.querySelector("#uuid-a2").value = "ada@example.test";
+      stubNonZeroRects(bWin);
+
+      const ctx = await bTarget.dispatch({ type: "CAPTURE_CONTEXT", tier: 2 });
+      const pwField = ctx.formFields.find((f: any) => f.type === "password");
+      expect(pwField).toBeTruthy(); // structure still rides (gates the sensitive-form confirm)…
+      expect(pwField.value).toBe(""); // …but never the value
+      expect(pwField.sensitive).toBe(true);
+      const cardField = ctx.formFields.find((f: any) => f.name === "cc-number");
+      expect(cardField.value).toBe(""); // name regex match (cc-number) redacts too
+      expect(cardField.sensitive).toBe(true);
+      // Non-sensitive fields keep their (truncated) value.
+      const emailField = ctx.formFields.find((f: any) => f.id === "uuid-a2" || f.name === "uuid-a2" || f.selector.includes("uuid-a2"));
+      expect(emailField.value).toBe("ada@example.test");
+      expect(emailField.sensitive).toBeUndefined();
+    });
+
     it("fill_form resolves by question text despite identical placeholders", async () => {
       const res = await bTarget.dispatch({
         type: "EXECUTE_ACTION",

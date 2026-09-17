@@ -14,7 +14,8 @@
 // by tests. Also re-used by tests/test-prompts/capture.ts (killing the old
 // hand-mirrored copy).
 
-import { ACTION_SCHEMA_COMPACT, PLAIN_RESPONSE_HINT } from './modes.js';
+import { ACTION_SCHEMA_COMPACT, BUILTIN_MODES, NOT_ATTACHED_CONTRACT, PLAIN_RESPONSE_HINT } from './modes.js';
+import { SKILL_POINTER, ACTION_ENVELOPE_DEMAND } from './protocol-skill.js';
 import { shouldDowngradeToJsonDisabled, detectIntent } from './intent.js';
 import { buildTabManifest, isBlankPage } from './tab-contexts.js';
 import { buildSkillLines, buildFileLines } from './pickers.js';
@@ -96,6 +97,30 @@ export function compactForm(f) {
   const q = (f.question || '').replace(/\s+/g, ' ').trim().slice(0, 60);
   const qs = q ? ` — ${q}` : '';
   return `[${f.tag || 'input'}${sel}${ty}${p}]${qs}`;
+}
+
+/**
+ * The action-turn tail (#235). Full by default — instructions + grammar +
+ * semantics inline (ACTION_SCHEMA_COMPACT) with the safety rules. When the
+ * protocol skill is VERIFIED installed (opts.protocolSkill.installed —
+ * background read-back), the tail slims to a skill pointer + envelope demand;
+ * the safety rules NEVER move server-side (the tail is never lighter than the
+ * verified install, and the #26 gate stays in-prompt on every turn).
+ *
+ * The builtin pacing instructions drop too — they are canon IN the skill —
+ * but only when they are still byte-identical to the builtin: a user's tuned
+ * instructions always ride, whatever the install state.
+ */
+function actionTail(opts, mode, wantJson) {
+  const slim = wantJson && opts && opts.protocolSkill && opts.protocolSkill.installed;
+  if (!slim) {
+    return { instructions: mode.instructions, protocol: `${ACTION_SCHEMA_COMPACT}${SHARED_SAFETY_RULES}` };
+  }
+  const instructionsKept = mode.instructions !== BUILTIN_MODES.cobrowse.instructions;
+  return {
+    instructions: instructionsKept ? mode.instructions : null,
+    protocol: `${SKILL_POINTER} ${ACTION_ENVELOPE_DEMAND}. ${SHARED_SAFETY_RULES}`,
+  };
 }
 
 /**
@@ -209,26 +234,40 @@ function _compose(mode, pageContext, userQuery, opts) {
   push('sep', '');
 
   if (jsonDisabled) {
-    push('tail', tier === 0
-      ? 'Only the page URL and title are attached — fetch the page yourself if you need its content. Answer the request directly.'
-      : 'Answer the request directly using the page content provided.');
-    push('tail', PLAIN_RESPONSE_HINT);
+    // #237 (spike GO — tests/test-prompts/probe-thread-tail.json): on an
+    // ESTABLISHED thread (the conversation_id echo already arrived) Zo retains
+    // the context contract, so read/downgraded follow-ups ride a stub instead
+    // of re-stating it. First turns and threadless callers (handoff/heal use
+    // their own assemblers) keep the full honest tail.
+    const stub = opts && opts.establishedThread;
+    if (stub) {
+      push('tail', 'Continue on this thread. Answer the request directly in plain markdown.');
+    } else {
+      push('tail', tier === 0
+        ? `${NOT_ATTACHED_CONTRACT} Answer the request directly.`
+        : 'Answer the request directly using the page content provided.');
+      push('tail', PLAIN_RESPONSE_HINT);
+    }
   } else {
-    push('tail', mode.instructions);
-    push('tail', wantJson ? `${ACTION_SCHEMA_COMPACT}${SHARED_SAFETY_RULES}` : PLAIN_RESPONSE_HINT);
+    const tail = actionTail(opts, mode, wantJson);
+    if (tail.instructions) push('tail', tail.instructions);
+    push('tail', wantJson ? tail.protocol : PLAIN_RESPONSE_HINT);
   }
   // Tier-0 honesty: when no page content rides, say so — exactly ONCE (#70).
-  // Suppressed when an earlier part already disclaimed (Lean's instructions
-  // carry their own not-attached contract; the read-downgrade tier-0 short
-  // variant covers downgraded turns). Skipped when there is no page pointer.
+  // NOT_ATTACHED_CONTRACT is the one canonical sentence (#236): turns that
+  // already carry it (the read-downgrade tier-0 tail, Lean's instructions)
+  // suppress the generic copy via exact-inclusion match below. Skipped when
+  // there is no page pointer at all — and on #237 established-thread stub
+  // turns (the thread already holds the contract).
   if (tier === 0 && !noPagePointer) {
-    const alreadyDisclaimed = parts.some((p) => /NOT attached|Only the page URL and title are attached/i.test(p.text));
+    const stub = opts && opts.establishedThread;
+    const alreadyDisclaimed = stub || parts.some((p) => p.text.includes(NOT_ATTACHED_CONTRACT));
     if (!alreadyDisclaimed) {
-      push('tail', "Page content was not attached this turn — only the URL and title above. If you need the page's content, fetch it yourself (web fetch, or read_page).");
+      push('tail', NOT_ATTACHED_CONTRACT);
     }
   }
 
-  return { parts, tier, intent: detectIntent(userQuery), expectJson: wantJson, downgradeApplied: jsonDisabled };
+  return { parts, tier, intent: detectIntent(userQuery), expectJson: wantJson, downgradeApplied: jsonDisabled, protocolSkill: (opts && opts.protocolSkill) || null };
 }
 
 /**
@@ -318,5 +357,5 @@ export function describePrompt(mode, pageContext, userQuery, opts) {
         : 'Instructions';
   }
 
-  return { prompt, sections, tier, intent, expectJson, downgradeApplied, approxTokens: estimateTokens(prompt) };
+  return { prompt, sections, tier, intent, expectJson, downgradeApplied, protocolSkill: (opts && opts.protocolSkill) || null, approxTokens: estimateTokens(prompt) };
 }
