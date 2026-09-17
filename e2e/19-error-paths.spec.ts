@@ -39,6 +39,8 @@ test.describe("error & cancel paths", () => {
     await expect(h.panel.locator("#query-input")).toBeEnabled();
     // The cancelled turn must NOT finalize (no footer = no persisted turn).
     await expect(h.panel.locator("#messages .msg-assistant .msg-footer")).toHaveCount(0);
+    // #234: the aborted turn's frozen "processing…" pill must be removed.
+    await expect(h.panel.locator("#messages .msg-processing-timer")).toHaveCount(0);
     // Panel still works: a follow-up completes normally.
     await sendQuery(h.panel, "what is this page?");
     await waitForTurnComplete(h.panel, 20_000);
@@ -58,6 +60,8 @@ test.describe("error & cancel paths", () => {
     await h.panel.waitForTimeout(400);
     await expect(h.panel.locator("#query-input")).toBeEnabled();
     await expect(h.panel.locator("#messages .msg-assistant .msg-footer")).toHaveCount(footersBefore);
+    // #234: no frozen "processing…" ghost from the aborted turn.
+    await expect(h.panel.locator("#messages .msg-processing-timer")).toHaveCount(0);
   });
 
   test("401 from the API renders an error card, not a hang", async () => {

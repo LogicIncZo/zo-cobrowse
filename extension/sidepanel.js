@@ -695,13 +695,13 @@ function bindEvents() {
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); closeTabAutocomplete(); sendQuery(); }
     // Esc cancels an in-flight stream (Zo: "Press Esc to stop").
-    if (e.key === 'Escape' && streamSession.active) { cancelStream(); e.preventDefault(); }
+    if (e.key === 'Escape' && streamSession.active) { cancelStream({ removeMsg: true }); e.preventDefault(); }
   });
   // Esc works anywhere in the panel, not just with the composer focused
   // (#133). Bubble phase: component Escape handlers (autocomplete popups,
   // rename input, review card) run first — skip keys they consumed.
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && streamSession.active && !e.defaultPrevented) cancelStream();
+    if (e.key === 'Escape' && streamSession.active && !e.defaultPrevented) cancelStream({ removeMsg: true });
   });
 
   // Mic button — STT
@@ -4225,13 +4225,19 @@ async function sendQueryFromLabel(label) {
 // Cancel the in-flight stream (Zo's "Press Esc to stop"). Disconnects the
 // port, clears the session, removes any thinking indicator, and re-enables
 // input so the panel is never stuck.
-function cancelStream() {
+// opts.removeMsg (#234): also drop the in-flight message element. An aborted
+// turn never gets a footer, so its frozen "◷ Ns — processing…" pill would
+// otherwise linger as a ghost. Only user-initiated cancels (Esc) pass this —
+// internal cancels (chat switch/close) keep the element; its chat re-renders
+// from history when the user returns.
+function cancelStream(opts = {}) {
   if (!streamSession.active) return;
   streamSession.active = false;
   clearThinkingTimeout();
   stopStreamTimer();
   const thinking = msgsEl?.querySelector('.msg-thinking');
   if (thinking) thinking.remove();
+  if (opts.removeMsg && streamSession.msgEl) streamSession.msgEl.remove();
   if (streamPort) { try { streamPort.disconnect(); } catch {} streamPort = null; }
   streamSession.msgEl = null;
   streamSession.fullText = '';
