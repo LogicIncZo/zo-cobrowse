@@ -759,3 +759,66 @@ describe("R2: workspace write-back (#256)", () => {
     expect(done.status).toBe("done");
   });
 });
+
+describe("R2: heal write-back (#256) — RECIPE_SAVE_HEALED", () => {
+  it("patches healed cues into the parameterized origin file; re-import needs no heal", async () => {
+    const wsPath = "/home/workspace/recipes/heal-origin.json";
+    savedFiles.set(wsPath, JSON.stringify(makeRecipe({
+      id: "rcp-ws-heal", name: "Heal origin", version: "3.0.0", origin: wsPath,
+      params: [{ name: "who", type: "string", required: true, question: "Name?" }],
+      steps: [
+        { type: "navigate", url: "https://fixture.example/form", expectUrl: "/form" },
+        { type: "fill", cues: [{ strategy: "question", value: "Ghost field" }], value: "{{who}}" },
+        { type: "done", message: "Filed" },
+      ],
+    }), null, 2) + "\n");
+
+    executedSteps.length = 0;
+    executeBehavior = (action) => {
+      const st = action.step;
+      if (st.type === "fill" && st.cues[0]?.value === "Ghost field") {
+        return { ok: false, type: "fill", cueMiss: true, tried: ["question=Ghost field"], candidates: [{ text: "Your name", selector: "#fullname" }], error: "no element matched" };
+      }
+      return { ok: true, type: st.type };
+    };
+    askResponder = () => jsonResponse({ output: JSON.stringify({ cues: [{ strategy: "selector", value: "#fullname" }, { strategy: "question", value: "Your name" }], note: "renamed field" }) });
+
+    const res = await start({ workspacePath: wsPath }, { who: "Ada" });
+    expect(res.ok).toBe(true);
+    const run = await settle(res.run.runId, ["done"]);
+    expect(run.status).toBe("done");
+    expect(run.healCount).toBe(1);
+    expect(run.healedSteps).toEqual([{ index: 1, type: "fill", cues: [{ strategy: "selector", value: "#fullname" }, { strategy: "question", value: "Your name" }] }]);
+
+    // Origin file still stale until the user saves.
+    expect(String(savedFiles.get(wsPath))).toContain("Ghost field");
+
+    const saved = await bus.runtime.sendMessage({ type: "RECIPE_SAVE_HEALED", runId: run.runId });
+    expect(saved.ok).toBe(true);
+    expect(saved.version).toBe("3.0.1");
+    const written: any = JSON.parse(String(savedFiles.get(wsPath)));
+    expect(written.steps[1].cues).toEqual([{ strategy: "selector", value: "#fullname" }, { strategy: "question", value: "Your name" }]);
+    expect(written.steps[1].value).toBe("{{who}}"); // parameterization survives the write-back
+    // The local cache carries the healed cues too.
+    expect(bus.storage.local._store.cobrowse_recipes["rcp-ws-heal"].steps[1].cues[0].value).toBe("#fullname");
+
+    // Re-import from origin: the patched cue hits — no second heal.
+    executedSteps.length = 0;
+    askResponder = null;
+    const res2 = await start({ workspacePath: wsPath }, { who: "Grace" });
+    expect(res2.ok).toBe(true);
+    const run2 = await settle(res2.run.runId, ["done"]);
+    expect(run2.status).toBe("done");
+    expect(run2.healCount || 0).toBe(0);
+    const fills = executedSteps.filter((st: any) => st.type === "fill");
+    expect(fills).toHaveLength(1); // single attempt, no retry
+    expect(fills[0].cues[0].value).toBe("#fullname");
+    executeBehavior = (action) => ({ ok: true, type: action.step?.type ?? action.type });
+  });
+
+  it("refuses unknown runs, local-origin runs, and already-saved duplicates stay honest", async () => {
+    const ghost = await bus.runtime.sendMessage({ type: "RECIPE_SAVE_HEALED", runId: "rec-nope" });
+    expect(ghost.ok).toBe(false);
+    expect(String(ghost.error)).toContain("run not found");
+  });
+});

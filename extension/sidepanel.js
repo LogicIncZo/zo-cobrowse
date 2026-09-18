@@ -374,6 +374,11 @@ async function finishInit() {
             : '';
           const note = `${icon} Recipe ${run.status} — ${safeText(run.name)}${reason}${evidence}`;
           const line = addMessage('system', note);
+          // R2 (#256): a healed run whose origin is a workspace file — offer
+          // the cue write-back (the origin file is stale until saved).
+          if ((run.healCount || 0) > 0 && !run.healedSaved && String(run.origin || '').startsWith('/home/workspace/')) {
+            renderRecipeHealOffer(run);
+          }
           // #269: the summary (with the evidence list) persists on the run's
           // conversation — addMessage skips system roles, so push directly.
           // Deduped: the terminal guard is per-panel-session, not global.
@@ -4932,6 +4937,119 @@ async function stopRecipeRecordingAndReport() {
   }
   const cleaned = resp.llmCleaned ? `Cleaned by Zo${resp.note ? `: ${safeText(resp.note)}` : ''}.` : 'Kept the deterministic draft (LLM cleanup unavailable).';
   addMessage('system', `🧠 Learned recipe "**${safeText(resp.name)}**" — ${resp.steps} steps, ${resp.params} params. ${cleaned}\n\nReplay it with \`!recipe run ${safeText(resp.name)}\`${(resp.warnings || []).length ? `\n\nWarnings: ${resp.warnings.map((w) => `- ${safeText(w)}`).join(' ')}` : ''}`);
+  renderRecipeSaveOffer(resp.name); // R2 (#256): workspace write-back offer
+}
+
+/** R2 (#256): send RECIPE_SAVE and render the outcome. An existing target
+ * renders the overwrite confirm card unless the caller pre-confirmed (--force,
+ * the healed-cues offer). Returns true when the write landed. */
+async function saveRecipeToWorkspace(name, path, { confirm = false } = {}) {
+  const resp = await chrome.runtime.sendMessage({ type: 'RECIPE_SAVE', name, path, confirm }).catch(() => null);
+  if (resp?.ok) {
+    addMessage('system', `⬆️ Saved **${safeText(name)}** v${safeText(resp.version)} → \`${safeText(resp.path)}\``);
+    return true;
+  }
+  if (resp?.exists) {
+    renderRecipeOverwriteCard(name, path || resp.path);
+    return false;
+  }
+  addMessage('error', resp?.error || 'Could not save the recipe.');
+  return false;
+}
+
+/** Small action card host — the checkpoint-card pattern minus persistence. */
+function recipeActionCard(title, bodyText) {
+  const host = document.createElement('div');
+  host.className = 'msg form-review-card recipe-action-card';
+  const titleEl = document.createElement('div');
+  titleEl.className = 'form-review-title';
+  titleEl.textContent = title;
+  host.appendChild(titleEl);
+  if (bodyText) {
+    const body = document.createElement('div');
+    body.className = 'recipe-checkpoint-instructions';
+    body.textContent = bodyText;
+    host.appendChild(body);
+  }
+  msgsEl?.appendChild(host);
+  host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  return host;
+}
+
+/** R2 (#256): the learned-recipe card's "Save to workspace" offer — the local
+ * library is device-bound; one click makes the recipe a portable artifact. */
+function renderRecipeSaveOffer(name) {
+  const host = recipeActionCard('🧠 Learned locally', `"${safeText(name)}" lives in this browser's library. Save it to the workspace to keep it portable?`);
+  const save = document.createElement('button');
+  save.className = 'btn btn-primary form-review-confirm';
+  save.textContent = '↥ Save to workspace';
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    const ok = await saveRecipeToWorkspace(name);
+    if (ok) host.remove();
+    else save.disabled = false;
+  });
+  const dismiss = document.createElement('button');
+  dismiss.className = 'btn btn-ghost form-review-cancel';
+  dismiss.textContent = 'Not now';
+  dismiss.addEventListener('click', () => host.remove());
+  const bar = document.createElement('div');
+  bar.className = 'form-review-actions';
+  bar.append(save, dismiss);
+  host.appendChild(bar);
+}
+
+/** R2 (#256): overwrite confirm card — probe-then-confirm, never a silent
+ * clobber. "Overwrite" re-sends with confirm:true. */
+function renderRecipeOverwriteCard(name, path) {
+  const host = recipeActionCard(`⚠️ ${safeText(path)} already exists`, 'Overwrite the workspace file with this recipe?');
+  const overwrite = document.createElement('button');
+  overwrite.className = 'btn btn-primary form-review-confirm';
+  overwrite.textContent = 'Overwrite';
+  overwrite.addEventListener('click', async () => {
+    overwrite.disabled = true;
+    const ok = await saveRecipeToWorkspace(name, path, { confirm: true });
+    if (ok) host.remove();
+    else overwrite.disabled = false;
+  });
+  const cancel = document.createElement('button');
+  cancel.className = 'btn btn-ghost form-review-cancel';
+  cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', () => host.remove());
+  const bar = document.createElement('div');
+  bar.className = 'form-review-actions';
+  bar.append(overwrite, cancel);
+  host.appendChild(bar);
+}
+
+/** R2 (#256): after a healed run whose origin is a workspace file, offer to
+ * push the healed cues back. The origin keeps its {{param}} refs — only the
+ * healed steps' cues move. One click = the confirmation; never automatic. */
+function renderRecipeHealOffer(run) {
+  const origin = safeText(run.origin);
+  const host = recipeActionCard('Healed cues are local only', `${origin} still has the cues that missed. Push the healed cues to the source file?`);
+  const save = document.createElement('button');
+  save.className = 'btn btn-primary form-review-confirm';
+  save.textContent = '↥ Save healed cues';
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    const resp = await chrome.runtime.sendMessage({ type: 'RECIPE_SAVE_HEALED', runId: run.runId }).catch(() => null);
+    if (resp?.ok) {
+      addMessage('system', `⬆️ Healed cues saved → \`${safeText(resp.path)}\` (now v${safeText(resp.version)})`);
+      host.remove();
+    } else {
+      addMessage('error', resp?.error || 'Could not save the healed cues.');
+      save.disabled = false;
+    }
+  });
+  const dismiss = document.createElement('button');
+  dismiss.className = 'btn btn-ghost form-review-cancel';
+  dismiss.textContent = 'Dismiss';
+  dismiss.addEventListener('click', () => host.remove());
+  const bar = document.createElement('div');
+  bar.className = 'form-review-actions';
+  bar.append(save, dismiss);
+  host.appendChild(bar);
 }
 
 /** The ⏺ recording indicator — ✕ stops, assembles the draft, learns. */
@@ -5374,8 +5492,7 @@ sendQuery = async function() {
       }
       if (bang.sub === 'save') {
         // R2 (#256): write a local recipe back to workspace JSON. An existing
-        // target refuses until --force confirms the overwrite (the library
-        // UI's confirm card lands with R3's popup).
+        // target renders the overwrite confirm card; --force pre-confirms.
         const parts = String(bang.target || '').trim().split(/\s+/).filter(Boolean);
         const force = parts.includes('--force');
         const args = parts.filter((w) => w !== '--force');
@@ -5386,10 +5503,7 @@ sendQuery = async function() {
           reenable();
           return;
         }
-        const resp = await chrome.runtime.sendMessage({ type: 'RECIPE_SAVE', name: rName, path: rPath, confirm: force }).catch(() => null);
-        if (resp?.ok) addMessage('system', `⬆️ Saved **${safeText(rName)}** v${safeText(resp.version)} → \`${safeText(resp.path)}\``);
-        else if (resp?.exists) addMessage('system', `⚠️ \`${safeText(resp.path)}\` already exists. Re-run with \`!recipe save ${safeText(rName)}${rPath ? ' ' + safeText(rPath) : ''} --force\` to overwrite.`);
-        else addMessage('error', resp?.error || 'Could not save the recipe.');
+        await saveRecipeToWorkspace(rName, rPath, { confirm: force });
         reenable();
         return;
       }

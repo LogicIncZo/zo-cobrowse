@@ -641,3 +641,35 @@ export function driftedFromWorkspace(localRecipe, workspaceText) {
   try { ws = JSON.parse(String(workspaceText ?? '')); } catch { return true; }
   return stableRecipe(localRecipe) !== stableRecipe(ws);
 }
+
+/**
+ * Patch healed cue arrays into the workspace (parameterized) copy of the
+ * recipe — the heal write-back's pure half (#256). The run carries the
+ * SUBSTITUTED recipe, so writing it would de-parameterize the artifact;
+ * instead the origin file keeps its {{param}} refs and only the healed
+ * steps' cues change. Refuses when the workspace copy no longer lines up
+ * (step removed/retyped since the run) — an honest refusal beats a patch
+ * onto the wrong step. Version bumping is the background's call.
+ * @param {object} workspaceRecipe parsed from the origin file
+ * @param {{index:number, type:string, cues:object[]}[]} healedSteps — type as
+ *   it was at run time, recorded by the healer
+ * @returns {{ok:true, recipe:object}|{ok:false, error:string}}
+ */
+export function patchHealedCues(workspaceRecipe, healedSteps) {
+  if (!Array.isArray(healedSteps) || healedSteps.length === 0) {
+    return { ok: false, error: 'no healed steps recorded' };
+  }
+  const steps = Array.isArray(workspaceRecipe?.steps) ? workspaceRecipe.steps : [];
+  const out = JSON.parse(JSON.stringify(workspaceRecipe));
+  for (const h of healedSteps) {
+    const i = Number(h?.index);
+    if (!Number.isInteger(i) || i < 0 || i >= steps.length) {
+      return { ok: false, error: `workspace recipe has no step at index ${i} — the file changed since the run; save manually` };
+    }
+    if (h?.type && steps[i]?.type !== h.type) {
+      return { ok: false, error: `type mismatch at step ${i} (${steps[i]?.type} vs healed ${h.type}) — the file changed since the run; save manually` };
+    }
+    out.steps[i].cues = Array.isArray(h.cues) ? h.cues : [];
+  }
+  return { ok: true, recipe: out };
+}
