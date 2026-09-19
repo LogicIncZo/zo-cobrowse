@@ -13,6 +13,7 @@ import { createFakeChrome, createTabTarget, waitUntil } from "../helpers/chrome-
 import {
   ZoFetchMock,
   MOCK_ZO_TOKEN,
+  jsonResponse,
   sseResponse,
   textResponse,
   zoSseText,
@@ -398,5 +399,225 @@ describe("compose sink — alignment (review F2)", () => {
     // The fill record carries the FILL's cues — not shifted onto a neighbor.
     expect(fill?.cues).toContainEqual({ strategy: "selector", value: "#qty" });
     expect(JSON.stringify(st.run.obs)).not.toContain("ZO-INVENTED-77");
+  });
+});
+
+describe("compose session (C2 #290)", () => {
+  async function composeStart(goal: string) {
+    const res = await bus.runtime.sendMessage({
+      type: "RECIPE_COMPOSE_START",
+      chatId: `chat-c2-${Math.random().toString(36).slice(2, 8)}`,
+      tabId: 1, goal,
+    });
+    expect(res.ok).toBe(true);
+    expect(res.run.boundaryMode).toBe("compose");
+    expect(res.run.compose.name).toBeTruthy();
+    expect(() => HandoffRun.parse(res.run)).not.toThrow();
+    return res.run;
+  }
+
+  /** Wait for the turn's STREAM_DONE and execute it as the panel would. */
+  async function driveOnce(run: any, sessionId: string | number) {
+    await waitUntil(() => seen.some((m) => m.type === "STREAM_DONE" && m.actions?.length && String(m.sessionId) === String(sessionId)), 8000);
+    const m = seen.filter((x: any) => x.type === "STREAM_DONE" && String(x.sessionId) === String(sessionId)).at(-1);
+    await bus.runtime.sendMessage({
+      type: "EXECUTE_ACTIONS", tabId: 1, handoffRunId: run.runId,
+      boundaryMode: "compose", url: "https://shop.example/form", actions: m.actions,
+    });
+    await flush();
+  }
+
+  it("value park: the boundary refuses Zo's fill (never executed), the human fills, resume continues", async () => {
+    const run = await composeStart("Fill the demo form");
+    let turn = 0;
+    fm.handle(() => {
+      turn++;
+      if (turn === 1) {
+        return envelope({ actions: [
+          { type: "navigate", url: "https://shop.example/form" },
+          { type: "fill", selector: "#qty", value: "ZO-INVENTED-99" },
+        ]});
+      }
+      return envelope({ actions: [{ type: "done", response: "Flow complete." }] });
+    });
+
+    port.postMessage({ sessionId: 2970, type: "ASK_ZO", chatId: run.chatId, modeId: "cobrowse", userQuery: run.goal, handoffRunId: run.runId });
+    await driveOnce(run, 2970);
+    // The loop parked instead of chaining — turn 2 never hit the wire.
+    await waitUntil(() => pushes.some((p) => p.run?.runId === run.runId && p.run.status === "blocked"), 8000);
+    expect(turn).toBe(1);
+
+    const st = await bus.runtime.sendMessage({ type: "HANDOFF_STATUS", runId: run.runId });
+    expect(() => HandoffRun.parse(st.run)).not.toThrow();
+    const parkRec = st.run.parks.find((p: any) => !p.resolved);
+    expect(parkRec.kind).toBe("value");
+    // The Zo fill NEVER executed: no 'zo' fill record exists, the invented
+    // value never landed — the boundary record is the park's trace.
+    expect(st.run.obs.filter((o: any) => o.source === "zo" && o.op === "fill")).toHaveLength(0);
+    expect(JSON.stringify(st.run.obs)).not.toContain("ZO-INVENTED-99");
+
+    // The human fills the page — RECIPE_OBS streams the human producer.
+    await bus.runtime.sendMessage({
+      type: "RECIPE_OBS",
+      obs: { op: "fill", url: "https://shop.example/form", cues: [{ strategy: "selector", value: "#qty" }], value: "3" },
+    });
+    const st2 = await bus.runtime.sendMessage({ type: "HANDOFF_STATUS", runId: run.runId });
+    const humanFill = st2.run.obs.find((o: any) => o.source === "human" && o.op === "fill");
+    expect(humanFill?.value).toBe("3");
+
+    // Resume: the park resolves and the continuation carries the resolution.
+    const res = await bus.runtime.sendMessage({ type: "RECIPE_COMPOSE_RESUME", runId: run.runId, parkId: parkRec.parkId });
+    expect(res.ok).toBe(true);
+    expect(res.continuationQuery).toContain("[compose park resolved]");
+
+    // The panel re-issues the continuation → turn 2 runs → done.
+    port.postMessage({ sessionId: "2970-h2", type: "ASK_ZO", chatId: run.chatId, modeId: "cobrowse", userQuery: res.continuationQuery, handoffRunId: run.runId });
+    await driveOnce(run, "2970-h2");
+    await waitUntil(() => pushes.some((p) => p.run?.runId === run.runId && p.run.status === "done"), 8000);
+
+    // Save → the HUMAN value is the param default; no invented value anywhere.
+    const save = await bus.runtime.sendMessage({ type: "RECIPE_COMPOSE_SAVE", runId: run.runId, name: "C2 Composed" });
+    expect(save.ok).toBe(true);
+    const entry = bus.storage.local._store.cobrowse_recipes["C2 Composed"];
+    expect(entry.composedBy).toBe("zo");
+    const withDefault = entry.params.find((p: any) => p.default === "3");
+    expect(withDefault).toBeTruthy();
+    expect(JSON.stringify(entry)).not.toContain("ZO-INVENTED-99");
+    // The resolved value park left NO checkpoint — the human fill IS the step.
+    expect(entry.steps.filter((s: any) => s.type === "human")).toHaveLength(0);
+  });
+
+  it("choice park: a PARK: done() is a question to the human, not completion", async () => {
+    const run = await composeStart("Pick a plan");
+    fm.handle(() => envelope({ actions: [{ type: "done", response: "PARK: Which hosting region? | Mumbai | Frankfurt" }] }));
+    port.postMessage({ sessionId: 2971, type: "ASK_ZO", chatId: run.chatId, modeId: "cobrowse", userQuery: run.goal, handoffRunId: run.runId });
+    await driveOnce(run, 2971);
+
+    const st = await bus.runtime.sendMessage({ type: "HANDOFF_STATUS", runId: run.runId });
+    expect(st.run.status).toBe("blocked"); // NOT done — the park intercepted it
+    const parkRec = st.run.parks.find((p: any) => !p.resolved);
+    expect(parkRec.kind).toBe("choice");
+    expect(parkRec.options).toEqual(["Mumbai", "Frankfurt"]);
+
+    const res = await bus.runtime.sendMessage({ type: "RECIPE_COMPOSE_RESUME", runId: run.runId, parkId: parkRec.parkId, text: "Mumbai" });
+    expect(res.ok).toBe(true);
+    expect(res.continuationQuery).toContain("Mumbai");
+    await bus.runtime.sendMessage({ type: "RECIPE_COMPOSE_STOP", runId: run.runId });
+  });
+
+  it("single-session rule: a second compose (or recording) start refuses", async () => {
+    const run = await composeStart("One at a time");
+    const second = await bus.runtime.sendMessage({ type: "RECIPE_COMPOSE_START", chatId: "chat-other", tabId: 1, goal: "Another goal" });
+    expect(second.ok).toBe(false);
+    expect(second.error).toContain("already live");
+    // The recorder path refuses too.
+    bus.storage.session._store.cobrowse_recipe_compose = { armed: true, runId: run.runId, startedAt: Date.now() };
+    const rec = await bus.runtime.sendMessage({ type: "RECIPE_RECORD_START", chatId: "chat-x", name: "sneaky" });
+    expect(rec.ok).toBe(false);
+    const stop = await bus.runtime.sendMessage({ type: "RECIPE_COMPOSE_STOP", runId: run.runId });
+    expect(stop.ok).toBe(true);
+    expect(stop.run.status).toBe("aborted");
+    const peek = await bus.runtime.sendMessage({ type: "RECIPE_RECORD_PEEK" });
+    expect(peek.armed).toBe(false);
+  });
+
+  it("HANDOFF_STOP (✕ / tab-close path) disarms the compose session too", async () => {
+    const run = await composeStart("Disarm me");
+    await bus.runtime.sendMessage({ type: "HANDOFF_STOP", runId: run.runId });
+    const peek = await bus.runtime.sendMessage({ type: "RECIPE_RECORD_PEEK" });
+    expect(peek.armed).toBe(false);
+  });
+});
+
+describe("compose session — review round 1 fixes", () => {
+  async function composeStartR1(goal: string) {
+    const res = await bus.runtime.sendMessage({
+      type: "RECIPE_COMPOSE_START",
+      chatId: `chat-r1-${Math.random().toString(36).slice(2, 8)}`,
+      tabId: 1, goal,
+    });
+    expect(res.ok).toBe(true);
+    return res.run;
+  }
+
+  async function driveOnceR1(run: any, sessionId: string | number) {
+    await waitUntil(() => seen.some((m) => m.type === "STREAM_DONE" && m.actions?.length && String(m.sessionId) === String(sessionId)), 8000);
+    const m = seen.filter((x: any) => x.type === "STREAM_DONE" && String(x.sessionId) === String(sessionId)).at(-1);
+    await bus.runtime.sendMessage({
+      type: "EXECUTE_ACTIONS", tabId: 1, handoffRunId: run.runId,
+      boundaryMode: "compose", url: "https://shop.example/form", actions: m.actions,
+    });
+    await flush();
+  }
+
+  it("F1: a fill_form action is refused by the compose boundary and never executes", async () => {
+    const run = await composeStartR1("Batch-fill is still a fill");
+    const res = await bus.runtime.sendMessage({
+      type: "EXECUTE_ACTIONS", tabId: 1, handoffRunId: run.runId,
+      boundaryMode: "compose", url: "https://shop.example/form",
+      actions: [{ type: "fill_form", values: [{ target: "#qty", value: "ZO-INVENTED-BATCH" }] }],
+    });
+    await flush();
+    const r = res.results[0];
+    expect(r.ok).toBe(false);
+    expect(r.handoffParked).toBe(true);
+    expect(r.error).toContain("never fills");
+    // Nothing executed: no zo record, no value anywhere.
+    const st = await bus.runtime.sendMessage({ type: "HANDOFF_STATUS", runId: run.runId });
+    expect(st.run.obs.filter((o: any) => o.source === "zo")).toHaveLength(0);
+    expect(JSON.stringify(st.run)).not.toContain("ZO-INVENTED-BATCH");
+    await bus.runtime.sendMessage({ type: "RECIPE_COMPOSE_STOP", runId: run.runId });
+  });
+
+  it("F2: a cleanup reply authoring a literal fill value is rejected for the deterministic draft", async () => {
+    const run = await composeStartR1("Literal guard");
+    // Stream-aware mock: the compose SAVE's cleanup one-shot is NON-streaming.
+    fm.handle((url: string, _init: any, req: any) => {
+      const body: any = req?.body || {};
+      if (url.includes("/zo/ask") && !body.stream) {
+        return jsonResponse({ output: JSON.stringify({
+          params: [],
+          steps: [
+            { type: "navigate", url: "https://shop.example/form", expectUrl: "/form" },
+            { type: "fill", cues: [{ strategy: "question", value: "Quantity" }], value: "MODEL-AUTHORED-LITERAL" },
+            { type: "done", message: "ok" },
+          ],
+        }) });
+      }
+      return envelope({ actions: [{ type: "navigate", url: "https://shop.example/form" }, { type: "done", response: "ok" }] });
+    });
+    port.postMessage({ sessionId: 2975, type: "ASK_ZO", chatId: run.chatId, modeId: "cobrowse", userQuery: run.goal, handoffRunId: run.runId });
+    await driveOnceR1(run, 2975);
+    await waitUntil(() => pushes.some((p) => p.run?.runId === run.runId && p.run.status === "done"), 8000);
+
+    const save = await bus.runtime.sendMessage({ type: "RECIPE_COMPOSE_SAVE", runId: run.runId, name: "F2 Composed" });
+    expect(save.ok).toBe(true);
+    expect(save.llmCleaned).toBe(false);
+    expect(save.note).toContain("literal fill value");
+    const entry = bus.storage.local._store.cobrowse_recipes["F2 Composed"];
+    expect(JSON.stringify(entry)).not.toContain("MODEL-AUTHORED-LITERAL");
+  });
+
+  it("F5: a paused compose run resumes WITHOUT a parkId (park-less resume)", async () => {
+    const run = await composeStartR1("Pause me by the sweep");
+    // Simulate the SW-restart orphan sweep's pause.
+    const runs = bus.storage.session._store.cobrowse_handoff_runs;
+    runs[run.runId].status = "paused";
+    runs[run.runId].stopReason = "extension restarted — resume to continue";
+    const res = await bus.runtime.sendMessage({ type: "RECIPE_COMPOSE_RESUME", runId: run.runId });
+    expect(res.ok).toBe(true);
+    expect(res.run.status).toBe("running");
+    expect(res.continuationQuery).toContain("[handoff-run continuation]");
+    await bus.runtime.sendMessage({ type: "RECIPE_COMPOSE_STOP", runId: run.runId });
+  });
+
+  it("F4: a compose run that completes naturally disarms the session", async () => {
+    const run = await composeStartR1("Finish on your own");
+    fm.handle(() => envelope({ actions: [{ type: "done", response: "All walked." }] }));
+    port.postMessage({ sessionId: 2976, type: "ASK_ZO", chatId: run.chatId, modeId: "cobrowse", userQuery: run.goal, handoffRunId: run.runId });
+    await driveOnceR1(run, 2976);
+    await waitUntil(() => pushes.some((p) => p.run?.runId === run.runId && p.run.status === "done"), 8000);
+    const peek = await bus.runtime.sendMessage({ type: "RECIPE_RECORD_PEEK" });
+    expect(peek.armed).toBe(false);
   });
 });

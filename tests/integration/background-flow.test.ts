@@ -436,8 +436,13 @@ describe("form-fill sensitivity gate (#26)", () => {
       parked = st.run?.parkLog || [];
       if (parked.length === 0) await new Promise((res) => setTimeout(res, 50));
     }
-    expect(parked).toHaveLength(1);
-    expect(parked[0].reason).toMatch(/blocked submit/i);
+    // Review F1 (0.3.2): fill_form no longer BYPASSES the readonly boundary —
+    // the batch-fill shape is parked like any other interactive action, so
+    // both actions of this batch park (fill_form: readonly refusal; click:
+    // the #163 blocked submit).
+    expect(parked).toHaveLength(2);
+    expect(parked[0].reason).toMatch(/READ-ONLY/);
+    expect(parked[1].reason).toMatch(/blocked submit/i);
   });
 
   it("benign fill_form executes immediately (no confirm)", async () => {

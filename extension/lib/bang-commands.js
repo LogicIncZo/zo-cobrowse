@@ -167,12 +167,12 @@ export function parseBangCommand(rawQuery) {
   // runs, `save <name> [path]` writes a local recipe back to the workspace
   // (R2 #256). The panel/background own everything after this parse.
   if (name === 'recipe') {
-    const RECIPE_SUBS = ['run', 'record', 'stop', 'list', 'save'];
-    const usage = 'Usage: `!recipe run <path|name>` — e.g. `!recipe run recipes/rti-filing.json` replays a saved multi-page flow (pauses at human checkpoints: captcha/OTP/payment). `!recipe record [name]` learns a draft recipe from a manual run. `!recipe list` shows saved recipes. `!recipe save <name> [path]` writes a local recipe back to the workspace (add `--force` to overwrite).';
+    const RECIPE_SUBS = ['run', 'record', 'stop', 'list', 'save', 'compose'];
+    const usage = 'Usage: `!recipe run <path|name>` — e.g. `!recipe run recipes/rti-filing.json` replays a saved multi-page flow (pauses at human checkpoints: captcha/OTP/payment). `!recipe record [name]` learns a draft from a manual run. `!recipe compose <goal>` — Zo walks the flow to compose a draft (it never fills or submits; you supply values). `!recipe list` shows saved recipes. `!recipe save <name> [path]` writes a local recipe back to the workspace (add `--force` to overwrite).';
     const subEnd = args.indexOf(' ');
     const sub = (subEnd === -1 ? args : args.slice(0, subEnd)).toLowerCase();
     const target = subEnd === -1 ? '' : args.slice(subEnd + 1).trim();
-    if (!RECIPE_SUBS.includes(sub) || (sub === 'run' && !target)) {
+    if (!RECIPE_SUBS.includes(sub) || (sub === 'run' && !target) || (sub === 'compose' && !target)) {
       return { handled: true, kind: 'inline', inlineReply: usage };
     }
     return { handled: true, kind: 'recipe', isRecipe: true, sub, target };

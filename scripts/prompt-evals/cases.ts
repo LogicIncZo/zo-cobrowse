@@ -26,7 +26,7 @@ import {
 import { parseZoOutput } from "../../extension/lib/parse-output.js";
 
 const T0 = 1757800000000; // fixed clock for eval fixtures
-import { generateValuePrompt, healPrompt, composeCleanupPrompt, assembleComposedDraft } from "../../extension/lib/recipes.js";
+import { generateValuePrompt, healPrompt, composeCleanupPrompt, composeInstructions, assembleComposedDraft } from "../../extension/lib/recipes.js";
 import {
   nonEmpty,
   noActionEnvelope,
@@ -380,6 +380,23 @@ export const CASES: EvalCase[] = [
         pass: (out.parsed?.steps || []).every((s: any, i: number, arr: any[]) =>
           !(s?.type === "click" && s.submitish) || (i > 0 && arr[i - 1]?.type === "human")),
       }),
+    ],
+  },
+  {
+    // 0.3.2 C2 (#290): the compose-session instructions — the belt (the
+    // boundary checker is the braces). Static shape checks only: the prompt
+    // must forbid fills/submits and define the PARK protocol.
+    id: "recipe-compose-instructions",
+    kind: "utility",
+    what: "Compose instructions carry the stable marker + never-fill/never-submit rules + PARK protocol (graded statically)",
+    build: () => composeInstructions("File the RTI application on the portal"),
+    live: false,
+    checks: [
+      promptMatches(/## Compose Run/, "carries the stable compose marker"),
+      promptMatches(/NEVER fill a field/, "forbids fills (values are human-only)"),
+      promptMatches(/NEVER click submit\/terminal controls/, "forbids submitish clicks"),
+      promptMatches(/PARK: /, "defines the park protocol"),
+      promptMatches(/compose-run marker/, "embeds the routing marker"),
     ],
   },
   {
