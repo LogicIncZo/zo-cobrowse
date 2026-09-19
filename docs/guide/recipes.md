@@ -114,6 +114,12 @@ only: executing a recipe always happens in the extension's deterministic
 player, never from the Zo side, and captured values are redacted before any
 markdown leaves the browser.
 
+One provenance note: while *values* are redacted, the bundle does carry
+text recorded from the pages you taught — cue labels and questions, checkpoint
+titles and instructions, and generated-fill prompts. If a flow was recorded on
+a page with manipulative copy, that copy can appear in the skill; give a bundle
+a quick skim before sharing it.
+
 ## Commands
 
 | Command | What it does |
