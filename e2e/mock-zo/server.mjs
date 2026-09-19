@@ -307,6 +307,13 @@ const server = http.createServer(async (req, res) => {
       // exercises the ask-write fallback.
       if (body.method === "tools/call" && body.params?.name === "write_file") {
         const targetFile = String(body.params.arguments?.target_file || "");
+        // R3 #257: skill-export bundles land here too — EXCEPT the exact
+        // #235 protocol-skill path, whose dedicated branch below carries the
+        // writefail arm the install tests exercise.
+        if (targetFile.startsWith("/home/workspace/Skills/") && targetFile !== "/home/workspace/Skills/zo-cobrowse/SKILL.md") {
+          savedRecipes.set(targetFile, String(body.params.arguments?.content || ""));
+          return json({ jsonrpc: "2.0", id: body.id, result: { isError: false, content: [{ type: "text", text: "ok" }] } });
+        }
         // R2 #256: recipe write-back targets the in-memory workspace store.
         if (targetFile.startsWith("/home/workspace/recipes/")) {
           savedRecipes.set(targetFile, String(body.params.arguments?.content || ""));

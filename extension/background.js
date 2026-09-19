@@ -99,6 +99,7 @@ import {
   serializeRecipe,
   driftedFromWorkspace,
   patchHealedCues,
+  buildRecipeSkillExport,
 } from './lib/recipes.js';
 import { createSessionCache } from './lib/sw-cache.js';
 import { createDebugLog } from './lib/debug-log.js';
@@ -549,6 +550,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     case 'RECIPE_STATUS': {
       recipeGet(request.runId ? { runId: request.runId } : { chatId: request.chatId }).then((run) => sendResponse({ ok: true, run }));
+      return true;
+    }
+    case 'RECIPE_RENAME': {
+      // R3 (#257): {name, newName} — library key + recipe.name move together;
+      // runs are self-contained and keep their copied name.
+      recipeRename(request).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
+      return true;
+    }
+    case 'RECIPE_DELETE': {
+      // R3 (#257): local library entry only — workspace files are the user's
+      // source of truth and are never removed by the extension.
+      recipeDelete(request).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
+      return true;
+    }
+    case 'RECIPE_IMPORT': {
+      // R3 (#257): {path} — read_file → validateRecipe → local library.
+      recipeImport(request).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
+      return true;
+    }
+    case 'RECIPE_EXPORT': {
+      // R3 (#257): {names, skillName?} — deterministic write_file bundle
+      // (SKILL.md + references/recipes.md). Documentation, never execution.
+      recipeExport(request).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
       return true;
     }
     case 'RECIPE_SAVE_HEALED': {
@@ -3081,9 +3105,94 @@ async function recipeList() {
   const live = Object.values(runs).find((r) => !['done', 'aborted'].includes(r.status));
   return {
     ok: true,
-    recipes: Object.values(lib).map((r) => ({ name: r.name, version: r.version, steps: r.steps.length, draft: !!r.draft, origin: r.origin })),
+    // R3 (#257): the library popup's payload — params (defaults stripped:
+    // they're local-only), provenance, and the source discriminator. The
+    // library is user storage: a corrupt entry still lists (key-fallback
+    // name, 0 steps) so it's visible and deletable — never a crash.
+    recipes: Object.entries(lib).map(([key, r]) => ({
+      name: (r && typeof r.name === 'string' && r.name) ? r.name : key,
+      version: (r && typeof r.version === 'string') ? r.version : '?',
+      steps: Array.isArray(r?.steps) ? r.steps.length : 0,
+      draft: !!(r && r.draft),
+      origin: r?.origin,
+      source: r?.origin && String(r.origin).startsWith('/home/workspace') ? 'workspace' : 'local',
+      updatedAt: (r && (r.updatedAt || r.createdAt)) || null,
+      params: (Array.isArray(r?.params) ? r.params : []).map((p) => ({ name: p.name, required: !!p.required, question: p.question || '' })),
+    })),
     liveRun: live ? { runId: live.runId, name: live.name, status: live.status } : null,
   };
+}
+
+// R3 (#257): rename — the library key AND recipe.name move together. Refuses
+// empty/colliding targets; runs keep their own copied name (self-contained).
+async function recipeRename({ name, newName } = {}) {
+  const lib = await recipeLibrary.load();
+  const key = safeText(name);
+  const next = safeText(newName).trim();
+  const recipe = lib[key];
+  if (!recipe) return { ok: false, error: `no local recipe named "${key}"` };
+  if (!next || /[/\\:]/.test(next)) return { ok: false, error: 'new name must be non-empty (no slashes/colons)' };
+  if (next === key) return { ok: true, name: next };
+  if (lib[next]) return { ok: false, error: `"${next}" already exists in the library` };
+  const verdict = validateRecipe(recipe);
+  if (!verdict.ok) return { ok: false, error: `invalid recipe: ${verdict.errors[0]}` };
+  lib[next] = { ...recipe, name: next, updatedAt: Date.now() };
+  delete lib[key];
+  await recipeLibrary.save(lib);
+  return { ok: true, name: next };
+}
+
+// R3 (#257): delete — local entry only, never the workspace source file.
+async function recipeDelete({ name } = {}) {
+  const lib = await recipeLibrary.load();
+  const key = safeText(name);
+  if (!lib[key]) return { ok: false, error: `no local recipe named "${key}"` };
+  delete lib[key];
+  await recipeLibrary.save(lib);
+  return { ok: true };
+}
+
+// R3 (#257): import — same gate the run path uses (read_file → parse →
+// validateRecipe), stamped with the workspace origin so drift is visible.
+async function recipeImport({ path } = {}) {
+  const target = safeWorkspacePath(String(path || ''));
+  if (!target) return { ok: false, error: `path must be inside ${WORKSPACE_ROOT}` };
+  const res = await readWorkspaceFile(target);
+  if (!res.ok) return { ok: false, error: res.error };
+  let recipe;
+  try {
+    recipe = JSON.parse(res.content);
+  } catch (e) {
+    return { ok: false, error: `recipe is not valid JSON: ${e.message}` };
+  }
+  const verdict = validateRecipe(recipe);
+  if (!verdict.ok) return { ok: false, error: `invalid recipe: ${verdict.errors[0]}`, errors: verdict.errors };
+  const stamped = { ...recipe, origin: target, updatedAt: Date.now() };
+  const lib = await recipeLibrary.load();
+  lib[recipe.name] = stamped;
+  await recipeLibrary.save(lib);
+  return { ok: true, name: stamped.name, version: stamped.version, path: target };
+}
+
+// R3 (#257): export — the deterministic bundle write (validate → build →
+// write_file per file). Never an LLM-authored transformation.
+async function recipeExport({ names, skillName } = {}) {
+  const lib = await recipeLibrary.load();
+  const list = (Array.isArray(names) ? names : []).map((n) => lib[safeText(n)]);
+  if (!list.length || list.some((r) => !r)) return { ok: false, error: 'no matching local recipes' };
+  const bundle = buildRecipeSkillExport(list, { skillName });
+  if (!bundle.ok) return bundle;
+  if (!config.zoAccessToken) return { ok: false, error: 'Zo access token not configured.' };
+  const written = [];
+  for (const f of bundle.files) {
+    try {
+      await mcpToolCall('write_file', { target_file: f.path, content: f.markdown });
+      written.push(f.path);
+    } catch (err) {
+      return { ok: false, error: `write_file failed for ${f.path}: ${err?.message || err}`, paths: written };
+    }
+  }
+  return { ok: true, skillName: bundle.skillName, paths: written };
 }
 
 // The healer (#220): on a cue miss, ONE re-ground turn — a redacted tier-2

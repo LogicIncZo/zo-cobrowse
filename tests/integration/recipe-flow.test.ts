@@ -19,7 +19,7 @@ import {
   jsonResponse,
   textResponse,
 } from "../helpers/zo-fetch-mock.ts";
-import { Recipe } from "../schemas/recipes.js";
+import { Recipe, RecipeListItem } from "../schemas/recipes.js";
 
 const bus = createFakeChrome();
 const fm = new ZoFetchMock();
@@ -820,5 +820,90 @@ describe("R2: heal write-back (#256) — RECIPE_SAVE_HEALED", () => {
     const ghost = await bus.runtime.sendMessage({ type: "RECIPE_SAVE_HEALED", runId: "rec-nope" });
     expect(ghost.ok).toBe(false);
     expect(String(ghost.error)).toContain("run not found");
+  });
+});
+
+describe("R3: library surface (#257) — list/rename/delete/import/export", () => {
+  it("RECIPE_LIST carries the popup payload (schema-validated, defaults stripped)", async () => {
+    const resp = await bus.runtime.sendMessage({ type: "RECIPE_LIST" });
+    expect(resp.ok).toBe(true);
+    // The corrupt "broken" entry (seeded by an earlier test) still lists —
+    // key-fallback name, 0 steps — visible and deletable, never a crash.
+    const brokenRow = resp.recipes.find((r: any) => r.name === "broken");
+    expect(brokenRow?.steps).toBe(0);
+    const rti = resp.recipes.find((r: any) => r.name === "RTI filing");
+    expect(rti).toBeTruthy();
+    // The R2 describe above saved rti to the workspace — its local copy now
+    // carries the workspace origin, so the popup badges it as such.
+    expect(rti.source).toBe("workspace");
+    const other = resp.recipes.find((r: any) => r.name === "Other");
+    expect(other?.source).toBe("local");
+    expect(typeof rti.updatedAt).toBe("number");
+    for (const row of resp.recipes) {
+      expect(() => RecipeListItem.parse(row)).not.toThrow();
+      expect(JSON.stringify(row)).not.toContain('"default"'); // defaults are local-only
+    }
+  });
+
+  it("rename moves key+name, refuses collisions; delete removes local only", async () => {
+    const ren = await bus.runtime.sendMessage({ type: "RECIPE_RENAME", name: "other", newName: "renamed-flow" });
+    expect(ren.ok).toBe(true);
+    const lib = bus.storage.local._store.cobrowse_recipes;
+    expect(lib["renamed-flow"]?.name).toBe("renamed-flow");
+    expect(lib.other).toBeUndefined();
+    const collide = await bus.runtime.sendMessage({ type: "RECIPE_RENAME", name: "renamed-flow", newName: "rti" });
+    expect(collide.ok).toBe(false);
+    const del = await bus.runtime.sendMessage({ type: "RECIPE_DELETE", name: "renamed-flow" });
+    expect(del.ok).toBe(true);
+    expect(bus.storage.local._store.cobrowse_recipes["renamed-flow"]).toBeUndefined();
+    const ghost = await bus.runtime.sendMessage({ type: "RECIPE_DELETE", name: "nope" });
+    expect(ghost.ok).toBe(false);
+  });
+
+  it("import: valid workspace file lands in the library with origin + source; invalid refuses with errors", async () => {
+    const good = makeRecipe({ id: "rcp-imp", name: "Imported flow", version: "0.9.0", origin: "/home/workspace/recipes/imp.json" });
+    savedFiles.set("/home/workspace/recipes/imp.json", JSON.stringify(good, null, 2) + "\n");
+    const res = await bus.runtime.sendMessage({ type: "RECIPE_IMPORT", path: "/home/workspace/recipes/imp.json" });
+    expect(res.ok).toBe(true);
+    expect(res.name).toBe("Imported flow");
+    expect(res.version).toBe("0.9.0");
+    const lib = bus.storage.local._store.cobrowse_recipes;
+    expect(lib["Imported flow"]?.origin).toBe("/home/workspace/recipes/imp.json");
+    const listed = await bus.runtime.sendMessage({ type: "RECIPE_LIST" });
+    const row = listed.recipes.find((r: any) => r.name === "Imported flow");
+    expect(row.source).toBe("workspace");
+    // Bad JSON + invalid recipe + traversal all refuse honestly.
+    savedFiles.set("/home/workspace/recipes/bad.json", "not json");
+    const bad = await bus.runtime.sendMessage({ type: "RECIPE_IMPORT", path: "/home/workspace/recipes/bad.json" });
+    expect(bad.ok).toBe(false);
+    expect(String(bad.error)).toContain("not valid JSON");
+    const invalid = makeRecipe({ id: "rcp-bad", name: "Bad", steps: [{ type: "click", submitish: true, cues: [] }] });
+    savedFiles.set("/home/workspace/recipes/invalid.json", JSON.stringify(invalid));
+    const inv = await bus.runtime.sendMessage({ type: "RECIPE_IMPORT", path: "/home/workspace/recipes/invalid.json" });
+    expect(inv.ok).toBe(false);
+    expect(Array.isArray(inv.errors)).toBe(true);
+    const evil = await bus.runtime.sendMessage({ type: "RECIPE_IMPORT", path: "../../etc/passwd" });
+    expect(evil.ok).toBe(false);
+    expect(String(evil.error)).toContain("must be inside");
+  });
+
+  it("export: writes the SKILL.md bundle via write_file; redacted + deterministic paths", async () => {
+    const res = await bus.runtime.sendMessage({ type: "RECIPE_EXPORT", names: ["rti"], skillName: "E2E flows" });
+    expect(res.ok).toBe(true);
+    expect(res.skillName).toBe("e2e-flows");
+    expect(res.paths).toEqual([
+      "/home/workspace/Skills/e2e-flows/SKILL.md",
+      "/home/workspace/Skills/e2e-flows/references/recipes.md",
+    ]);
+    const skill = String(savedFiles.get(res.paths[0]));
+    expect(skill).toContain("name: e2e-flows");
+    expect(skill).toContain("RTI filing");
+    expect(skill.toLowerCase()).toContain("documentation only");
+    // The deterministic-draft fill value ("Ada" from makeRecipe) never leaves.
+    const both = res.paths.map((p: string) => String(savedFiles.get(p))).join("\n");
+    expect(both).not.toContain("Ada");
+    expect(both).toContain("••••");
+    const unknown = await bus.runtime.sendMessage({ type: "RECIPE_EXPORT", names: ["ghost"] });
+    expect(unknown.ok).toBe(false);
   });
 });

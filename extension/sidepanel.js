@@ -2838,6 +2838,24 @@ let shotModeAuto = false;
 // the DOM off still ships pixels (screenshot-only turn — separate channel).
 let domContextOn = true;
 
+// R3 (#257): the 🧾 Recipes button opens the library popup above the composer.
+// Esc closes it — preventDefault marks the key consumed so the panel-level
+// Esc-to-stop (#133) doesn't also fire (same contract as the pickers).
+function initRecipeLibraryButton() {
+  const btn = document.getElementById('recipe-lib-btn');
+  if (!btn) return;
+  btn.addEventListener('click', () => toggleRecipeLibrary());
+  const input = document.getElementById('query-input');
+  input?.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const pop = document.getElementById('recipe-library');
+    if (pop && !pop.classList.contains('hidden')) {
+      e.preventDefault();
+      closeRecipeLibrary();
+    }
+  });
+}
+
 function renderDomToggle() {
   const btn = document.getElementById('dom-toggle');
   if (!btn) return;
@@ -2930,6 +2948,7 @@ function initTabStrip() {
   refreshOpenTabs();
   initShotToggle();
   initDomToggle();
+  initRecipeLibraryButton(); // R3 (#257): 🧾 library popup
   // #62: panel-safe dropdowns (native select popups don't open on click in
   // the side-panel shell). The native selects stay as the data store.
   shimSelect(modelSelect);
@@ -3247,6 +3266,7 @@ function closeFilePopup() {
 function closeAllPickerPopups() {
   closeSkillPopup();
   closeFilePopup();
+  closeRecipeLibrary(); // R3 (#257): one Escape/send closes every composer popup
 }
 
 async function ensureSkillsLoaded(force = false) {
@@ -5147,6 +5167,213 @@ function renderRecipeReviewCard(run) {
   host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
+// ---- Recipe library popup (R3 #257) ----------------------------------------
+// Browse/run/rename/delete/import saved flows + export them as a Zo skill
+// (documentation only). Pure rendering over the extended RECIPE_LIST payload;
+// popup state lives in the panel only.
+
+/** Start a recipe run from the panel (bang + library popup share this):
+ * params card when the recipe declares required params, then RECIPE_START. */
+async function startRecipeRun(source) {
+  const startRecipe = (paramValues) => chrome.runtime.sendMessage({
+    type: 'RECIPE_START',
+    chatId: activeId,
+    tabId: currentContext?.tabId,
+    source,
+    ...(paramValues ? { paramValues } : {}),
+  }).catch(() => null);
+  let start = await startRecipe();
+  if (start?.needsParams) {
+    const values = await renderRecipeParamsCard(start.params || []);
+    if (!values) {
+      addMessage('system', 'Recipe run cancelled.');
+      return null;
+    }
+    start = await startRecipe(values);
+  }
+  if (!start?.ok || !start.run) {
+    addMessage('error', start?.error || 'Could not start the recipe run.');
+    return null;
+  }
+  activeRecipeRun = start.run;
+  renderChatTabs(); // the run's chat tab carries the run marker
+  addMessage('system', `🧾 Recipe started — ${safeText(start.run.name)} (v${safeText(start.run.version)})`);
+  return start.run;
+}
+
+function closeRecipeLibrary() {
+  const pop = document.getElementById('recipe-library');
+  if (pop) pop.classList.add('hidden');
+}
+
+async function toggleRecipeLibrary() {
+  const pop = document.getElementById('recipe-library');
+  if (pop && !pop.classList.contains('hidden')) {
+    closeRecipeLibrary();
+    return;
+  }
+  closeAllPickerPopups();
+  await renderRecipeLibrary();
+}
+
+async function renderRecipeLibrary() {
+  const pop = document.getElementById('recipe-library');
+  if (!pop) return;
+  pop.replaceChildren();
+  pop.appendChild(pickerNoteItem('Loading recipes…'));
+  pop.classList.remove('hidden');
+  const resp = await chrome.runtime.sendMessage({ type: 'RECIPE_LIST' }).catch(() => null);
+  pop.replaceChildren();
+  if (!resp?.ok) {
+    pop.appendChild(pickerNoteItem(resp?.error || 'Recipes unavailable — check your Zo token.'));
+    return;
+  }
+  const recipes = resp.recipes || [];
+  if (!recipes.length) {
+    pop.appendChild(pickerNoteItem('No saved recipes yet. Teach one with `!recipe record <name>`, or import a workspace file below.'));
+  }
+  for (const r of recipes) pop.appendChild(recipeLibraryRow(r, resp.liveRun));
+  // Footer: import from the workspace (read_file → validate → local library).
+  const importBar = document.createElement('div');
+  importBar.className = 'recipe-lib-import';
+  const pathInput = document.createElement('input');
+  pathInput.placeholder = '/home/workspace/recipes/flow.json';
+  pathInput.setAttribute('aria-label', 'Workspace recipe path to import');
+  const importBtn = document.createElement('button');
+  importBtn.textContent = '＋ Import';
+  importBtn.title = 'Import a workspace recipe into the local library';
+  const importRecipe = async () => {
+    const path = pathInput.value.trim();
+    if (!path) return;
+    importBtn.disabled = true;
+    const r = await chrome.runtime.sendMessage({ type: 'RECIPE_IMPORT', path }).catch(() => null);
+    importBtn.disabled = false;
+    if (r?.ok) {
+      addMessage('system', `⬇️ Imported **${safeText(r.name)}** v${safeText(r.version)} ← \`${safeText(r.path)}\``);
+      await renderRecipeLibrary();
+    } else {
+      const errEl = document.createElement('div');
+      errEl.className = 'recipe-lib-error';
+      errEl.textContent = r?.errors ? r.errors.map(safeText).join('\n') : (r?.error || 'Import failed.');
+      const old = pop.querySelector('.recipe-lib-error');
+      if (old) old.remove();
+      pop.insertBefore(errEl, importBar);
+    }
+  };
+  importBtn.addEventListener('click', importRecipe);
+  pathInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); importRecipe(); }
+    e.stopPropagation(); // the composer's Enter-to-send must not fire
+  });
+  importBar.append(pathInput, importBtn);
+  pop.appendChild(importBar);
+}
+
+/** One library row: header (name/version/steps/source), params, actions. */
+function recipeLibraryRow(r, liveRun) {
+  const row = document.createElement('div');
+  row.className = 'recipe-lib-row';
+  const head = document.createElement('div');
+  head.className = 'recipe-lib-head';
+  const name = document.createElement('span');
+  name.className = 'recipe-lib-name';
+  name.textContent = safeText(r.name);
+  head.appendChild(name);
+  const badge = document.createElement('span');
+  badge.className = 'recipe-lib-badge';
+  badge.textContent = r.source === 'workspace' ? `🌐 ${safeText(r.origin)}` : '💻 local';
+  badge.title = r.source === 'workspace' ? 'Imported from the workspace (the file is the source of truth)' : 'Learned locally in this browser';
+  for (const b of [`v${safeText(r.version)}`, `${r.steps} steps`, ...(r.draft ? ['draft'] : [])]) {
+    const el = document.createElement('span');
+    el.className = 'recipe-lib-badge';
+    el.textContent = b;
+    head.appendChild(el);
+  }
+  head.appendChild(badge);
+  row.appendChild(head);
+  if ((r.params || []).length) {
+    const chips = document.createElement('div');
+    chips.className = 'recipe-lib-head';
+    for (const p of r.params.slice(0, 6)) {
+      const c = document.createElement('span');
+      c.className = 'recipe-lib-badge' + (p.required ? ' required' : '');
+      c.textContent = p.required ? `${safeText(p.name)}*` : safeText(p.name);
+      if (p.question) c.title = safeText(p.question);
+      chips.appendChild(c);
+    }
+    row.appendChild(chips);
+  }
+  const actions = document.createElement('div');
+  actions.className = 'recipe-lib-actions';
+  const act = (label, title, fn, cls = '') => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.title = title;
+    if (cls) b.className = cls;
+    b.addEventListener('click', () => fn(b));
+    actions.appendChild(b);
+    return b;
+  };
+  act('▶ Run', 'Run this recipe (pauses at human checkpoints)', async (b) => {
+    // One live run at a time — the second click is the confirmation.
+    if (liveRun && liveRun.name !== r.name && !b.dataset.confirmed) {
+      b.dataset.confirmed = '1';
+      b.textContent = `▶ Run anyway? (${safeText(liveRun.name)} is live)`;
+      return;
+    }
+    closeRecipeLibrary();
+    await startRecipeRun({ localName: r.name });
+  });
+  act('↥ Save', 'Write this recipe to the workspace (R2 #256)', async () => {
+    closeRecipeLibrary();
+    await saveRecipeToWorkspace(r.name);
+  });
+  act('⤓ Export', 'Export as a Zo skill (SKILL.md — documentation only)', async (b) => {
+    b.disabled = true;
+    const resp = await chrome.runtime.sendMessage({ type: 'RECIPE_EXPORT', names: [r.name], skillName: r.name }).catch(() => null);
+    b.disabled = false;
+    if (resp?.ok) addMessage('system', `⤓ Exported **${safeText(r.name)}** as skill \`${safeText(resp.skillName)}\` → ${resp.paths.map((p) => `\`${safeText(p)}\``).join(', ')}`);
+    else addMessage('error', resp?.error || 'Export failed.');
+  });
+  act('✎ Rename', 'Rename the local library entry', () => {
+    const input = document.createElement('input');
+    input.value = safeText(r.name);
+    input.className = 'recipe-lib-rename';
+    input.setAttribute('aria-label', 'New name');
+    name.replaceWith(input);
+    input.focus();
+    input.select();
+    const commit = async () => {
+      const newName = input.value.trim();
+      if (newName && newName !== r.name) {
+        const resp = await chrome.runtime.sendMessage({ type: 'RECIPE_RENAME', name: r.name, newName }).catch(() => null);
+        if (!resp?.ok) { addMessage('error', resp?.error || 'Rename failed.'); return; }
+      }
+      await renderRecipeLibrary();
+    };
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') { e.preventDefault(); commit(); }
+      if (e.key === 'Escape') { e.preventDefault(); renderRecipeLibrary(); }
+    });
+    input.addEventListener('blur', commit);
+  });
+  act('🗑 Delete', 'Remove from the LOCAL library (workspace files are never touched)', (b) => {
+    if (!b.dataset.confirmed) {
+      b.dataset.confirmed = '1';
+      b.textContent = '🗑 Sure? click again';
+      return;
+    }
+    chrome.runtime.sendMessage({ type: 'RECIPE_DELETE', name: r.name }).then(async (resp) => {
+      if (resp?.ok) addMessage('system', `🗑 Removed **${safeText(r.name)}** from the local library.`);
+      else addMessage('error', resp?.error || 'Delete failed.');
+      await renderRecipeLibrary();
+    }).catch(() => {});
+  }, 'danger');
+  row.appendChild(actions);
+  return row;
+}
+
 /** The params card: one input per required recipe param; resolves with a
  * {name: value} map, or null on cancel. Form-review-card styling. */
 function renderRecipeParamsCard(params) {
@@ -5529,30 +5756,7 @@ sendQuery = async function() {
       const source = (bang.target.includes('/') || bang.target.endsWith('.json'))
         ? { workspacePath: bang.target }
         : { localName: bang.target };
-      const startRecipe = (paramValues) => chrome.runtime.sendMessage({
-        type: 'RECIPE_START',
-        chatId: activeId,
-        tabId: currentContext?.tabId,
-        source,
-        ...(paramValues ? { paramValues } : {}),
-      }).catch(() => null);
-      let start = await startRecipe();
-      if (start?.needsParams) {
-        const values = await renderRecipeParamsCard(start.params || []);
-        if (!values) {
-          addMessage('system', 'Recipe run cancelled.');
-          reenable();
-          return;
-        }
-        start = await startRecipe(values);
-      }
-      if (!start?.ok || !start.run) {
-        addMessage('error', start?.error || 'Could not start the recipe run.');
-      } else {
-        activeRecipeRun = start.run;
-        renderChatTabs(); // the run's chat tab carries the run marker
-        addMessage('system', `🧾 Recipe started — ${safeText(start.run.name)} (v${safeText(start.run.version)})`);
-      }
+      await startRecipeRun(source);
       reenable();
       return;
     }

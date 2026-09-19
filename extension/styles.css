@@ -2541,6 +2541,87 @@ body.options-page {
   gap: 2px;
 }
 .tab-autocomplete.hidden { display: none; }
+
+/* R3 (#257): the recipe library popup — taller than the token pickers, rows
+   carry action buttons and a params chip strip. */
+.recipe-library {
+  max-height: min(60vh, 460px);
+}
+.recipe-lib-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border, #2a2d45);
+}
+.recipe-lib-row:last-of-type { border-bottom: none; }
+.recipe-lib-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  color: var(--text, #fff);
+  font-size: 13px;
+}
+.recipe-lib-name { font-weight: 600; }
+.recipe-lib-badge {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border, #333);
+  color: var(--text-dim, #9aa);
+}
+.recipe-lib-badge.required { border-color: var(--accent, #6c8cff); }
+.recipe-lib-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.recipe-lib-actions button {
+  background: none;
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  color: var(--text, #fff);
+  font-size: 12px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.recipe-lib-actions button:hover { border-color: var(--accent, #6c8cff); }
+.recipe-lib-actions button.danger:hover { border-color: #e5484d; color: #ff6369; }
+.recipe-lib-import {
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  position: sticky;
+  bottom: 0;
+  background: var(--bg-elevated, #15182e);
+    border-top: 1px solid var(--border, #2a2d45);
+}
+.recipe-lib-import input {
+  flex: 1;
+  background: var(--bg, #0e1122);
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  color: var(--text, #fff);
+  font-size: 12px;
+  padding: 4px 8px;
+}
+.recipe-lib-import button {
+  background: none;
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  color: var(--text, #fff);
+  font-size: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.recipe-lib-import button:hover { border-color: var(--accent, #6c8cff); }
+.recipe-lib-error {
+  color: #ff6369;
+  font-size: 12px;
+  padding: 4px 8px;
+  white-space: pre-wrap;
+}
 .tab-ac-item {
   text-align: left;
   background: none;
