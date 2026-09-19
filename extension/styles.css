@@ -236,7 +236,7 @@
   --bg-input: #faf2e2;
   --bg-glass: rgba(246, 236, 218, 0.88);
   --text: #3d3024;
-  --text-muted: #7a6b5a;
+  --text-muted: #766756;  /* #297: 4.66:1 on --bg-surface (was 4.40, sub-AA) */
   --text-faint: #a89880;
   --text-inverse: #f6ecda;
   --amber: #a0592a;
@@ -689,7 +689,7 @@ input, textarea, select {
 }
 .page-icon {
   font-size: 11px;
-  color: var(--text-faint);
+  color: var(--text-muted); /* #297: was --text-faint @ 2.4-3.1:1 */
   flex-shrink: 0;
 }
 #page-url {
@@ -715,11 +715,15 @@ input, textarea, select {
   flex-wrap: wrap;
 }
 .controls-bar label {
-  font-size: 10px;
+  /* #297: 10px @ --text-faint measured 2.40-3.14:1 across themes (WCAG AA
+     needs 4.5). 11px matches the smallest legible size elsewhere in the
+     panel; --text-muted is the value-text token, >=4.5 on --bg-surface in
+     every theme after the sepia token nudge. */
+  font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--text-faint);
+  color: var(--text-muted);
 }
 /* #140: stacked label-over-value groups; MODE gets the widest group (it is
    switched per task and its value must read at ~400px dock width), PERSONA
