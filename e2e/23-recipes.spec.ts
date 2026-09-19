@@ -135,3 +135,42 @@ test.describe("recipes player", () => {
     await expect(h.site.locator("#name")).toHaveValue("Workspace Value");
   });
 });
+
+// C1 (#289): a completed handoff run becomes a composed draft — the panel
+// offers "↧ Save as recipe" on the done line, the LLM cleanup (mocked on the
+// stable compose marker) prunes it into checkpoints, and the first replay is
+// a REHEARSAL (no "Skip check") whose success promotes the library entry.
+test("compose save + rehearsal: handoff run → composed draft → verified", async () => {
+  await h.site.goto(`${E2E_BASE}/`);
+  await sendQuery(h.panel, "!handoff compose-e2e: walk the demo flow and report back");
+
+  // The run completes (parked click + navigation, then done()).
+  const doneLine = h.panel.locator("#messages .msg-system", { hasText: "Handoff done" });
+  await expect(doneLine).toBeVisible({ timeout: 30_000 });
+
+  // The save offer rides the done line, name prefilled from the goal slug.
+  const offer = h.panel.locator(".recipe-action-card", { hasText: "Save this run as a recipe?" });
+  await expect(offer).toBeVisible({ timeout: 20_000 });
+  const nameInput = offer.locator("input.recipe-compose-name");
+  await expect(nameInput).not.toHaveValue("");
+  await nameInput.fill("e2e-composed");
+  await offer.locator(".form-review-confirm").click();
+
+  const composed = h.panel.locator("#messages .msg-system", { hasText: "Composed draft" });
+  await expect(composed).toContainText("e2e-composed", { timeout: 20_000 });
+  await expect(composed).toContainText("Cleaned by Zo");
+  await expect(composed).toContainText("the first run verifies it");
+
+  // Rehearsal run: the checkpoint card has NO "Skip check" — verify or abort.
+  await sendQuery(h.panel, "!recipe run e2e-composed");
+  const checkpoint = h.panel.locator(".recipe-checkpoint-card");
+  await expect(checkpoint).toBeVisible({ timeout: 30_000 });
+  await expect(checkpoint).toContainText("Rehearsal");
+  await expect(checkpoint.locator(".form-review-cancel")).toHaveCount(0);
+
+  // Verify (the compose run left the tab on form.html — postcondition holds).
+  await checkpoint.locator(".form-review-confirm").click();
+  const promotedLine = h.panel.locator("#messages .msg-system", { hasText: "Recipe done — e2e-composed" });
+  await expect(promotedLine).toBeVisible({ timeout: 30_000 });
+  await expect(promotedLine).toContainText("Rehearsal passed");
+});

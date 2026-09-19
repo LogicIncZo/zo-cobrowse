@@ -87,6 +87,11 @@ export function createRun(opts) {
     status: 'priming',
     pagesVisited: [],
     parkLog: [],
+    // C1 (#289): the run's observation log — one record per EXECUTED action
+    // ({source:'zo', …}) plus boundary parks ({source:'boundary', …}). Values
+    // are stripped by the sink BEFORE a record lands here; assembleComposedDraft
+    // turns this log into a draft recipe when the user saves the run.
+    obs: [],
     createdAt: now,
     updatedAt: now,
   };
@@ -145,6 +150,17 @@ export function recordVisit(run, url) {
   const next = [...pages, String(url)];
   if (next.length > 100) next.splice(0, next.length - 100);
   return { ...run, pagesVisited: next, updatedAt: Date.now() };
+}
+
+/** Append observation records to the run's compose sink (C1 #289). Records are
+ * already value-stripped by the caller — this only caps the log so a long run
+ * cannot grow storage without bound. Pure. */
+export function recordObs(run, records) {
+  const add = (Array.isArray(records) ? records : [records]).filter(Boolean);
+  if (!add.length) return run;
+  const obs = [...(run.obs || []), ...add];
+  if (obs.length > 200) obs.splice(0, obs.length - 200);
+  return { ...run, obs, updatedAt: Date.now() };
 }
 
 /** Park an action that crossed the boundary — the user performs it later from

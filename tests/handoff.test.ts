@@ -7,6 +7,7 @@ import {
   transition,
   tally,
   recordVisit,
+  recordObs,
   park,
   withinBudget,
   handoffInstructions,
@@ -39,6 +40,39 @@ describe("handoff — createRun", () => {
     const run = mkRun({ boundaryMode: "no-submit", budget: { maxTurns: 4 } });
     expect(run.budget).toEqual({ ...DEFAULT_BUDGET, maxTurns: 4 });
     expect(() => HandoffRun.parse(run)).not.toThrow();
+  });
+
+  it("seeds an empty compose-sink log (obs)", () => {
+    const run = mkRun();
+    expect(run.obs).toEqual([]);
+    expect(() => HandoffRun.parse(run)).not.toThrow();
+  });
+});
+
+describe("handoff — recordObs (C1 #289 compose sink)", () => {
+  it("appends value-stripped records and validates against the schema", () => {
+    let run = mkRun();
+    run = recordObs(run, [
+      { source: "zo", op: "navigate", url: "https://portal.example/", ts: NOW },
+      { source: "zo", op: "fill", url: "https://portal.example/form", cues: [{ strategy: "question", value: "Name" }], ts: NOW },
+      { source: "boundary", op: "click", url: "https://portal.example/form", reason: "terminal action", ts: NOW },
+    ]);
+    expect(run.obs).toHaveLength(3);
+    expect(() => HandoffRun.parse(run)).not.toThrow();
+  });
+
+  it("caps the log at 200 records so long runs cannot grow storage unbounded", () => {
+    let run = mkRun();
+    const flood = Array.from({ length: 260 }, (_, i) => ({ source: "zo", op: "click", url: "https://x/", ts: NOW + i }));
+    run = recordObs(run, flood);
+    expect(run.obs).toHaveLength(200);
+    expect(run.obs[0].ts).toBe(NOW + 60); // oldest dropped, newest kept
+  });
+
+  it("ignores empty/null record batches", () => {
+    const run = mkRun();
+    expect(recordObs(run, [])).toBe(run);
+    expect(recordObs(run, null)).toBe(run);
   });
 });
 

@@ -571,6 +571,189 @@ export function parseGeneratedRecipe(text) {  const raw = typeof text === 'strin
   };
 }
 
+// ---- Composed drafts (0.3.2 C1, #289) --------------------------------------
+// A completed handoff run's observation log becomes a draft recipe. The log's
+// records were value-stripped at the sink (background), so a Zo-sourced fill
+// can only ever become a param WITHOUT a default — the invented value is
+// discarded, the human supplies it on replay. Same step-shaping rules as the
+// recorder where they apply; boundary parks become human checkpoints (the
+// E-INVARIANT holds by construction and is re-checked at validate time).
+
+/**
+ * Compose-observation log → draft Recipe.
+ * @param {string} name
+ * @param {string} goal the handoff run's goal (recorded as provenance)
+ * @param {object[]} obs records {source:'zo'|'boundary', op, url?, cues?,
+ *   submitish?, checked?, reason?, ts}
+ * @param {number} [now]
+ * @returns {{ok:true, recipe:object}|{ok:false, errors:string[], recipe:null}}
+ */
+export function assembleComposedDraft(name, goal, obs, now = Date.now()) {
+  const events = (Array.isArray(obs) ? obs : []).filter(Boolean);
+  if (!events.length) {
+    return { ok: false, errors: ['nothing to compose — the run executed no composable actions'], recipe: null };
+  }
+
+  const params = [];
+  const steps = [];
+  const usedNames = new Set();
+  const addParam = (question, nameBase) => {
+    const base = slugParam(nameBase || question);
+    let n = base;
+    let k = 2;
+    while (usedNames.has(n)) n = `${base}_${k++}`;
+    usedNames.add(n);
+    // NO default: composed fills are human-supplied on every run (required).
+    params.push({ name: n, type: 'string', required: true, question: question || n });
+    return `{{${n}}}`;
+  };
+
+  // Retry collapse: consecutive records with the same op on the same target
+  // are a failed-then-retried sequence — one step, not two.
+  const pruned = [];
+  for (const ev of events) {
+    const prev = pruned[pruned.length - 1];
+    if (prev && prev.source === 'zo' && ev.source === 'zo'
+      && prev.op === ev.op && prev.url === ev.url
+      && JSON.stringify(prev.cues || null) === JSON.stringify(ev.cues || null)) {
+      continue;
+    }
+    pruned.push(ev);
+  }
+
+  let i = 0;
+  let lastNav = '';
+  while (i < pruned.length) {
+    const ev = pruned[i];
+
+    if (ev.source === 'boundary') {
+      // A refused action = a step Zo was NOT allowed to do — it stays human,
+      // on every replay. E-INVARIANT: any submitish park becomes a checkpoint,
+      // never a click step.
+      let j = i;
+      while (j < pruned.length && pruned[j].source === 'boundary') j += 1;
+      const after = pruned[j];
+      steps.push({
+        type: 'human',
+        title: ev.op === 'click' ? 'Review, then make the final click' : 'Do this step by hand',
+        instructions: [
+          ev.reason || 'Zo was refused this step by the run boundary.',
+          'Do it yourself, then continue the recipe.',
+          after ? '' : 'This is the flow\u2019s last checkpoint — complete the step, then finish the recipe.',
+        ].filter(Boolean).join(' '),
+        resumeOn: { url: after ? safeExpectUrl(after.url || '') : safeExpectUrl(ev.url || '') },
+      });
+      i = j;
+      continue;
+    }
+
+    if (ev.op === 'navigate') {
+      const expect = safeExpectUrl(ev.url);
+      // Back-track dedup: same-page reloads/re-entries collapse (recorder rule).
+      if (expect && expect !== lastNav) steps.push({ type: 'navigate', url: ev.url, expectUrl: expect });
+      lastNav = expect;
+      i += 1;
+      continue;
+    }
+
+    const cues = cleanCues(ev.cues);
+    switch (ev.op) {
+      case 'fill': {
+        // The sink stripped the value — the param is born without a default.
+        if (!cues.length) break; // unidentifiable field — drop rather than misfire
+        const question = cueText(cues) || 'Field';
+        const ref = addParam(question);
+        steps.push({ type: 'fill', cues, value: ref });
+        break;
+      }
+      case 'check':
+        if (cues.length) steps.push({ type: 'check', cues, ...(ev.checked === undefined ? {} : { checked: !!ev.checked }) });
+        break;
+      case 'click': {
+        if (!cues.length) break;
+        if (ev.submitish === true) {
+          // Belt: Zo never executes submitish clicks (they park), but if a
+          // submitish record ever arrived, the invariant is authored here.
+          steps.push({
+            type: 'human',
+            title: 'Review, then submit',
+            instructions: 'The recipe never clicks a submit button for you — review the page, make the final click yourself, then continue.',
+            resumeOn: { url: safeExpectUrl(ev.url) },
+          });
+        }
+        steps.push({ type: 'click', cues, ...(ev.submitish === true ? { submitish: true } : {}) });
+        break;
+      }
+      case 'extract': {
+        if (!cues.length) break;
+        const key = slugParam(ev.evidenceKey || cueText(cues) || 'evidence');
+        steps.push({ type: 'extract', cues, evidenceKey: key, label: ev.label || cueText(cues) || key });
+        break;
+      }
+      // scroll/wait/read_* records are traversal noise, not steps — dropped.
+    }
+    i += 1;
+  }
+
+  if (!steps.length) {
+    return { ok: false, errors: ['nothing to compose — the run executed no composable actions'], recipe: null };
+  }
+  steps.push({ type: 'done', message: 'Composed draft complete' });
+  return {
+    ok: true,
+    errors: [],
+    recipe: {
+      id: `rcp-${slugParam(name) || 'composed'}-${Math.random().toString(36).slice(2, 6)}`,
+      name: String(name || 'Composed recipe'),
+      version: '1.0.0',
+      origin: 'composed',
+      draft: true,
+      composedBy: 'zo',
+      verified: false,
+      goal: String(goal || ''),
+      createdAt: now,
+      updatedAt: now,
+      params,
+      steps,
+    },
+  };
+}
+
+// The LLM cleanup prompt for a COMPOSED draft (variant of the recorder's) —
+// prunes non-advancing steps, names params, proposes checkpoint titles.
+// Carries the stable `composed-recipe` marker (mocks/evals route on it).
+// Param defaults are HUMAN-only: the prompt forbids inventing any.
+export function composeCleanupPrompt(draft) {
+  const slim = {
+    name: draft?.name || 'Composed recipe',
+    goal: draft?.goal || '',
+    params: (Array.isArray(draft?.params) ? draft.params : []).map((p) => {
+      const { default: _omit, ...rest } = p;
+      return rest;
+    }),
+    steps: draft?.steps || [],
+  };
+  return [
+    '## Composed Recipe Draft',
+    '',
+    'Zo (the assistant) drove this multi-page flow itself and its executed steps were recorded. Clean it into a replayable recipe:',
+    '- Prune steps that did not advance the flow (duplicate navigations, dead-end clicks, retry loops).',
+    '- Give each {{param}} a clear question for the run-start prompt; keep {{...}} references consistent.',
+    '- NEVER add a "default" to any param — composed values are supplied by the human on every run. A Zo fill recorded here has no value by design.',
+    '- Insert human checkpoints before anything trust-critical (payment, OTP, captcha). A click step with "submitish": true is ONLY legal immediately after a human step — keep that true.',
+    '- Improve cues: label/question/aria strategies beat bare selectors; keep AT LEAST TWO cues per interactive step.',
+    '- Keep the flow linear (no branching or looping).',
+    '',
+    'Respond with ONLY a JSON object:',
+    '{"params": [{"name":"…","type":"string","required":true,"question":"…"}], "steps": [ …same step shapes… ], "note": "one line"}',
+    '',
+    'Current draft:',
+    '```json',
+    JSON.stringify(slim, null, 2),
+    '```',
+  ].join('\n');
+}
+
 // ---- Generate-at-runtime fill values (#228) --------------------------------
 
 // The one-shot field-drafting prompt for a fill step with a `generate` block.
@@ -626,9 +809,11 @@ export function serializeRecipe(recipe) {
   return `${JSON.stringify(recipe, null, 2)}\n`;
 }
 
-// Provenance fields change on every save; content drift is what bumps the version.
+// Provenance fields change on every save/promotion (and composed-provenance
+// stamps — composedBy/verified/goal — flip without the flow changing);
+// content drift is what bumps the version.
 function stableRecipe(recipe) {
-  const { origin, updatedAt, ...rest } = (recipe || {});
+  const { origin, updatedAt, draft, composedBy, verified, goal, ...rest } = (recipe || {});
   return JSON.stringify(rest);
 }
 

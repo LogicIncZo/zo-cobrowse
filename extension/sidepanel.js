@@ -21,7 +21,7 @@ import { WORKSPACE_ROOT, filterPickerEntries } from './lib/pickers.js';
 import { applyI18nDom } from './lib/i18n.js';
 import { handoffInstructions, runProgress } from './lib/handoff.js';
 import { recipeProgress } from './lib/recipes.js';
-import { conversationToMarkdown, exportFileName, pageContextToMarkdown, pageExportFileName } from './lib/export.js';
+import { conversationToMarkdown, exportFileName, pageContextToMarkdown, pageExportFileName, slugifyTitle } from './lib/export.js';
 import {
   openChatTab,
   closeChatTab,
@@ -343,6 +343,9 @@ async function finishInit() {
             body.appendChild(document.createElement('br'));
             body.appendChild(btn);
           }
+          // C1 (#289): a completed run's work shouldn't evaporate — offer to
+          // save the executed flow as a composed draft recipe.
+          if (run.status === 'done') renderComposeSaveOffer(run);
         }
       }
       // Recipes (#220): run-state pushes from the deterministic player.
@@ -5019,10 +5022,57 @@ function renderRecipeSaveOffer(name) {
   host.appendChild(bar);
 }
 
+/** C1 (#289): the done run's "↧ Save as recipe" offer — assemble the run's
+ * executed flow into a composed draft (composedBy:'zo', unverified) whose
+ * first replay is the rehearsal. Name prefilled from the goal slug; failures
+ * render the validator's reasons honestly. */
+function renderComposeSaveOffer(run) {
+  const host = recipeActionCard(
+    '🧠 Save this run as a recipe?',
+    'Zo executed this flow under the boundary rules. Save the steps as a draft recipe — the first run rehearses it, and passing the rehearsal marks it verified.',
+  );
+  const input = document.createElement('input');
+  input.className = 'recipe-compose-name';
+  input.placeholder = 'Recipe name';
+  input.value = slugifyTitle(safeText(run.goal), 48) || `composed-${new Date().toISOString().slice(0, 10)}`;
+  input.setAttribute('aria-label', 'Name for the composed recipe');
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); save.click(); }
+    e.stopPropagation(); // the composer's Enter-to-send must not fire
+  });
+  host.appendChild(input);
+  const save = document.createElement('button');
+  save.className = 'btn btn-primary form-review-confirm';
+  save.textContent = '↧ Save as recipe';
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    const resp = await chrome.runtime.sendMessage({
+      type: 'RECIPE_COMPOSE_SAVE', runId: run.runId, name: input.value.trim(),
+    }).catch(() => null);
+    if (resp?.ok) {
+      host.remove();
+      const cleaned = resp.llmCleaned ? ` Cleaned by Zo${resp.note ? `: ${safeText(resp.note)}` : ''}.` : '';
+      addMessage('system', `🧠 Composed draft "**${safeText(resp.name)}**" v${safeText(resp.version)} — ${resp.steps} steps, ${resp.params} params.${cleaned}\n\nRehearse with \`!recipe run ${safeText(resp.name)}\` — the first run verifies it.`);
+    } else {
+      save.disabled = false;
+      addMessage('error', resp?.errors?.length
+        ? `Could not compose the recipe: ${resp.errors.map(safeText).join(' ')}`
+        : (resp?.error || 'Could not compose the recipe from this run.'));
+    }
+  });
+  const dismiss = document.createElement('button');
+  dismiss.className = 'btn btn-ghost form-review-cancel';
+  dismiss.textContent = 'Not now';
+  dismiss.addEventListener('click', () => host.remove());
+  const bar = document.createElement('div');
+  bar.className = 'form-review-actions';
+  bar.append(save, dismiss);
+  host.appendChild(bar);
+}
+
 /** R2 (#256): overwrite confirm card — probe-then-confirm, never a silent
  * clobber. "Overwrite" re-sends with confirm:true. */
-function renderRecipeOverwriteCard(name, path) {
-  const host = recipeActionCard(`⚠️ ${safeText(path)} already exists`, 'Overwrite the workspace file with this recipe?');
+function renderRecipeOverwriteCard(name, path) {  const host = recipeActionCard(`⚠️ ${safeText(path)} already exists`, 'Overwrite the workspace file with this recipe?');
   const overwrite = document.createElement('button');
   overwrite.className = 'btn btn-primary form-review-confirm';
   overwrite.textContent = 'Overwrite';
@@ -5115,14 +5165,24 @@ function renderRecipeCheckpoint(run) {
   verify.className = 'btn btn-primary form-review-confirm';
   verify.textContent = 'Done — verify';
   verify.addEventListener('click', () => resumeRecipeRun(run.runId, false));
-  const skip = document.createElement('button');
-  skip.className = 'btn btn-ghost form-review-cancel';
-  skip.textContent = 'Skip check';
-  skip.title = 'Continue without verifying the resume condition';
-  skip.addEventListener('click', () => resumeRecipeRun(run.runId, true));
   const bar = document.createElement('div');
   bar.className = 'form-review-actions';
-  bar.append(verify, skip);
+  bar.append(verify);
+  if (run.composedRehearsal) {
+    // C1 (#289): the composed draft's first run is the rehearsal — verify or
+    // abort; there is no "Skip check" to wave through an unverified artifact.
+    const note = document.createElement('div');
+    note.className = 'recipe-checkpoint-instructions';
+    note.textContent = 'Rehearsal: first run of a composed recipe — checkpoints must be verified (no skip).';
+    host.appendChild(note);
+  } else {
+    const skip = document.createElement('button');
+    skip.className = 'btn btn-ghost form-review-cancel';
+    skip.textContent = 'Skip check';
+    skip.title = 'Continue without verifying the resume condition';
+    skip.addEventListener('click', () => resumeRecipeRun(run.runId, true));
+    bar.append(skip);
+  }
   host.appendChild(bar);
   msgsEl?.appendChild(host);
   recipeCheckpointEl = host;
@@ -5296,6 +5356,17 @@ function recipeLibraryRow(r, liveRun) {
     el.className = 'recipe-lib-badge';
     el.textContent = b;
     head.appendChild(el);
+  }
+  // C1 (#289): composed provenance — 🤖 while unverified, with the rehearsal
+  // expectation spelled out; verified composed recipes keep the 🤖 badge only.
+  if (r.composedBy === 'zo') {
+    const comp = document.createElement('span');
+    comp.className = 'recipe-lib-badge';
+    comp.textContent = r.verified ? '🤖 composed' : '🤖 composed · unverified';
+    comp.title = r.verified
+      ? 'Composed by Zo and verified by a rehearsal run'
+      : 'Composed by Zo — the first run is a rehearsal that verifies it (checkpoints cannot be skipped)';
+    head.appendChild(comp);
   }
   head.appendChild(badge);
   if (r.lastRun) {
