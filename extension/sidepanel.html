@@ -126,6 +126,10 @@
              pointer only), whatever the Mode or context policy decides. -->
         <button id="dom-toggle" class="shot-toggle" type="button" aria-pressed="true"
                 title="Page DOM attached to messages — OFF sends the URL/title pointer only (privacy / token cap)">🧩 DOM ✓</button>
+        <!-- R3 (#257): the recipe library popup — browse/run/rename/delete/
+             import saved flows, export them as a Zo skill. -->
+        <button id="recipe-lib-btn" class="shot-toggle" type="button"
+                title="Recipe library — saved flows (run, rename, delete, import, export)">🧾 Recipes</button>
       </div>
       <div id="tab-autocomplete" class="tab-autocomplete hidden"></div>
 
@@ -134,6 +138,7 @@
       <div id="skill-autocomplete" class="tab-autocomplete hidden" role="listbox" aria-label="Zo skills — run on next send"></div>
       <div id="file-autocomplete" class="tab-autocomplete hidden" role="listbox" aria-label="Zo workspace files — attach to next send"></div>
       <div id="picker-chips" class="picker-chips hidden"></div>
+      <div id="recipe-library" class="tab-autocomplete recipe-library hidden" role="dialog" aria-label="Recipe library"></div>
 
       <!-- Input area -->
       <div class="input-area">

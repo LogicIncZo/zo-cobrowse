@@ -202,6 +202,15 @@ export const RecipeRun = z.object({
   params: z.record(z.string(), z.union([z.string(), z.number()])),
   evidence: z.array(RecipeEvidence),
   healCount: z.number().int().nonnegative(),
+  // R2 (#256): cue patches awaiting the workspace write-back — {index, type,
+  // cues} recorded per heal; the run copy is substituted, so only these
+  // travel to the origin file.
+  healedSteps: z.array(z.object({
+    index: z.number().int().nonnegative(),
+    type: z.string(),
+    cues: z.array(Cue),
+  })).optional(),
+  healedSaved: z.boolean().optional(),
   stopReason: z.string().optional(),
   // #270: recorded irregularities (e.g. a force-resumed checkpoint whose
   // postcondition was never verified) — surfaced on the progress line.
@@ -219,3 +228,32 @@ export const RecipeRun = z.object({
   updatedAt: z.number(),
 });
 export type RecipeRun = z.infer<typeof RecipeRun>;
+
+// R3 (#257): one row of the extended RECIPE_LIST payload — the library
+// popup's contract. Param defaults are deliberately absent (local-only).
+export const RecipeListItem = z.object({
+  name: z.string().min(1),
+  version: z.string(),
+  steps: z.number().int().nonnegative(), // 0 = corrupt entry, listed for deletion
+  draft: z.boolean(),
+  origin: z.string().optional(),
+  source: z.enum(['local', 'workspace']),
+  updatedAt: z.number().nullable(),
+  params: z.array(z.object({
+    name: z.string().min(1),
+    required: z.boolean(),
+    question: z.string(),
+  })),
+});
+export type RecipeListItemT = z.infer<typeof RecipeListItem>;
+
+// R3 (#257): the SKILL.md export bundle — documentation, never execution.
+export const RecipeSkillExport = z.object({
+  ok: z.literal(true),
+  skillName: z.string().min(1),
+  files: z.array(z.object({
+    path: z.string().startsWith('/home/workspace/Skills/'),
+    markdown: z.string().min(1),
+  })).min(2),
+});
+export type RecipeSkillExportT = z.infer<typeof RecipeSkillExport>;

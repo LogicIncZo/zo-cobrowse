@@ -6,6 +6,7 @@
 // Contract: tests/schemas/recipes.ts. Design: docs/superpowers/specs/2026-09-14-recipes-design.md
 
 import { safeWorkspacePath, WORKSPACE_ROOT } from './pickers.js';
+import { redactValue } from './formfill.js';
 import { slugifyTitle } from './export.js';
 
 export const RECIPE_STEP_TYPES = [
@@ -672,4 +673,125 @@ export function patchHealedCues(workspaceRecipe, healedSteps) {
     out.steps[i].cues = Array.isArray(h.cues) ? h.cues : [];
   }
   return { ok: true, recipe: out };
+}
+
+// ---- SKILL.md export (R3, #257) ---------------------------------------------
+// Export is DOCUMENTATION, never execution: Zo reading the skill can
+// describe and suggest recipes; runs happen extension-side via the
+// deterministic player (`!recipe run`). No captured values and no param
+// defaults ever leave the extension (redaction pass below).
+
+// How a fill/attach value renders in the step table: {{param}}/{{evidence}}
+// refs are structural and ride as-is; anything else is a captured literal —
+// masked, never exported.
+function exportValueRef(value) {
+  const v = String(value ?? '');
+  if (!v) return '';
+  return /\{\{[^}]+\}\}/.test(v) ? v : redactValue(v);
+}
+
+function exportStepRow(step, i) {
+  const n = i + 1;
+  const cues = (step.cues || []).map((c) => `${c.strategy}=${/\{\{[^}]+\}\}/.test(String(c.value ?? '')) ? String(c.value) : String(c.value ?? '')}`).join(' · ');
+  let detail = '';
+  if (step.type === 'navigate') detail = `\`${step.url}\` (expect: ${step.expectUrl || '—'})`;
+  else if (step.type === 'fill' || step.type === 'attach') {
+    detail = `${cues || '—'} → ${exportValueRef(step.value) || '—'}`;
+    if (step.generate) {
+      detail += ` · generated (prompt: ${step.generate.prompt}${step.generate.maxChars ? `, ≤${step.generate.maxChars} chars` : ''}`;
+      if (step.generate.contextFile) detail += `, context: \`${step.generate.contextFile}\` (path only — contents never exported)`;
+      detail += ')';
+    }
+  } else if (step.type === 'click') detail = `${cues || '—'}${step.submitish ? ' · SUBMITISH' : ''}`;
+  else if (step.type === 'check') detail = `${cues || '—'} → ${step.checked ? 'checked' : 'unchecked'}`;
+  else if (step.type === 'extract') detail = `${cues || '—'} → evidence \`${step.evidenceKey}\`${step.label ? ` (${step.label})` : ''}`;
+  else if (step.type === 'waitFor') detail = `${step.expectUrl || step.expect || '—'}`;
+  else if (step.type === 'human') detail = `${step.title || 'checkpoint'} — ${step.instructions || ''} (resume on ${JSON.stringify(step.resumeOn || {})})`;
+  else if (step.type === 'done') detail = String(step.message || '');
+  return `| ${n} | ${step.type} | ${detail} |`;
+}
+
+/**
+ * Bundle recipes as a Zo-side skill: SKILL.md (frontmatter + per-recipe
+ * overview: params without defaults, checkpoints, run hint) plus
+ * references/recipes.md (redacted step tables). Deterministic — no
+ * timestamps, so tests and repeat exports diff clean.
+ * @param {object[]} recipes validated library entries
+ * @param {{skillName?: string}} [opts]
+ * @returns {{ok:true, skillName:string, files:{path:string, markdown:string}[]}|{ok:false, error:string}}
+ */
+export function buildRecipeSkillExport(recipes, opts = {}) {
+  const list = (Array.isArray(recipes) ? recipes : []).filter(Boolean);
+  if (!list.length) return { ok: false, error: 'no recipes to export' };
+  for (const r of list) {
+    const verdict = validateRecipe(r);
+    if (!verdict.ok) return { ok: false, error: `recipe "${r?.name || r?.id || '?'}" does not validate: ${verdict.errors[0]}` };
+  }
+  const slug = slugifyTitle(String(opts.skillName || 'zo-cobrowse-recipes'), 48) || 'zo-cobrowse-recipes';
+  const dir = `${WORKSPACE_ROOT}/Skills/${slug}`;
+
+  const sections = list.map((r) => {
+    const params = (r.params || [])
+      .map((p) => `- \`${p.name}\` (${p.type || 'string'}${p.required ? ', required' : ''})${p.question ? ` — ${p.question}` : ''}`)
+      .join('\n');
+    const checkpoints = r.steps.filter((st) => st.type === 'human').map((st) => `- **${st.title || 'Checkpoint'}** — ${st.instructions || ''}`);
+    return [
+      `## ${r.name} (v${r.version})`,
+      `${r.steps.length} steps. Run it with \`!recipe run ${r.name}\`${r.origin && String(r.origin).startsWith('/') ? ` (source: \`${r.origin}\`)` : ''}.`,
+      params ? `\n**Parameters** (defaults are never exported):\n${params}` : '',
+      checkpoints.length ? `\n**Human checkpoints** — these always pause for you:\n${checkpoints.join('\n')}` : '',
+      `Step-by-step table: see \`references/recipes.md\` § ${r.name}.`,
+    ].filter(Boolean).join('\n');
+  });
+
+  const tables = list.map((r) => [
+    `## ${r.name} v${r.version}`,
+    `| # | type | detail |`,
+    `|---|---|---|`,
+    ...r.steps.map((st, i) => exportStepRow(st, i)),
+  ].join('\n'));
+
+  const skillMd = [
+    '---',
+    `name: ${slug}`,
+    'description: >-',
+    `  Documents ${list.length} recipe${list.length === 1 ? '' : 's'} learned in the Zo Co-browse browser`,
+    '  extension — what each flow does, its parameters, and its human',
+    '  checkpoints. Documentation only: recipes execute in the extension via',
+    '  !recipe run (deterministic player); never Zo-side.',
+    'metadata:',
+    '  author: zo-cobrowse-extension',
+    `  recipes: ${list.length}`,
+    '---',
+    '',
+    `# ${slug}`,
+    '',
+    'These flows run in the Zo Co-browse Chrome extension. When a user asks',
+    'about a flow listed here, you can describe it and suggest running it —',
+    'say `!recipe run <name>` in the extension panel. Do NOT attempt to',
+    'reproduce the steps with page actions yourself: the extension\u2019s player',
+    'enforces the checkpoints and the no-auto-submit invariant.',
+    '',
+    sections.join('\n\n'),
+    '',
+  ].join('\n');
+
+  const refMd = [
+    `# ${slug} — recipe step tables`,
+    '',
+    'Values marked •••• are redacted captured literals; `{{name}}` refs are',
+    'parameters (or extracted evidence) resolved at run time.',
+    '',
+    tables.join('\n\n'),
+    '',
+  ].join('\n');
+
+  return {
+    ok: true,
+    skillName: slug,
+    files: [
+      { path: `${dir}/SKILL.md`, markdown: skillMd },
+      { path: `${dir}/references/recipes.md`, markdown: refMd },
+    ],
+  };
 }

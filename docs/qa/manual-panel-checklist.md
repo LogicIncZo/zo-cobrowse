@@ -94,6 +94,31 @@ open the side panel on a normal website.
       instruction; a slim-tail action turn must still include that custom line
       (user-tuned instructions are never dropped by the skill slim).
 
+## 0.3.1 additions — Recipes R2 + R3 (#256, #257)
+
+- [ ] **🧾 Recipes button opens the library popup** — by the composer option row;
+      rows show name / version / steps / params (`*` = required) / 💻 local or 🌐
+      workspace badge; Esc and the button toggle close it; a send closes it too.
+- [ ] **Library row actions** — ▶ Run closes the popup and starts the run (params
+      card when required params exist); ✎ Rename edits inline (Enter commits,
+      Escape cancels); 🗑 Delete needs a second confirming click and only removes
+      the local entry (a workspace-origin row's file stays); ↥ Save writes to the
+      workspace (overwrite renders the confirm card when the mock/live target
+      exists).
+- [ ] **Import footer** — a valid workspace path imports (system line + row
+      appears with 🌐 badge); an invalid recipe shows the validator errors inside
+      the popup; `../../etc` paths refuse.
+- [ ] **Learned-card save offer (#256)** — after `!recipe record` stops, the
+      "🧠 Learned locally" card offers Save to workspace; clicking it renders the
+      overwrite confirm card when the target exists.
+- [ ] **Heal write-back offer (#256)** — after a healed run whose origin is a
+      workspace file, the terminal line is followed by the "Healed cues are local
+      only" card; one click saves (version bumps a patch); local-origin runs and
+      already-saved runs show no offer.
+- [ ] **Skill export (#257)** — ⤓ Export writes SKILL.md + references/recipes.md
+      under /home/workspace/Skills/<slug>/ and posts a system line with both
+      paths; the bundle contains "documentation only" and no captured values.
+
 ## 0.3.0 walkthrough log (#244)
 
 Round scaffold: walk every section above on a FRESH profile and an EXISTING profile,
