@@ -24,7 +24,9 @@ import {
   buildTestConnectionPrompt,
 } from "../../extension/lib/zo-prompts.js";
 import { parseZoOutput } from "../../extension/lib/parse-output.js";
-import { generateValuePrompt, healPrompt } from "../../extension/lib/recipes.js";
+
+const T0 = 1757800000000; // fixed clock for eval fixtures
+import { generateValuePrompt, healPrompt, composeCleanupPrompt, assembleComposedDraft } from "../../extension/lib/recipes.js";
 import {
   nonEmpty,
   noActionEnvelope,
@@ -347,6 +349,36 @@ export const CASES: EvalCase[] = [
         pass: (out.parsed?.cues || []).every(
           (c: any) => ["selector", "text", "label", "aria", "placeholder", "question"].includes(c?.strategy) && typeof c?.value === "string" && c.value.trim(),
         ),
+      }),
+    ],
+  },
+  {
+    // 0.3.2 C1 (#289): the composed-draft cleanup variant — same reply
+    // protocol as the recorder's cleanup, plus the human-values-only rule.
+    id: "recipe-compose-cleanup",
+    kind: "json",
+    what: "Composed-draft cleanup prunes a Zo-run's obs into a validated recipe — no invented param defaults, submitish only after human",
+    build: () => composeCleanupPrompt(
+      assembleComposedDraft("Eval composed", "File the RTI application", [
+        { source: "boundary", op: "click", url: "https://rtionline.gov.in/request-form.php", reason: "no-submit handoff: click targets a terminal action", cues: [{ strategy: "text", value: "Submit Request" }], ts: T0 },
+        { source: "zo", op: "navigate", url: "https://rtionline.gov.in/request-form.php?d=r1", ts: T0 },
+        { source: "zo", op: "fill", url: "https://rtionline.gov.in/request-form.php", cues: [{ strategy: "question", value: "Applicant Full Name" }], ts: T0 },
+        { source: "zo", op: "click", url: "https://rtionline.gov.in/request-form.php", cues: [{ strategy: "text", value: "Save Draft" }], ts: T0 },
+      ], T0).recipe,
+    ),
+    live: true,
+    checks: [
+      promptMatches(/## Composed Recipe Draft/, "carries the stable compose marker"),
+      promptMatches(/NEVER add a "default" to any param/, "states the human-values-only rule"),
+      (out) => ({ name: "reply is a recipe object with steps", pass: Array.isArray(out.parsed?.steps) && out.parsed.steps.length > 0 }),
+      (out) => ({
+        name: "no param carries an invented default",
+        pass: (out.parsed?.params || []).every((p: any) => p?.default === undefined),
+      }),
+      (out) => ({
+        name: "submitish clicks only immediately after a human step",
+        pass: (out.parsed?.steps || []).every((s: any, i: number, arr: any[]) =>
+          !(s?.type === "click" && s.submitish) || (i > 0 && arr[i - 1]?.type === "human")),
       }),
     ],
   },

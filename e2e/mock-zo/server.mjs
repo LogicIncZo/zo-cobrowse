@@ -33,6 +33,10 @@ let skillWriteFail = false;
 // "## Handoff Run" instructions (resets the counter); each continuation turn
 // carries "[handoff-run continuation]" and gets the next scripted envelope.
 let handoffTurn = 0;
+// C1 (#289): the compose demo uses its own handoff sequence (a parked click +
+// a navigation — the raw material of a composed draft) so it never collides
+// with the 0.2.7 handoff demo's turns.
+let composeTurn = 0;
 // The "flaky" scenario simulates transient network drops on the first N armed
 // calls (socket destroy → retriable → the panel's Reconnecting banner shows
 // "attempt 2 of 3", then "attempt 3 of 3"), then answers normally. Specs arm
@@ -101,9 +105,18 @@ function pickScenario(input) {
   // a handoff goal may legitimately contain words like "extract" or "click".
   if (String(input || "").includes("## Handoff Run")) {
     handoffTurn = 1;
+    if (String(input || "").includes("compose-e2e")) {
+      composeTurn = 1;
+      return "compose-t1";
+    }
+    composeTurn = 0; // a fresh non-compose handoff takes the counter back
     return "handoff-t1";
   }
   if (String(input || "").includes("[handoff-run continuation]")) {
+    if (composeTurn > 0) {
+      composeTurn += 1;
+      return `compose-t${Math.min(composeTurn, 2)}`;
+    }
     handoffTurn += 1;
     return `handoff-t${Math.min(handoffTurn, 3)}`;
   }
@@ -406,6 +419,23 @@ const server = http.createServer(async (req, res) => {
         }),
       }));
     }
+    // C1 (#289): the composed-draft cleanup pass is a non-streaming one-shot
+    // (routes on its stable marker) — returns a cleaned draft whose checkpoint
+    // carries a form.html postcondition so the e2e rehearsal can verify.
+    if (String(body.input || "").includes("## Composed Recipe Draft")) {
+      res.writeHead(200, { "content-type": "application/json", ...cors });
+      return res.end(JSON.stringify({
+        output: JSON.stringify({
+          params: [],
+          steps: [
+            { type: "human", title: "Make the final click", instructions: "The buy click stays yours — do it, then continue.", resumeOn: { url: "form.html" } },
+            { type: "navigate", url: `http://127.0.0.1:${PORT}/form.html`, expectUrl: "form.html" },
+            { type: "done", message: "Composed demo complete" },
+          ],
+          note: "pruned the retry, pinned the checkpoint",
+        }),
+      }));
+    }
     // ENHANCE_TEXT handler calls /zo/ask NON-streaming and parses JSON
     // ({output}), so reply with a plain JSON body — not SSE. Routed on the
     // stable write-assist marker baked into the enhance prompt. The reply
@@ -478,6 +508,26 @@ const server = http.createServer(async (req, res) => {
         { type: "done", response: "## Pricing digest\n\nCompared across the fixture pages (Pro $29/mo, Team $79/mo, Enterprise custom): **Pro** is the value pick for solo use; **Team** wins at 3+ seats. The click on **Buy now** was parked for you — checkout stays a human decision." },
       ]});
       return streamSse(res, [textStart(env), completed()], { delayMs: 120 });
+    }
+    if (scenario === "compose-t1") {
+      // C1 (#289) demo turn 1: the click is PARKED (readonly boundary) and the
+      // tab moves to form.html — exactly the obs a composed draft needs (the
+      // park becomes the human checkpoint, the navigation a step).
+      const env = JSON.stringify({ actions: [
+        { type: "click", selector: "#buy-now" },
+        { type: "navigate", url: `http://127.0.0.1:${PORT}/form.html` },
+      ]});
+      return streamSse(res, [
+        thinkingStart("Planning the route: check the offer, then move to the form."),
+        textStart(env),
+        completed(),
+      ], { delayMs: 120 });
+    }
+    if (scenario === "compose-t2") {
+      const env = JSON.stringify({ actions: [
+        { type: "done", response: "Walked the flow: the buy click is yours by design; the form page is the next stop." },
+      ]});
+      return streamSse(res, [textStart(env), completed()], { delayMs: 100 });
     }
     if (scenario === "flaky") {
       if (flakyArmed <= 0) {

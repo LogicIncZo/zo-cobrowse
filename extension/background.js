@@ -39,6 +39,8 @@ import {
   park as handoffPark,
   withinBudget as handoffWithinBudget,
   checkBoundary as handoffCheckBoundary,
+  isSubmitish as handoffIsSubmitish,
+  recordObs as handoffRecordObs,
   buildContinuationTurn,
   handoffInstructions,
   continuationPayload as handoffContinuationPayload,
@@ -92,8 +94,11 @@ import {
   healPrompt,
   parseRecipeHealResponse,
   assembleDraftRecipe,
+  assembleComposedDraft,
   generateRecipePrompt,
+  composeCleanupPrompt,
   parseGeneratedRecipe,
+  withoutParamDefaults,
   generateValuePrompt,
   recipeSaveTarget,
   serializeRecipe,
@@ -586,6 +591,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // R2 (#256): {name, path?, confirm?} → {ok, path, version} | {ok:false,
       // exists:true, path} (overwrite needs confirm) | {ok:false, error}.
       recipeSave(request).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
+      return true;
+    }
+    case 'RECIPE_COMPOSE_SAVE': {
+      // 0.3.2 C1 (#289): {runId, name} → {ok, name, version, steps, params} |
+      // {ok:false, error, errors?} — assemble a completed handoff run's
+      // observation log into a validated composed draft in the local library.
+      recipeComposeSave(request).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
       return true;
     }
     case 'RECIPE_LIST': {
@@ -2509,12 +2521,71 @@ async function handoffGet({ runId, chatId } = {}) {
   }).catch(() => { /* storage unavailable — nothing to sweep */ });
 })();
 
+// C1 (#289): the compose sink. One value-stripped observation record per
+// executed action ({source:'zo'}) plus one per boundary park
+// ({source:'boundary'}) — the raw material assembleComposedDraft turns into a
+// draft when the user saves the run. Values NEVER land here: fill actions'
+// `value` is dropped unconditionally (defense-in-depth with the #243
+// redaction round), only targeting cues ride along. `actions` must be the
+// SAME isContextAction-filtered list the executor saw — res.results is
+// index-aligned with it (F2, review round 1).
+function handoffObsRecords(actions, res, pageUrl) {
+  const results = (res && res.results) || [];
+  const records = [];
+  const cuesFromAction = (a) => [
+    ...(a.selector ? [{ strategy: 'selector', value: String(a.selector) }] : []),
+    ...(a.text ? [{ strategy: 'text', value: String(a.text) }] : []),
+  ];
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    const a = actions[i] || {};
+    if (!r || !r.type || r.type === 'done') continue;
+    if (r.handoffParked) {
+      records.push({
+        source: 'boundary',
+        op: r.type,
+        url: pageUrl,
+        cues: cuesFromAction(a),
+        reason: safeText(r.error || 'refused by the run boundary'),
+        ts: Date.now(),
+      });
+      continue;
+    }
+    if (!r.ok) continue; // failed attempts aren't steps — the retry (if any) records the working cue
+    if (r.type === 'navigate') {
+      records.push({ source: 'zo', op: 'navigate', url: String(a.url || pageUrl), ts: Date.now() });
+      continue;
+    }
+    if (['click', 'fill', 'check', 'extract'].includes(r.type)) {
+      records.push({
+        source: 'zo',
+        op: r.type,
+        url: pageUrl,
+        cues: cuesFromAction(a),
+        ...(r.type === 'click' && handoffIsSubmitish(a) ? { submitish: true } : {}),
+        ...(r.type === 'check' && a.checked !== undefined ? { checked: !!a.checked } : {}),
+        ...(r.type === 'extract' ? { evidenceKey: safeText(a.evidenceKey || a.text || '') } : {}),
+        ts: Date.now(),
+      });
+    }
+    // scroll/wait/read_* results are traversal noise — not steps, dropped.
+  }
+  return records;
+}
+
 async function handoffAfterExecute(runId, request, res) {
   try {
     let run = await handoffGet({ runId });
     if (!run || run.status !== 'running') return;
-    const actions = request.actions || [];
+    // Same filter the executor saw — res.results is index-aligned with the
+    // DOM actions only (context/pull actions never reach it).
+    const actions = (request.actions || []).filter((a) => a && !isContextAction(a));
     const results = (res && res.results) || [];
+
+    // Compose sink (C1 #289): remember what this turn executed/parked before
+    // anything else — records persist even when the run ends on this turn.
+    const obs = handoffObsRecords(actions, res, request.url);
+    if (obs.length) run = handoffRecordObs(run, obs);
 
     // Tally the completed turn; navigations from successful navigate actions.
     const navOk = results.filter((r) => r && r.type === 'navigate' && r.ok).length;
@@ -2740,6 +2811,9 @@ async function recipeStart(request) {
   if (!sub.ok) return { ok: false, error: sub.errors.join('; ') };
 
   const now = Date.now();
+  // C1 (#289): a composed draft's first run is its rehearsal — checkpoints
+  // are unskippable and success promotes the library entry.
+  const composedRehearsal = recipe.composedBy === 'zo' && recipe.verified !== true;
   const run = {
     runId: `rec-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
     recipeId: recipe.id,
@@ -2753,6 +2827,7 @@ async function recipeStart(request) {
     params: values,
     evidence: [],
     healCount: 0,
+    ...(composedRehearsal ? { composedRehearsal: true } : {}),
     startedAt: now,
     createdAt: now,
     updatedAt: now,
@@ -2787,14 +2862,36 @@ async function recipeAdvance(runId) {
   run.updatedAt = Date.now();
   if (run.stepIndex >= run.stepsTotal) {
     // Ran off the end without a done step — still a completion, honestly noted.
+    const promoteNote = await recipePromoteComposed(run);
     run.status = 'done';
-    run.stopReason = 'recipe finished (no done step)';
+    run.stopReason = promoteNote ? `recipe finished (no done step) — ${promoteNote}` : 'recipe finished (no done step)';
     const saved = await recipePut(run);
     recipeMaybeNotify(saved);
     return;
   }
   await recipePut(run);
   recipePlayStep(runId).catch((e) => console.debug('recipePlayStep:', e));
+}
+
+// C1 (#289): a composed draft's rehearsal just finished — promote the library
+// entry (verified:true, draft:false, patch bump) so the next run skips the
+// rehearsal. Missing entry (deleted mid-run) promotes nothing. Returns the
+// honest note to append to the run's done line, or '' for non-rehearsals.
+async function recipePromoteComposed(run) {
+  if (!run.composedRehearsal) return '';
+  const lib = await recipeLibrary.load();
+  const entry = lib[run.name];
+  if (!entry) return 'rehearsal finished — the recipe is no longer in the library, nothing to promote';
+  // Promote the artifact that actually rehearsed — a mid-run replacement
+  // under the same name never earned verified.
+  if (entry.id !== run.recipeId) return 'rehearsal finished — the library entry was replaced mid-run, nothing to promote';
+  entry.verified = true;
+  entry.draft = false;
+  entry.version = bumpVersion(entry.version, 'patch') || entry.version;
+  entry.updatedAt = Date.now();
+  lib[run.name] = entry;
+  await recipeLibrary.save(lib);
+  return '✅ Rehearsal passed — recipe verified';
 }
 
 async function recipePlayStep(runId) {
@@ -2845,8 +2942,10 @@ async function recipePlayStep(runId) {
   }
 
   if (step.type === 'done') {
+    const promoteNote = await recipePromoteComposed(run);
     run.status = 'done';
-    run.stopReason = recipeInterpolateEvidence(step.message, run.evidence) || 'recipe complete';
+    const message = recipeInterpolateEvidence(step.message, run.evidence) || 'recipe complete';
+    run.stopReason = promoteNote ? `${message} — ${promoteNote}` : message;
     run.updatedAt = Date.now();
     const saved = await recipePut(run);
     recipeMaybeNotify(saved);
@@ -2972,6 +3071,11 @@ async function recipeResume(request = {}) {
   const step = run.recipe.steps[run.stepIndex];
 
   if (run.status === 'waiting_human' && step && step.type === 'human') {
+    // C1 (#289): a composed draft's rehearsal has NO manual fallback —
+    // "verify or abort" is what makes the promotion mean something.
+    if (force && run.composedRehearsal) {
+      return { ok: false, error: 'rehearsal checkpoints must be verified — complete the step, or abort the run; the draft stays unverified', run };
+    }
     if (step.timeoutMinutes && !force && Date.now() - run.updatedAt > step.timeoutMinutes * 60000) {
       return { ok: false, error: `checkpoint timed out (${step.timeoutMinutes} min) — resume with "skip check" to continue anyway`, run };
     }
@@ -3061,6 +3165,102 @@ async function recipeSave({ name, path, confirm } = {}) {
   return { ok: true, path: target.path, version: stamped.version };
 }
 
+// 0.3.2 C1 (#289): turn a COMPLETED handoff run's observation log into a
+// composed draft recipe. Same pipeline as the recorder's stop: deterministic
+// assembly → best-effort LLM cleanup (compose variant; output must pass
+// validateRecipe or the deterministic draft is kept) → validate → library put
+// with composed provenance. Values never reach the artifact: the sink stripped
+// them, and assembleComposedDraft births every Zo fill as a param WITHOUT a
+// default. Save is idempotent per name (library upsert).
+async function recipeComposeSave({ runId, name } = {}) {
+  const run = await handoffGet({ runId });
+  if (!run) return { ok: false, error: 'no such handoff run' };
+  if (run.status !== 'done') {
+    return { ok: false, error: `run is ${run.status} — only a completed run can be composed` };
+  }
+  const safeName = safeText(name) || `composed-${new Date().toISOString().slice(0, 10)}`;
+
+  // 1) Deterministic draft (retry collapse, nav dedup, boundary parks →
+  // human checkpoints, Zo fills → params without defaults).
+  const assembled = assembleComposedDraft(safeName, run.goal, run.obs);
+  if (!assembled.ok) return { ok: false, error: assembled.errors?.[0] || 'could not compose a draft from this run' };
+  let recipe = assembled.recipe;
+  let llmCleaned = false;
+  let note;
+
+  // 2) Best-effort LLM cleanup — the compose variant of the recorder's pass.
+  // A cleaned draft that fails validateRecipe is discarded for the
+  // deterministic one, never tolerated.
+  if (config.zoAccessToken) {
+    try {
+      const resp = await fetch(config.zoApiUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${config.zoAccessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          input: composeCleanupPrompt(recipe),
+          model_name: config.zoModel || undefined,
+        }),
+      });
+      if (resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        const parsed = parseGeneratedRecipe(String(data?.output ?? ''));
+        if (parsed.ok) {
+          // Adopt-time backstop: a cleanup reply can never inject a param
+          // default — composed values are human-supplied on every run.
+          const merged = { ...recipe, params: withoutParamDefaults(parsed.recipe.params), steps: parsed.recipe.steps, updatedAt: Date.now() };
+          const verdict = validateRecipe(merged);
+          if (verdict.ok) {
+            recipe = merged;
+            llmCleaned = true;
+            note = parsed.note;
+          } else {
+            note = `LLM draft rejected (${verdict.errors[0]}) — kept the deterministic draft`;
+          }
+        } else {
+          note = `LLM cleanup unusable (${parsed.error}) — kept the deterministic draft`;
+        }
+      } else {
+        note = `LLM cleanup HTTP ${resp.status} — kept the deterministic draft`;
+      }
+    } catch (e) {
+      note = `LLM cleanup failed (${e?.message || e}) — kept the deterministic draft`;
+    }
+  }
+
+  // 3) The gate, whichever draft survived.
+  const finalVerdict = validateRecipe(recipe);
+  if (!finalVerdict.ok) {
+    return { ok: false, error: `composed draft failed validation: ${finalVerdict.errors[0]}`, errors: finalVerdict.errors };
+  }
+
+  // 4) Library put with composed provenance — the first replay is the
+  // rehearsal that verifies it.
+  const lib = await recipeLibrary.load();
+  const stamped = {
+    ...recipe,
+    draft: true,
+    composedBy: 'zo',
+    verified: false,
+    goal: safeText(run.goal),
+    updatedAt: Date.now(),
+  };
+  lib[safeName] = stamped;
+  await recipeLibrary.save(lib);
+  return {
+    ok: true,
+    name: safeName,
+    version: stamped.version,
+    steps: stamped.steps.length,
+    params: stamped.params.length,
+    llmCleaned,
+    note,
+    warnings: finalVerdict.warnings,
+  };
+}
+
 // R2 (#256): the heal write-back. The origin file stays the parameterized
 // artifact — only the healed steps' cues are patched in (patchHealedCues
 // refuses structurally diverged files), then the same validate → write →
@@ -3126,6 +3326,11 @@ async function recipeList() {
       version: (r && typeof r.version === 'string') ? r.version : '?',
       steps: Array.isArray(r?.steps) ? r.steps.length : 0,
       draft: !!(r && r.draft),
+      // C1 (#289): composed provenance — the popup badges 🤖 drafts and
+      // their unverified state.
+      composedBy: r?.composedBy === 'zo' ? 'zo' : undefined,
+      verified: r?.verified === true,
+      goal: typeof r?.goal === 'string' ? r.goal : undefined,
       origin: r?.origin,
       source: r?.origin && String(r.origin).startsWith('/home/workspace') ? 'workspace' : 'local',
       updatedAt: (r && (r.updatedAt || r.createdAt)) || null,
@@ -3378,7 +3583,9 @@ async function recipeRecordStop() {
         const data = await resp.json().catch(() => ({}));
         const parsed = parseGeneratedRecipe(String(data?.output ?? ''));
         if (parsed.ok) {
-          const merged = { ...recipe, params: parsed.recipe.params, steps: parsed.recipe.steps, updatedAt: Date.now() };
+          // Adopt-time backstop: the reply can never inject a param default —
+          // recorded values stay local and human-sourced.
+          const merged = { ...recipe, params: withoutParamDefaults(parsed.recipe.params), steps: parsed.recipe.steps, updatedAt: Date.now() };
           const verdict = validateRecipe(merged);
           if (verdict.ok) {
             recipe = merged;

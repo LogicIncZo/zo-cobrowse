@@ -9,7 +9,7 @@
 // NOTE: unique ?file= cache-buster — bun shares the module registry per process.
 
 import { describe, it, expect, beforeAll } from "bun:test";
-import { createFakeChrome, waitUntil } from "../helpers/chrome-mock.ts";
+import { createFakeChrome, createTabTarget, waitUntil } from "../helpers/chrome-mock.ts";
 import {
   ZoFetchMock,
   MOCK_ZO_TOKEN,
@@ -17,6 +17,7 @@ import {
   textResponse,
   zoSseText,
 } from "../helpers/zo-fetch-mock.ts";
+import { HandoffRun } from "../schemas/handoff.js";
 
 const bus = createFakeChrome();
 const fm = new ZoFetchMock();
@@ -296,5 +297,106 @@ describe("handoff run loop (Lane E)", () => {
     expect(note).toBeTruthy();
     expect(note.opts.title).toBe("Zo handoff finished");
     expect(note.opts.message).toContain("Digest the tabs");
+  });
+});
+
+describe("compose sink (C1 #289)", () => {
+  // Tab 1's fake content script — fills/clicks execute through it (the
+  // recipe-flow pattern); the default answers ok for any action.
+  const sinkTarget = createTabTarget();
+  sinkTarget.onMessage.addListener((msg: any, _s: any, sendResponse: Function) => {
+    if (msg.type === "EXECUTE_ACTION") {
+      sendResponse({ ok: true, type: msg.action?.step?.type ?? msg.action?.type });
+      return true;
+    }
+  });
+  bus.tabs.bindTab(1, sinkTarget.onMessage);
+
+  it("records executed + parked actions on the run — with the fill value stripped at the sink", async () => {
+    const run = await startRun({ boundaryMode: "no-submit", goal: "Order the supplies" });
+    let turn = 0;
+    fm.handle(() => {
+      turn++;
+      if (turn === 1) {
+        return envelope({
+          actions: [
+            { type: "navigate", url: "https://shop.example/cart" },
+            // Zo INVENTED a value for the quantity field — the sink must strip it.
+            { type: "fill", selector: "#qty", value: "ZO-INVENTED-42" },
+            { type: "click", selector: "[type=submit]", text: "Place order" }, // submitish → park
+          ],
+        });
+      }
+      return envelope({ actions: [{ type: "done", response: "parked at checkout" }] });
+    });
+
+    port.postMessage({ sessionId: 2960, type: "ASK_ZO", chatId: run.chatId, modeId: "cobrowse", userQuery: run.goal, handoffRunId: run.runId, boundaryMode: "no-submit" });
+    const finalRun = await panelLoop(run, { boundaryMode: "no-submit", sessionBase: "2960" });
+    expect(finalRun.status).toBe("done");
+
+    const st = await bus.runtime.sendMessage({ type: "HANDOFF_STATUS", runId: run.runId });
+    const obs = st.run.obs;
+    expect(Array.isArray(obs)).toBe(true);
+    const nav = obs.find((o: any) => o.op === "navigate");
+    expect(nav?.source).toBe("zo");
+    expect(nav?.url).toBe("https://shop.example/cart");
+    const fill = obs.find((o: any) => o.op === "fill");
+    expect(fill?.source).toBe("zo");
+    expect(fill?.cues).toContainEqual({ strategy: "selector", value: "#qty" });
+    // The invented value never landed in the sink.
+    expect(JSON.stringify(obs)).not.toContain("ZO-INVENTED-42");
+    expect(fill && "value" in fill).toBe(false);
+    const park = obs.find((o: any) => o.source === "boundary");
+    expect(park?.op).toBe("click");
+    expect(park?.reason).toContain("terminal action");
+    expect(() => HandoffRun.parse(st.run)).not.toThrow();
+  });
+
+  it("a readonly run records navigate/extract but no click noise beyond parks", async () => {
+    const run = await startRun({ boundaryMode: "readonly" });
+    fm.handle(() => envelope({
+      actions: [
+        { type: "navigate", url: "https://news.example/a" },
+        { type: "click", selector: ".next" }, // parked (readonly)
+        { type: "done", response: "read it" },
+      ],
+    }));
+    port.postMessage({ sessionId: 2961, type: "ASK_ZO", chatId: run.chatId, modeId: "cobrowse", userQuery: run.goal, handoffRunId: run.runId });
+    const finalRun = await panelLoop(run, { boundaryMode: "readonly", sessionBase: "2961" });
+    expect(finalRun.status).toBe("done");
+    const st = await bus.runtime.sendMessage({ type: "HANDOFF_STATUS", runId: run.runId });
+    const obs = st.run.obs;
+    expect(obs.filter((o: any) => o.source === "zo").map((o: any) => o.op)).toEqual(["navigate"]);
+    expect(obs.filter((o: any) => o.source === "boundary").map((o: any) => o.op)).toEqual(["click"]);
+  });
+});
+
+describe("compose sink — alignment (review F2)", () => {
+  it("context/pull actions mixed into the batch do not shift obs records off their actions", async () => {
+    // Seeded 'running' run — handoffAfterExecute processes the batch without
+    // a live stream (no turn context → the continuation chain no-ops).
+    const runId = `run-f2-${Math.random().toString(36).slice(2, 8)}`;
+    const runs = (bus.storage.session._store.cobrowse_handoff_runs ??= {});
+    runs[runId] = {
+      runId, chatId: "chat-f2", goal: "Fill the demo form", boundaryMode: "no-submit",
+      budget: { maxTurns: 12, maxNavigations: 25, maxMinutes: 20 },
+      usage: { turns: 0, navigations: 0, startedAt: Date.now() }, status: "running",
+      pagesVisited: [], parkLog: [], obs: [], createdAt: Date.now(), updatedAt: Date.now(),
+    };
+    await bus.runtime.sendMessage({
+      type: "EXECUTE_ACTIONS", tabId: 1, handoffRunId: runId, boundaryMode: "no-submit",
+      actions: [
+        // Degenerate mixed reply: a context action rides BEFORE the DOM fill —
+        // the executor never sees it, so results align with the FILTERED list.
+        { type: "read_page" },
+        { type: "fill", selector: "#qty", value: "ZO-INVENTED-77" },
+      ],
+    });
+    await flush();
+    const st = await bus.runtime.sendMessage({ type: "HANDOFF_STATUS", runId });
+    const fill = (st.run.obs || []).find((o: any) => o.op === "fill");
+    // The fill record carries the FILL's cues — not shifted onto a neighbor.
+    expect(fill?.cues).toContainEqual({ strategy: "selector", value: "#qty" });
+    expect(JSON.stringify(st.run.obs)).not.toContain("ZO-INVENTED-77");
   });
 });

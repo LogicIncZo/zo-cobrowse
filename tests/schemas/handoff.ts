@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Cue } from "./recipes.js";
 
 // Handoff (Lane E) — delegate-mode runs where Zo works unattended up to a hard
 // boundary. Contract for lib/handoff.js's exported shapes; the run object also
@@ -43,6 +44,24 @@ export const ParkedAction = z.object({
 });
 export type ParkedAction = z.infer<typeof ParkedAction>;
 
+// C1 (#289): one compose-sink record — what a handoff turn EXECUTED
+// (source:'zo') or had PARKED by the boundary (source:'boundary'). Values are
+// stripped at the sink (a fill's invented value never lands here), so the
+// record only ever carries targeting cues + flags.
+export const HandoffObsRecord = z.object({
+  source: z.enum(["zo", "boundary"]),
+  op: z.string(), // navigate | click | fill | check | extract
+  url: z.string().optional(), // navigate target, else the page URL
+  cues: z.array(Cue).optional(),
+  submitish: z.boolean().optional(),
+  checked: z.boolean().optional(),
+  evidenceKey: z.string().optional(),
+  label: z.string().optional(),
+  reason: z.string().optional(), // boundary parks: why the action was refused
+  ts: z.number(),
+});
+export type HandoffObsRecord = z.infer<typeof HandoffObsRecord>;
+
 export const HandoffRun = z.object({
   runId: z.string().min(1),
   chatId: z.string().min(1),
@@ -53,6 +72,9 @@ export const HandoffRun = z.object({
   status: HandoffStatus,
   pagesVisited: z.array(z.string()),
   parkLog: z.array(ParkedAction),
+  // C1 (#289): the compose sink's log — optional so pre-C1 persisted runs
+  // (storage.session from an older build) still validate.
+  obs: z.array(HandoffObsRecord).optional(),
   stopReason: z.string().optional(),
   // The driven tab (panel-bound at HANDOFF_START). Optional so the pure
   // createRun stays tab-agnostic; the background stamps it.
