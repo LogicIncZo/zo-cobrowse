@@ -556,7 +556,9 @@ export function generateRecipePrompt(draft) {
 // the braces).
 export function withoutParamDefaults(params) {
   return (Array.isArray(params) ? params : []).map((p) => {
-    if (!p || typeof p !== 'object' || p.default === undefined) return p;
+    // '' and null count as defaults too — a model-authored blank must not
+    // fill the field on replay either.
+    if (!p || typeof p !== 'object' || p.default == null || p.default === '') return p;
     const { default: _omit, ...rest } = p;
     return rest;
   });
