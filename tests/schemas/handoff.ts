@@ -100,6 +100,7 @@ export const HandoffRun = z.object({
   // optional so pre-C2 persisted runs still validate.
   compose: z.object({ name: z.string().min(1) }).optional(),
   parks: z.array(ComposePark).optional(),
+  parkSeq: z.number().int().nonnegative().optional(),
   stopReason: z.string().optional(),
   // The driven tab (panel-bound at HANDOFF_START). Optional so the pure
   // createRun stays tab-agnostic; the background stamps it.

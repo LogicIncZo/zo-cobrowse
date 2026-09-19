@@ -334,20 +334,29 @@ async function finishInit() {
           const line = addMessage('system', `${icon} Handoff ${run.status}${reason}`);
           if (run.compose) {
             // C2: a compose run's blocked state IS the park — render the park
-            // cards (value/choice/checkpoint) instead of the generic resume.
-            if (run.status === 'blocked') renderComposeParkCards(run);
+            // cards (value/choice/checkpoint). Paused or park-less blocked
+            // runs (budget, stream error, SW restart) get the plain resume
+            // (review F5) — RECIPE_COMPOSE_RESUME without a parkId continues.
+            if (run.status === 'blocked' && (run.parks || []).some((p) => !p.resolved)) renderComposeParkCards(run);
             if (run.status === 'paused' || run.status === 'blocked') {
               const body = line.querySelector('.msg-body') || line;
-              const btn = document.createElement('button');
-              btn.type = 'button';
-              btn.textContent = '🛑 Stop composing';
-              btn.className = 'btn btn-ghost btn-sm';
-              btn.addEventListener('click', async () => {
-                btn.disabled = true;
+              const resume = document.createElement('button');
+              resume.type = 'button';
+              resume.textContent = '▶ Resume composing';
+              resume.className = 'btn btn-ghost btn-sm';
+              resume.addEventListener('click', () => resolveComposePark(run.runId, undefined));
+              body.appendChild(document.createElement('br'));
+              body.appendChild(resume);
+              const stop = document.createElement('button');
+              stop.type = 'button';
+              stop.textContent = '🛑 Stop composing';
+              stop.className = 'btn btn-ghost btn-sm';
+              stop.addEventListener('click', async () => {
+                stop.disabled = true;
                 await chrome.runtime.sendMessage({ type: 'RECIPE_COMPOSE_STOP', runId: run.runId, reason: 'stopped by user' }).catch(() => {});
               });
               body.appendChild(document.createElement('br'));
-              body.appendChild(btn);
+              body.appendChild(stop);
             }
           } else if (run.status === 'paused' || run.status === 'blocked') {
             // #164: paused runs are resumable — offer the control inline.

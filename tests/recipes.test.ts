@@ -8,6 +8,7 @@ import {
   assembleComposedDraft,
   composeCleanupPrompt,
   composeInstructions,
+  literalFillValueCount,
   driftedFromWorkspace,
   withoutParamDefaults,
 } from "../extension/lib/recipes.js";
@@ -856,5 +857,34 @@ describe("assembleComposedDraft — two producers (0.3.2 C2)", () => {
     const r = (out as any).recipe;
     expect(r.steps.some((st: any) => st.type === "human")).toBe(true);
     expect(validateRecipe(r).ok).toBe(true);
+  });
+});
+
+describe("compose assembler — sensitive-page collapse (review F3)", () => {
+  it("a sensitive-page span collapses to ONE checkpoint; human values there never become defaults", () => {
+    const out = assembleComposedDraft("Compose", "g", [
+      { source: "zo", op: "navigate", url: "https://portal.example/checkout", ts: T0 },
+      // The human typed an address on the CHECKOUT page — the recorder still
+      // emits the value (field not field-sensitive), but pageSensitive wins.
+      { source: "human", op: "fill", url: "https://portal.example/checkout", cues: [cue("question", "Address")], value: "12 Civil Lines", pageSensitive: true, ts: T0 },
+      { source: "human", op: "click", url: "https://portal.example/checkout", cues: [cue("text", "Pay now")], submitish: true, ts: T0 },
+      { source: "zo", op: "navigate", url: "https://portal.example/done", ts: T0 },
+    ], T0);
+    expect(out.ok).toBe(true);
+    const r = (out as any).recipe;
+    expect(r.steps.filter((st: any) => st.type === "human")).toHaveLength(1);
+    expect(r.params).toHaveLength(0); // no value from the sensitive span
+    expect(JSON.stringify(r)).not.toContain("12 Civil Lines");
+    expect(JSON.stringify(r)).not.toContain("submitish");
+    expect(validateRecipe(r).ok).toBe(true);
+  });
+});
+
+describe("literalFillValueCount (review F2)", () => {
+  it("counts fill steps whose value is not a {{param}}/{{evidence}} reference", () => {
+    expect(literalFillValueCount([{ type: "fill", cues: [], value: "{{name}}" }])).toBe(0);
+    expect(literalFillValueCount([{ type: "fill", cues: [], value: "MODEL-INVENTED" }])).toBe(1);
+    expect(literalFillValueCount([{ type: "navigate", url: "x" }])).toBe(0);
+    expect(literalFillValueCount(undefined)).toBe(0);
   });
 });

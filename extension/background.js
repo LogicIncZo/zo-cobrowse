@@ -100,9 +100,9 @@ import {
   assembleComposedDraft,
   generateRecipePrompt,
   composeCleanupPrompt,
-  composeInstructions,
   parseGeneratedRecipe,
   withoutParamDefaults,
+  literalFillValueCount,
   generateValuePrompt,
   recipeSaveTarget,
   serializeRecipe,
@@ -2678,6 +2678,12 @@ async function handoffAfterExecute(runId, request, res) {
       const reason = safeText(doneResult.response || '').slice(0, 200) || 'goal reached';
       const t = handoffTransition(run, 'complete', { now: Date.now(), reason });
       handoffTurnCtx.delete(runId);
+      // C2: a compose session that completed naturally disarms — the human
+      // producer goes with the run (review F4).
+      if (t.ok && t.run.compose) {
+        await composeStore.clear();
+        composeBroadcastRecordState(false).catch(() => {});
+      }
       await handoffPut(t.ok ? t.run : run);
       return;
     }
@@ -2841,12 +2847,28 @@ async function recipeComposeResume({ runId, parkId, text } = {}) {
 // RUN's obs log (source:'human') — the second producer of the composed draft.
 // Values ride ONLY here, from the human's own keyboard; the recorder's #243
 // redaction already stripped sensitive ones upstream.
+const COMPOSE_OBS_OPS = ['navigate', 'click', 'fill', 'check', 'attach', 'extract'];
 async function composeObserve(obs) {
   const session = await composeStore.load();
   if (!session || !session.armed || !obs || typeof obs !== 'object' || !obs.op) return;
+  if (!COMPOSE_OBS_OPS.includes(obs.op)) return;
   const run = await handoffGet({ runId: session.runId });
   if (!run || !run.compose || ['done', 'aborted'].includes(run.status)) return;
-  await handoffPut(handoffRecordObs(run, { ...obs, source: 'human', ts: Date.now() }));
+  // Whitelist the fields the recorder emits — nothing else reaches the obs
+  // log (the artifact's raw material) from a runtime message (review F7).
+  await handoffPut(handoffRecordObs(run, {
+    source: 'human',
+    op: String(obs.op),
+    ...(typeof obs.url === 'string' ? { url: obs.url.slice(0, 500) } : {}),
+    ...(Array.isArray(obs.cues) ? { cues: obs.cues } : {}),
+    ...(obs.op === 'fill' && typeof obs.value === 'string' ? { value: obs.value.slice(0, 2000) } : {}),
+    ...(typeof obs.checked === 'boolean' ? { checked: obs.checked } : {}),
+    ...(typeof obs.submitish === 'boolean' ? { submitish: obs.submitish } : {}),
+    ...(typeof obs.fieldSensitive === 'boolean' ? { fieldSensitive: obs.fieldSensitive } : {}),
+    ...(typeof obs.pageSensitive === 'boolean' ? { pageSensitive: obs.pageSensitive } : {}),
+    ...(obs.op === 'extract' || obs.op === 'attach' ? { evidenceKey: safeText(obs.evidenceKey || '') } : {}),
+    ts: Date.now(),
+  }));
 }
 
 // ---- Recipes: deterministic player (#220) ---------------------------------
@@ -3385,7 +3407,9 @@ async function recipeComposeSave({ runId, name } = {}) {
       if (resp.ok) {
         const data = await resp.json().catch(() => ({}));
         const parsed = parseGeneratedRecipe(String(data?.output ?? ''));
-        if (parsed.ok) {
+        if (parsed.ok && literalFillValueCount(parsed.recipe.steps) > 0) {
+          note = 'LLM draft rejected (literal fill value) — kept the deterministic draft';
+        } else if (parsed.ok) {
           // Adopt-time backstop: a cleanup reply can never inject a param
           // default — composed values are human-supplied on every run.
           const merged = { ...recipe, params: withoutParamDefaults(parsed.recipe.params), steps: parsed.recipe.steps, updatedAt: Date.now() };
@@ -3771,7 +3795,9 @@ async function recipeRecordStop() {
       if (resp.ok) {
         const data = await resp.json().catch(() => ({}));
         const parsed = parseGeneratedRecipe(String(data?.output ?? ''));
-        if (parsed.ok) {
+        if (parsed.ok && literalFillValueCount(parsed.recipe.steps) > 0) {
+          note = 'LLM draft rejected (literal fill value) — kept the deterministic draft';
+        } else if (parsed.ok) {
           // Adopt-time backstop: the reply can never inject a param default —
           // recorded values stay local and human-sourced.
           const merged = { ...recipe, params: withoutParamDefaults(parsed.recipe.params), steps: parsed.recipe.steps, updatedAt: Date.now() };
@@ -4055,10 +4081,12 @@ async function executeActions(actions, tabId, opts = {}) {
       }
     }
 
-    // Handoff boundary (Lane E): readonly/no-submit runs PARK interactive
-    // actions instead of executing them — the user performs them later from
-    // the review card. Push + continue: parking must not stop sibling actions.
-    if (opts.boundaryMode && (action.type === 'click' || action.type === 'fill')) {
+    // Handoff boundary (Lane E): readonly/no-submit/compose runs PARK
+    // interactive actions instead of executing them — the user performs them
+    // later from the review card. Push + continue: parking must not stop
+    // sibling actions. isFillish covers fill_form too (review F1: the
+    // canonical batch-fill shape must not bypass the compose/no-submit gate).
+    if (opts.boundaryMode && (action.type === 'click' || handoffIsFillish(action))) {
       const verdict = handoffCheckBoundary(action, opts.boundaryMode);
       if (!verdict.allowed) {
         results.push({ ok: false, type: action.type, blocked: true, handoffParked: true, action, error: verdict.reason });

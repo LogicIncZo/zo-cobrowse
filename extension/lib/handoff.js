@@ -86,8 +86,9 @@ export function checkBoundary(action, boundaryMode) {
       reason: `READ-ONLY handoff: "${type}" is not permitted — the user performs interactive steps themselves`,
     };
   }
-  // 'no-submit' — everything except submit-ish clicks/fills passes.
-  if ((type === 'click' || type === 'fill') && isSubmitish(action)) {
+  // 'no-submit' — everything except submit-ish clicks/fills passes. isFillish
+  // covers fill_form (review F1: the batch shape gets the same scrutiny).
+  if ((type === 'click' || isFillish(action)) && isSubmitish(action)) {
     return {
       allowed: false,
       reason: `no-submit handoff: "${type}" targets a terminal action (submit/pay/delete…) — parked for the user`,
@@ -209,9 +210,10 @@ export function park(run, action, reason, url) {
 // (checkpoint). Parks persist on the run (storage.session) so the panel can
 // render the cards and a resume resolves them.
 
-/** Append a compose park. Pure. */
+/** Append a compose park. Pure. parkSeq is monotonic (review F6: length-derived
+ * ids collide once the 20-cap evicts older parks). */
 export function addComposePark(run, { kind, question, options, action, url }) {
-  const n = (run.parks || []).length + 1;
+  const n = (run.parkSeq || 0) + 1;
   const rec = {
     parkId: `park-${n}`,
     kind, // 'value' | 'choice' | 'checkpoint'
@@ -221,7 +223,7 @@ export function addComposePark(run, { kind, question, options, action, url }) {
     ...(url ? { url } : {}),
     ts: Date.now(),
   };
-  return { ...run, parks: [...(run.parks || []), rec].slice(-20), updatedAt: Date.now() };
+  return { ...run, parkSeq: n, parks: [...(run.parks || []), rec].slice(-20), updatedAt: Date.now() };
 }
 
 /** Mark one park resolved (the human did the step / picked an option). Pure. */
@@ -272,7 +274,9 @@ export function handoffInstructions(run) {
     '- Work autonomously: navigate, read, extract, and move on without waiting for the user.',
     run.boundaryMode === 'readonly'
       ? '- This run is READ-ONLY: use navigate/extract/scroll/wait only. Never click or fill — park interactive steps by noting them and moving on.'
-      : '- You may fill forms, but NEVER click terminal actions (submit/order/pay/delete/send) — park them and continue.',
+      : run.boundaryMode === 'compose'
+        ? '- This run COMPOSES a recipe: navigate and click non-submitish controls only — never fill, never submit (the compose loop handles parks).'
+        : '- You may fill forms, but NEVER click terminal actions (submit/order/pay/delete/send) — park them and continue.',
     '- Each reply must end with either tool calls to continue the work, or a final done() whose response is the deliverable (e.g. the digest).',
     '- Be budget-aware: when the goal is met (or nearly met), finish with done() rather than extra verification loops.',
   ];

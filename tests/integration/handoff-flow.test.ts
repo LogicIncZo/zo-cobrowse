@@ -13,6 +13,7 @@ import { createFakeChrome, createTabTarget, waitUntil } from "../helpers/chrome-
 import {
   ZoFetchMock,
   MOCK_ZO_TOKEN,
+  jsonResponse,
   sseResponse,
   textResponse,
   zoSseText,
@@ -523,6 +524,86 @@ describe("compose session (C2 #290)", () => {
   it("HANDOFF_STOP (✕ / tab-close path) disarms the compose session too", async () => {
     const run = await composeStart("Disarm me");
     await bus.runtime.sendMessage({ type: "HANDOFF_STOP", runId: run.runId });
+    const peek = await bus.runtime.sendMessage({ type: "RECIPE_RECORD_PEEK" });
+    expect(peek.armed).toBe(false);
+  });
+});
+
+describe("compose session — review round 1 fixes", () => {
+  async function composeStartR1(goal: string) {
+    const res = await bus.runtime.sendMessage({
+      type: "RECIPE_COMPOSE_START",
+      chatId: `chat-r1-${Math.random().toString(36).slice(2, 8)}`,
+      tabId: 1, goal,
+    });
+    expect(res.ok).toBe(true);
+    return res.run;
+  }
+
+  async function driveOnceR1(run: any, sessionId: string | number) {
+    await waitUntil(() => seen.some((m) => m.type === "STREAM_DONE" && m.actions?.length && String(m.sessionId) === String(sessionId)), 8000);
+    const m = seen.filter((x: any) => x.type === "STREAM_DONE" && String(x.sessionId) === String(sessionId)).at(-1);
+    await bus.runtime.sendMessage({
+      type: "EXECUTE_ACTIONS", tabId: 1, handoffRunId: run.runId,
+      boundaryMode: "compose", url: "https://shop.example/form", actions: m.actions,
+    });
+    await flush();
+  }
+
+  it("F1: a fill_form action is refused by the compose boundary and never executes", async () => {
+    const run = await composeStartR1("Batch-fill is still a fill");
+    const res = await bus.runtime.sendMessage({
+      type: "EXECUTE_ACTIONS", tabId: 1, handoffRunId: run.runId,
+      boundaryMode: "compose", url: "https://shop.example/form",
+      actions: [{ type: "fill_form", values: [{ target: "#qty", value: "ZO-INVENTED-BATCH" }] }],
+    });
+    await flush();
+    const r = res.results[0];
+    expect(r.ok).toBe(false);
+    expect(r.handoffParked).toBe(true);
+    expect(r.error).toContain("never fills");
+    // Nothing executed: no zo record, no value anywhere.
+    const st = await bus.runtime.sendMessage({ type: "HANDOFF_STATUS", runId: run.runId });
+    expect(st.run.obs.filter((o: any) => o.source === "zo")).toHaveLength(0);
+    expect(JSON.stringify(st.run)).not.toContain("ZO-INVENTED-BATCH");
+    await bus.runtime.sendMessage({ type: "RECIPE_COMPOSE_STOP", runId: run.runId });
+  });
+
+  it("F2: a cleanup reply authoring a literal fill value is rejected for the deterministic draft", async () => {
+    const run = await composeStartR1("Literal guard");
+    // Stream-aware mock: the compose SAVE's cleanup one-shot is NON-streaming.
+    fm.handle((url: string, _init: any, req: any) => {
+      const body: any = req?.body || {};
+      if (url.includes("/zo/ask") && !body.stream) {
+        return jsonResponse({ output: JSON.stringify({
+          params: [],
+          steps: [
+            { type: "navigate", url: "https://shop.example/form", expectUrl: "/form" },
+            { type: "fill", cues: [{ strategy: "question", value: "Quantity" }], value: "MODEL-AUTHORED-LITERAL" },
+            { type: "done", message: "ok" },
+          ],
+        }) });
+      }
+      return envelope({ actions: [{ type: "navigate", url: "https://shop.example/form" }, { type: "done", response: "ok" }] });
+    });
+    port.postMessage({ sessionId: 2975, type: "ASK_ZO", chatId: run.chatId, modeId: "cobrowse", userQuery: run.goal, handoffRunId: run.runId });
+    await driveOnceR1(run, 2975);
+    await waitUntil(() => pushes.some((p) => p.run?.runId === run.runId && p.run.status === "done"), 8000);
+
+    const save = await bus.runtime.sendMessage({ type: "RECIPE_COMPOSE_SAVE", runId: run.runId, name: "F2 Composed" });
+    expect(save.ok).toBe(true);
+    expect(save.llmCleaned).toBe(false);
+    expect(save.note).toContain("literal fill value");
+    const entry = bus.storage.local._store.cobrowse_recipes["F2 Composed"];
+    expect(JSON.stringify(entry)).not.toContain("MODEL-AUTHORED-LITERAL");
+  });
+
+  it("F4: a compose run that completes naturally disarms the session", async () => {
+    const run = await composeStartR1("Finish on your own");
+    fm.handle(() => envelope({ actions: [{ type: "done", response: "All walked." }] }));
+    port.postMessage({ sessionId: 2976, type: "ASK_ZO", chatId: run.chatId, modeId: "cobrowse", userQuery: run.goal, handoffRunId: run.runId });
+    await driveOnceR1(run, 2976);
+    await waitUntil(() => pushes.some((p) => p.run?.runId === run.runId && p.run.status === "done"), 8000);
     const peek = await bus.runtime.sendMessage({ type: "RECIPE_RECORD_PEEK" });
     expect(peek.armed).toBe(false);
   });

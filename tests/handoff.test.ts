@@ -389,3 +389,17 @@ describe("handoff — compose parks (C2 #290)", () => {
     expect(() => HandoffRun.parse(run)).not.toThrow();
   });
 });
+
+describe("handoff — compose park ids stay unique past the cap (review F6)", () => {
+  it("parkSeq is monotonic even when old parks are evicted", () => {
+    let run = mkRun({ boundaryMode: "compose" });
+    for (let i = 0; i < 25; i++) {
+      run = addComposePark(run, { kind: "value", question: `q${i}` });
+    }
+    expect(run.parks).toHaveLength(20); // capped
+    const ids = run.parks.map((p: any) => p.parkId);
+    expect(new Set(ids).size).toBe(20); // no collisions
+    expect(ids[19]).toBe("park-25"); // monotonic, not length-derived
+    expect(() => HandoffRun.parse(run)).not.toThrow();
+  });
+});

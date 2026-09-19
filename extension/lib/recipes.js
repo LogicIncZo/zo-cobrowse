@@ -564,6 +564,17 @@ export function withoutParamDefaults(params) {
   });
 }
 
+// Cleanup replies may not author literal fill values: an adopted fill whose
+// value is not a {{param}}/{{evidence}} reference would auto-type that
+// literal on every replay (review F2 — the reply sees page-derived strings,
+// so the injection vector is real). Returns the offending count; any > 0
+// rejects the cleaned draft for the deterministic one.
+export function literalFillValueCount(steps) {
+  return (Array.isArray(steps) ? steps : [])
+    .filter((s) => s && s.type === 'fill' && typeof s.value === 'string' && !/\{\{[^}]+\}\}/.test(s.value))
+    .length;
+}
+
 // Parse the cleanup reply. Shape-check only — the caller runs validateRecipe
 // (which enforces the invariant) before anything is saved.
 export function parseGeneratedRecipe(text) {  const raw = typeof text === 'string' ? text : '';
@@ -648,10 +659,11 @@ export function assembleComposedDraft(name, goal, obs, now = Date.now()) {
     && JSON.stringify(cleanCues(h.cues) || null) === JSON.stringify(cleanCues(ev.cues) || null));
 
   // Retry collapse: consecutive records with the same op on the same target
-  // are a failed-then-retried sequence — one step, not two.
+  // are a failed-then-retried sequence — one step, not two. fill_form lands
+  // in the same fill shape (review F1: the batch shape is recorded too).
   const pruned = [];
   for (const ev of events) {
-    if (ev.source === 'boundary' && ev.op === 'fill' && humanFillTwin(ev)) continue;
+    if (ev.source === 'boundary' && (ev.op === 'fill' || ev.op === 'fill_form') && humanFillTwin(ev)) continue;
     const prev = pruned[pruned.length - 1];
     if (prev && prev.source === 'zo' && ev.source === 'zo'
       && prev.op === ev.op && prev.url === ev.url
@@ -665,6 +677,26 @@ export function assembleComposedDraft(name, goal, obs, now = Date.now()) {
   let lastNav = '';
   while (i < pruned.length) {
     const ev = pruned[i];
+
+    if (isSensitivePageEvent(ev)) {
+      // Recorder rule wins (review F3): a sensitive-page span — payment,
+      // OTP, credentials, whatever the recorder flagged — collapses into ONE
+      // human checkpoint for BOTH producers. Human-typed values on those
+      // pages never become param defaults; clicks there never automate.
+      let j = i;
+      while (j < pruned.length && isSensitivePageEvent(pruned[j])) j += 1;
+      const after = pruned[j];
+      steps.push({
+        type: 'human',
+        title: `Complete ${safeHost(ev.url)} by hand`,
+        instructions: after
+          ? 'This part of the flow touches sensitive pages the recipe must not automate. You did it manually while composing; do it manually on replay, then continue.'
+          : 'This part of the flow touches sensitive pages the recipe must not automate. Finish it by hand, then finish the recipe.',
+        resumeOn: { url: after ? safeExpectUrl(after.url || '') : safeExpectUrl(ev.url || '') },
+      });
+      i = j;
+      continue;
+    }
 
     if (ev.source === 'boundary') {
       // A refused action = a step Zo was NOT allowed to do — it stays human,
@@ -698,7 +730,8 @@ export function assembleComposedDraft(name, goal, obs, now = Date.now()) {
 
     const cues = cleanCues(ev.cues);
     switch (ev.op) {
-      case 'fill': {
+      case 'fill':
+      case 'fill_form': {
         if (!cues.length) break; // unidentifiable field — drop rather than misfire
         const question = cueText(cues) || 'Field';
         if (ev.source === 'human' && typeof ev.value === 'string' && ev.value) {
