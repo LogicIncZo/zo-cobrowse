@@ -3111,7 +3111,8 @@ async function recipeList() {
     if (!prev || (r.updatedAt || 0) > (prev.updatedAt || 0)) lastRunByRecipe.set(r.recipeId, r);
   }
   const lastRunStatus = (recipe) => {
-    const run = lastRunByRecipe.get(recipe.id);
+    // Library entries are user storage — null/corrupt values must not throw.
+    const run = recipe && typeof recipe === 'object' ? lastRunByRecipe.get(recipe.id) : null;
     return run ? { status: run.status, endedAt: run.updatedAt || null } : null;
   };
   return {
