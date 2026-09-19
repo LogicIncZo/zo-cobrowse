@@ -301,7 +301,7 @@ describe("healPrompt / parseRecipeHealResponse", () => {
 
 // ---- recorder pure halves (PR4) --------------------------------------------
 
-import { assembleDraftRecipe, generateRecipePrompt, parseGeneratedRecipe } from "../extension/lib/recipes.js";
+import { assembleDraftRecipe, generateRecipePrompt, parseGeneratedRecipe, recipeSaveTarget, serializeRecipe, driftedFromWorkspace, patchHealedCues, buildRecipeSkillExport } from "../extension/lib/recipes.js";
 
 describe("assembleDraftRecipe", () => {
   const T = 1757800000000;
@@ -520,5 +520,140 @@ describe("recipeProgress — surfaced warnings (#270)", () => {
     expect(recipeProgress(run, T0 + 60_000)).toContain('⚠ checkpoint "Pay by hand" skipped');
     const clean: any = { status: "running", stepIndex: 1, stepsTotal: 3, evidence: [], startedAt: T0 };
     expect(recipeProgress(clean, T0 + 60_000)).not.toContain("⚠");
+  });
+});
+
+// ---- R2: workspace write-back (#256) ----------------------------------------
+
+describe("recipeSaveTarget", () => {
+  it("defaults to /home/workspace/recipes/<slug>.json", () => {
+    expect(recipeSaveTarget("RTI filing")).toEqual({ ok: true, path: "/home/workspace/recipes/rti-filing.json" });
+    expect(recipeSaveTarget("!!!").ok).toBe(true); // degenerate name → 'recipe' fallback slug
+  });
+  it("confines a caller-supplied path to the workspace", () => {
+    expect(recipeSaveTarget("x", "/home/workspace/recipes/deep/thing.json")).toEqual({ ok: true, path: "/home/workspace/recipes/deep/thing.json" });
+    const bad = recipeSaveTarget("x", "/etc/passwd");
+    expect(bad.ok).toBe(false);
+    expect((bad as any).error).toContain("must be inside");
+    expect(recipeSaveTarget("x", "../../escape.json").ok).toBe(false);
+  });
+});
+
+describe("serializeRecipe + driftedFromWorkspace", () => {
+  const base = { id: "r", name: "R", version: "1.0.0", params: [], steps: [{ type: "done" }] };
+
+  it("serializes pretty-printed with a trailing newline", () => {
+    expect(serializeRecipe(base)).toBe(JSON.stringify(base, null, 2) + "\n");
+  });
+  it("content drifts bump; provenance-only diffs do not; garbage counts as drift", () => {
+    const wsCopy = serializeRecipe({ ...base, origin: "/home/workspace/recipes/r.json", updatedAt: 123 });
+    expect(driftedFromWorkspace(base, wsCopy)).toBe(false); // origin/updatedAt ignored
+    expect(driftedFromWorkspace({ ...base, steps: [{ type: "done", message: "x" }] }, wsCopy)).toBe(true);
+    expect(driftedFromWorkspace(base, "not json at all")).toBe(true);
+  });
+});
+
+describe("patchHealedCues — heal write-back's pure half (#256)", () => {
+  const ws: any = {
+    id: "rcp-h", name: "Heal me", version: "2.1.0",
+    params: [{ name: "applicant", required: true }],
+    steps: [
+      { type: "fill", cues: [{ strategy: "question", value: "Ghost field" }], value: "{{applicant}}" },
+      { type: "click", cues: [{ strategy: "text", value: "Go" }] },
+      { type: "done" },
+    ],
+  };
+
+  it("patches only the healed steps' cues and leaves params intact", () => {
+    const patched = patchHealedCues(ws, [{ index: 0, cues: [{ strategy: "selector", value: "#fullname" }] }]);
+    expect(patched.ok).toBe(true);
+    const r: any = (patched as any).recipe;
+    expect(r.steps[0].cues).toEqual([{ strategy: "selector", value: "#fullname" }]);
+    expect(r.steps[0].value).toBe("{{applicant}}"); // parameterization survives
+    expect(r.steps[1].cues[0].value).toBe("Go"); // untouched steps untouched
+    expect(r.version).toBe("2.1.0"); // version bump is the background's call
+    expect(ws.steps[0].cues[0].value).toBe("Ghost field"); // input not mutated
+  });
+
+  it("applies multiple healed steps in one pass", () => {
+    const patched = patchHealedCues(ws, [
+      { index: 0, cues: [{ strategy: "selector", value: "#a" }] },
+      { index: 1, cues: [{ strategy: "selector", value: "#b" }] },
+    ]);
+    expect(patched.ok).toBe(true);
+    expect((patched as any).recipe.steps[1].cues[0].value).toBe("#b");
+  });
+
+  it("refuses structurally diverged workspace copies and empty heal records", () => {
+    expect(patchHealedCues(ws, []).ok).toBe(false);
+    const oor = patchHealedCues(ws, [{ index: 9, cues: [] }]);
+    expect(oor.ok).toBe(false);
+    expect(String((oor as any).error)).toContain("no step at index");
+    const stale = JSON.parse(JSON.stringify({ ...ws, steps: ws.steps.slice(1) }));
+    const shifted = patchHealedCues(stale, [{ index: 1, type: "click", cues: [{ strategy: "selector", value: "#b" }] }]);
+    expect(shifted.ok).toBe(false);
+    expect(String((shifted as any).error)).toContain("type mismatch");
+    // No recorded type → index range still guards.
+    expect(patchHealedCues(stale, [{ index: 1, cues: [] }]).ok).toBe(true);
+  });
+});
+
+// ---- R3: SKILL.md export (#257) ---------------------------------------------
+
+describe("buildRecipeSkillExport", () => {
+  const rec: any = {
+    id: "rcp-x", name: "RTI filing", version: "1.2.0", origin: "/home/workspace/recipes/rti.json",
+    params: [
+      { name: "applicant", type: "string", required: true, question: "Who is filing?", default: "Secret Default" },
+      { name: "count", type: "number" },
+    ],
+    steps: [
+      { type: "navigate", url: "https://gateway.example/form", expectUrl: "form" },
+      { type: "fill", cues: [{ strategy: "label", value: "Name" }], value: "{{applicant}}" },
+      { type: "fill", cues: [{ strategy: "selector", value: "#note" }], value: "captured literal note" },
+      { type: "fill", cues: [{ strategy: "selector", value: "#essay" }], generate: { prompt: "Draft a short application note", maxChars: 200, contextFile: "notes/source.md" } },
+      { type: "human", title: "Pay by hand", instructions: "Complete the payment, then verify.", resumeOn: { url: "paid=1" } },
+      { type: "extract", cues: [{ strategy: "selector", value: "#reg" }], evidenceKey: "registration", label: "Registration number" },
+      { type: "done", message: "Filed {{applicant}} — ref {{registration}}" },
+    ],
+  };
+
+  it("bundles SKILL.md + references/recipes.md under /home/workspace/Skills/<slug>", () => {
+    const out: any = buildRecipeSkillExport([rec], { skillName: "My Flows" });
+    expect(out.ok).toBe(true);
+    expect(out.files.map((f: any) => f.path)).toEqual([
+      "/home/workspace/Skills/my-flows/SKILL.md",
+      "/home/workspace/Skills/my-flows/references/recipes.md",
+    ]);
+    const skill = out.files[0].markdown;
+    expect(skill.startsWith("---\n")).toBe(true);
+    expect(skill).toContain("name: my-flows");
+    expect(skill).toContain("RTI filing");
+    expect(skill).toContain("v1.2.0");
+    // Boundary pinned in the issue: documentation, never Zo-side execution.
+    expect(skill.toLowerCase()).toContain("documentation only");
+    // Human checkpoints surface — that's the safety story Zo can narrate.
+    expect(skill).toContain("Pay by hand");
+    expect(skill).toContain("!recipe run");
+  });
+
+  it("redacts: no param defaults, literal values masked, refs/generate kept, contextFile path-only", () => {
+    const out: any = buildRecipeSkillExport([rec]);
+    const all = out.files.map((f: any) => f.markdown).join("\n");
+    expect(all).not.toContain("Secret Default");
+    expect(all).not.toContain("captured literal note");
+    expect(all).toContain("{{applicant}}");
+    expect(all).toContain("Draft a short application note");
+    expect(all).toContain("notes/source.md"); // path reference rides
+    expect(all).toContain("registration");
+    // Masked literals show the redactValue form.
+    expect(all).toContain("••••");
+  });
+
+  it("refuses empty lists and recipes that do not validate", () => {
+    expect(buildRecipeSkillExport([]).ok).toBe(false);
+    const bad = buildRecipeSkillExport([{ ...rec, steps: [{ type: "click", submitish: true, cues: [] }] }]);
+    expect(bad.ok).toBe(false);
+    expect(String((bad as any).error)).toContain("does not validate");
   });
 });

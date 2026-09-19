@@ -91,4 +91,47 @@ test.describe("recipes player", () => {
     // The fill landed through the cue ladder with the PARAM value.
     await expect(h.site.locator("#name")).toHaveValue("Fresh Param Value");
   });
+
+  test("R2 write-back (#256): learn card saves to workspace; the written artifact replays", async () => {
+    // Fresh workspace recipe store for this scenario.
+    await fetch(`${E2E_BASE}/__recipes`, { method: "DELETE" });
+
+    // Record a one-fill flow by hand.
+    await h.site.goto(`${E2E_BASE}/`);
+    await sendQuery(h.panel, "!recipe record e2e-saveflow");
+    await expect(h.panel.locator(".msg-recipe-record-line")).toContainText("Recording recipe", { timeout: 20_000 });
+    await h.site.locator("#nav-form").click();
+    await expect(h.site).toHaveURL(/form\.html/);
+    await h.site.locator("#name").fill("Recorded Value");
+    await h.panel.locator(".msg-recipe-record-line .handoff-stop").click();
+    await expect(h.panel.locator("#messages .msg-system", { hasText: 'Learned recipe "e2e-saveflow"' })).toBeVisible({ timeout: 20_000 });
+
+    // The learn card offers the workspace save. The mock's read_file probe
+    // answers at every path → the overwrite CONFIRM CARD renders first.
+    const offer = h.panel.locator(".recipe-action-card", { hasText: '"e2e-saveflow" lives in this browser' });
+    await expect(offer).toBeVisible({ timeout: 10_000 });
+    await offer.locator("button", { hasText: "Save to workspace" }).click();
+    const overwrite = h.panel.locator(".recipe-action-card", { hasText: "already exists" });
+    await expect(overwrite).toBeVisible({ timeout: 15_000 });
+    await overwrite.locator("button", { hasText: "Overwrite" }).click();
+    await expect(h.panel.locator("#messages .msg-system", { hasText: "Saved" })).toContainText("recipes/e2e-saveflow.json", { timeout: 15_000 });
+
+    // The mock actually stored the artifact — parameterized, value-free.
+    const files: Record<string, string> = (await (await fetch(`${E2E_BASE}/__recipes`)).json()).files;
+    const written = files["/home/workspace/recipes/e2e-saveflow.json"];
+    expect(written).toBeTruthy();
+    expect(written).toContain("{{applicant_name}}");
+    expect(written).not.toContain("Recorded Value");
+
+    // Replay straight from the WRITTEN workspace file — params card prompts,
+    // the player fills through the cue ladder, done carries the fresh value.
+    await sendQuery(h.panel, "!recipe run /home/workspace/recipes/e2e-saveflow.json");
+    const card = h.panel.locator(".recipe-params-card");
+    await expect(card).toBeVisible({ timeout: 20_000 });
+    await card.locator("input").fill("Workspace Value");
+    await card.locator(".form-review-confirm").click();
+    const done = h.panel.locator("#messages .msg-system", { hasText: "Recipe done — e2e-saveflow" });
+    await expect(done).toContainText("Workspace Value", { timeout: 30_000 });
+    await expect(h.site.locator("#name")).toHaveValue("Workspace Value");
+  });
 });

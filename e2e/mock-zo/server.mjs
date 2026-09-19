@@ -19,6 +19,10 @@ import { extname, join, resolve } from "node:path";
 const PORT = Number(process.env.E2E_PORT || 3179);
 const SITE_DIR = resolve(new URL(".", import.meta.url).pathname, "../fixtures/site");
 const requests = []; // {ts, method, url, body}
+// R2 #256: in-memory workspace recipe files — write_file stores, read_file
+// serves them back so save → run round-trips through the real transport.
+// Control: GET /__recipes lists them, DELETE /__recipes resets.
+const savedRecipes = new Map();
 // #235: the virtual /home/workspace/Skills/zo-cobrowse/SKILL.md + a one-shot
 // write_file failure arm (module scope — state must survive across requests).
 let skillFile = null;
@@ -170,6 +174,17 @@ const server = http.createServer(async (req, res) => {
   // DELETE /__skill        — remove it (fresh-workspace state)
   // PUT  /__skill?mode=writefail — arm the next write_file to error once
   // (skillFile/skillWriteFail live at module scope, next to `requests`.)
+  if (url.pathname === "/__recipes") {
+    if (req.method === "GET") {
+      res.writeHead(200, { "content-type": "application/json", ...cors });
+      return res.end(JSON.stringify({ files: Object.fromEntries(savedRecipes) }));
+    }
+    if (req.method === "DELETE") {
+      savedRecipes.clear();
+      res.writeHead(200, { "content-type": "application/json", ...cors });
+      return res.end('{"ok":true}');
+    }
+  }
   if (url.pathname === "/__skill") {
     if (req.method === "GET") {
       res.writeHead(200, { "content-type": "application/json", ...cors });
@@ -249,6 +264,12 @@ const server = http.createServer(async (req, res) => {
         }
         return json({ jsonrpc: "2.0", id: body.id, result: { isError: false, content: [{ type: "text", text: JSON.stringify([skillFile, `kind='file_ref' path='${targetFile}' media_type=None label=None`]) }] } });
       }
+      // R2 #256: a file this server wrote wins over the fixtures — the
+      // written artifact is what !recipe run must replay.
+      if (savedRecipes.has(targetFile)) {
+        const wrappedSaved = JSON.stringify([savedRecipes.get(targetFile), `kind='file_ref' path='${targetFile}' media_type=None label=None`]);
+        return json({ jsonrpc: "2.0", id: body.id, result: { isError: false, content: [{ type: "text", text: wrappedSaved }] } });
+      }
       if (targetFile.includes("notes/source.md")) {
         const wrappedNotes = JSON.stringify(["E2E-SOURCE-CONTENT: the draft notes behind the application.", "kind='file_ref' path='" + targetFile + "' media_type=None label=None"]);
         return json({ jsonrpc: "2.0", id: body.id, result: { isError: false, content: [{ type: "text", text: wrappedNotes }] } });
@@ -286,6 +307,18 @@ const server = http.createServer(async (req, res) => {
       // exercises the ask-write fallback.
       if (body.method === "tools/call" && body.params?.name === "write_file") {
         const targetFile = String(body.params.arguments?.target_file || "");
+        // R3 #257: skill-export bundles land here too — EXCEPT the exact
+        // #235 protocol-skill path, whose dedicated branch below carries the
+        // writefail arm the install tests exercise.
+        if (targetFile.startsWith("/home/workspace/Skills/") && targetFile !== "/home/workspace/Skills/zo-cobrowse/SKILL.md") {
+          savedRecipes.set(targetFile, String(body.params.arguments?.content || ""));
+          return json({ jsonrpc: "2.0", id: body.id, result: { isError: false, content: [{ type: "text", text: "ok" }] } });
+        }
+        // R2 #256: recipe write-back targets the in-memory workspace store.
+        if (targetFile.startsWith("/home/workspace/recipes/")) {
+          savedRecipes.set(targetFile, String(body.params.arguments?.content || ""));
+          return json({ jsonrpc: "2.0", id: body.id, result: { isError: false, content: [{ type: "text", text: "ok" }] } });
+        }
         if (targetFile === "/home/workspace/Skills/zo-cobrowse/SKILL.md" && !skillWriteFail) {
           skillFile = String(body.params.arguments?.content || "");
           skillWriteFail = false;

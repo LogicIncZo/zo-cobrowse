@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.3.1.0] — 2026-09-19
+
+### Added — Recipes R2 + R3 (0.3.1 slate: #256, #257)
+
+- **Workspace write-back (#256).** `!recipe save <name> [path] [--force]` writes a local recipe to `/home/workspace/recipes/<slug>.json` over deterministic MCP `write_file`; the learned-recipe card offers **↥ Save to workspace**; an existing target renders an overwrite confirm card. Content drift bumps the patch version; the round-trip (save → load → validate → replay) is byte-equivalent. After a healed run whose origin is a workspace file, the completion line offers **↥ Save healed cues** — `RECIPE_SAVE_HEALED` patches the healed `{index, type, cues}` into the *parameterized* source file (the run's substituted copy never travels), so parameterization survives the write-back and re-imports need no second heal.
+- **Recipe library panel (#257).** The **🧾 Recipes** button opens the library: run / rename / delete / import / save-to-workspace per row, params + source badges, an import footer (`read_file` → `validateRecipe` → local library, with the validator's errors on refusal), and a corrupt-entry-tolerant `RECIPE_LIST` payload. Deleting touches the local entry only — workspace files are never removed.
+- **SKILL.md export (#257).** `RECIPE_EXPORT` bundles recipes to `/home/workspace/Skills/<name>/SKILL.md` + `references/recipes.md` (`buildRecipeSkillExport`): frontmatter per the skill protocol, params without defaults, redacted step tables (captured literals masked, `{{param}}` refs kept, `contextFile` as path-only). Documentation only — Zo can describe and suggest flows; execution stays extension-side.
+- **User guide.** `docs/guide/recipes.md` — record/run/checkpoints/generated fills/healing, the recorder's limits, and the safety model.
+
 ## [0.3.0.1] — 2026-09-18
 
 ### Fixed — stabilization round 1 (recipes player + recorder)

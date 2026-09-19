@@ -33,6 +33,7 @@ export default defineConfig({
             { text: 'Getting Started', link: '/guide/getting-started' },
             { text: 'Using Co-browse', link: '/guide/using-cobrowse' },
             { text: 'Modes', link: '/guide/modes' },
+            { text: 'Recipes', link: '/guide/recipes' },
           ],
         },
       ],
