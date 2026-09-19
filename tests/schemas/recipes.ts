@@ -244,6 +244,11 @@ export const RecipeListItem = z.object({
     required: z.boolean(),
     question: z.string(),
   })),
+  // qa-recipe-rows-no-last-run: most recent run's status, if any run exists.
+  lastRun: z.object({
+    status: z.string(),
+    endedAt: z.number().nullable(),
+  }).nullable().optional(),
 });
 export type RecipeListItemT = z.infer<typeof RecipeListItem>;
 

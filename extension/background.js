@@ -3103,6 +3103,18 @@ async function recipeList() {
   const lib = await recipeLibrary.load();
   const runs = await recipeStore.load();
   const live = Object.values(runs).find((r) => !['done', 'aborted'].includes(r.status));
+  // qa-recipe-rows-no-last-run: the runs store is already in hand — derive
+  // each recipe's most recent run status so library rows can badge it.
+  const lastRunByRecipe = new Map();
+  for (const r of Object.values(runs)) {
+    const prev = lastRunByRecipe.get(r.recipeId);
+    if (!prev || (r.updatedAt || 0) > (prev.updatedAt || 0)) lastRunByRecipe.set(r.recipeId, r);
+  }
+  const lastRunStatus = (recipe) => {
+    // Library entries are user storage — null/corrupt values must not throw.
+    const run = recipe && typeof recipe === 'object' ? lastRunByRecipe.get(recipe.id) : null;
+    return run ? { status: run.status, endedAt: run.updatedAt || null } : null;
+  };
   return {
     ok: true,
     // R3 (#257): the library popup's payload — params (defaults stripped:
@@ -3118,6 +3130,7 @@ async function recipeList() {
       source: r?.origin && String(r.origin).startsWith('/home/workspace') ? 'workspace' : 'local',
       updatedAt: (r && (r.updatedAt || r.createdAt)) || null,
       params: (Array.isArray(r?.params) ? r.params : []).map((p) => ({ name: p.name, required: !!p.required, question: p.question || '' })),
+      lastRun: lastRunStatus(r),
     })),
     liveRun: live ? { runId: live.runId, name: live.name, status: live.status } : null,
   };

@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.3.1.1] — 2026-09-19
+
+### Fixed — stabilization round 1 over the recipes R2/R3 surface (#280–#284)
+
+Verification round (owner-called, run through the zo-loop factory, work item `311`): deterministic half green (verify 4/4, evals 22/22, qa-matrix 9/9) + a conformance/adversarial review of the R2+R3 diff vs #256/#257. Five findings, all fixed in PR #279:
+
+- **`!recipe list` surfaces provenance (#280).** Workspace-sourced rows show 🌐 origin + last-run status — drift visible on the command surface, per the R2 spec's "drift is visible, not hidden".
+- **Library rows badge last-run status (#281).** `recipeList()` derives each recipe's most recent run (the runs store was already loaded); rows show it; `RecipeListItem.lastRun` in the schema.
+- **Library footer gains the 📖 Guide link (#282).** The popup links to `docs/guide/recipes.md` on the docs site (#257 conformance).
+- **Inline rename commits once (#283).** The Enter + blur race double-sent `RECIPE_RENAME` and errored on the moved key; a committed flag makes the first commit win.
+- **Export provenance documented (#284).** The guide states the SKILL.md boundary: values redacted, page-recorded labels/checkpoint text/generate prompts ride — skim before sharing.
+
+Review-lane hardening: `lastRunStatus` guards against null/corrupt library entries (user storage must never 500 the list).
+
 ## [0.3.1.0] — 2026-09-19
 
 ### Added — Recipes R2 + R3 (0.3.1 slate: #256, #257)
