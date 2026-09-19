@@ -884,6 +884,10 @@ describe("literalFillValueCount (review F2)", () => {
   it("counts fill steps whose value is not a {{param}}/{{evidence}} reference", () => {
     expect(literalFillValueCount([{ type: "fill", cues: [], value: "{{name}}" }])).toBe(0);
     expect(literalFillValueCount([{ type: "fill", cues: [], value: "MODEL-INVENTED" }])).toBe(1);
+    // Anchored (review round 2): a hybrid value wraps the human's input in
+    // model-authored text — it must count as a literal too.
+    expect(literalFillValueCount([{ type: "fill", cues: [], value: "Free text {{name}}" }])).toBe(1);
+    expect(literalFillValueCount([{ type: "fill", cues: [], value: "  {{name}}  " }])).toBe(0);
     expect(literalFillValueCount([{ type: "navigate", url: "x" }])).toBe(0);
     expect(literalFillValueCount(undefined)).toBe(0);
   });

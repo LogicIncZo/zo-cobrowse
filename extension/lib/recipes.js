@@ -570,8 +570,11 @@ export function withoutParamDefaults(params) {
 // so the injection vector is real). Returns the offending count; any > 0
 // rejects the cleaned draft for the deterministic one.
 export function literalFillValueCount(steps) {
+  // Anchored (review round 2): 'free text {{param}}' would otherwise smuggle
+  // model-authored wrapper text around the human's value — the value must be
+  // EXACTLY one reference.
   return (Array.isArray(steps) ? steps : [])
-    .filter((s) => s && s.type === 'fill' && typeof s.value === 'string' && !/\{\{[^}]+\}\}/.test(s.value))
+    .filter((s) => s && s.type === 'fill' && typeof s.value === 'string' && !/^\{\{[^}]+\}\}$/.test(s.value.trim()))
     .length;
 }
 

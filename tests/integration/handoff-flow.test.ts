@@ -598,6 +598,19 @@ describe("compose session — review round 1 fixes", () => {
     expect(JSON.stringify(entry)).not.toContain("MODEL-AUTHORED-LITERAL");
   });
 
+  it("F5: a paused compose run resumes WITHOUT a parkId (park-less resume)", async () => {
+    const run = await composeStartR1("Pause me by the sweep");
+    // Simulate the SW-restart orphan sweep's pause.
+    const runs = bus.storage.session._store.cobrowse_handoff_runs;
+    runs[run.runId].status = "paused";
+    runs[run.runId].stopReason = "extension restarted — resume to continue";
+    const res = await bus.runtime.sendMessage({ type: "RECIPE_COMPOSE_RESUME", runId: run.runId });
+    expect(res.ok).toBe(true);
+    expect(res.run.status).toBe("running");
+    expect(res.continuationQuery).toContain("[handoff-run continuation]");
+    await bus.runtime.sendMessage({ type: "RECIPE_COMPOSE_STOP", runId: run.runId });
+  });
+
   it("F4: a compose run that completes naturally disarms the session", async () => {
     const run = await composeStartR1("Finish on your own");
     fm.handle(() => envelope({ actions: [{ type: "done", response: "All walked." }] }));

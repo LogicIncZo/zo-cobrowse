@@ -45,7 +45,6 @@ import {
   addComposePark,
   resolveComposePark,
   buildContinuationTurn,
-  handoffInstructions,
   continuationPayload as handoffContinuationPayload,
   DEFAULT_BUDGET,
 } from './lib/handoff.js';
