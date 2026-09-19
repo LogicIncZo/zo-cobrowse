@@ -403,3 +403,44 @@ GitHub milestone is closed; #34 (Mode revisit) closed as superseded the same day
 shipped as the `ask`/`cobrowse` modes, the #28 workspace pickers, and 0.2.7 `!handoff`.
 
 **Next:** 0.9.0 — autonomy foundation #124–#131 as prereqs for #46/#47/#48, plus slate #49–#54.
+
+## 2026-09-19 — 0.3.1.1 stabilization round (recipes R2/R3 surface) + 0.3.0.1 backfill
+
+Two stabilization rounds over the recipes surface, both run through the zo-loop
+factory (`scripts/swamp/factory.yaml` — intake → implement → verify → review →
+merge → release). The 0.3.0.1 round predates this file's coverage; recorded here
+for a complete audit trail.
+
+### 2026-09-18 — v0.3.0.1 (round 0, backfill) — PR #271, findings #266–#270
+
+Conformance review of the R1 recipes impl vs the 2026-09-14 design spec. Full
+deterministic gates green (verify 4/4, evals 22/22, unit 1394/0, qa-matrix 9/9,
+e2e 63). Five findings, all fixed in PR #271: the sensitive-page submit probe
+was structurally inert for `recipe_step` actions (#266, P1), `waitFor{url}`
+unimplemented (#267), recorder missed navigations (#268), done summary not
+persisted (#269), conformance polish (#270).
+
+### 2026-09-19 — v0.3.1.1 (round 1, owner-called) — PR #279, findings #280–#284
+
+Verification round over the R2/R3 surface (v0.3.1.0). Deterministic half green:
+`bun run verify` 4/4, `bun run evals` 22/22, `bun run qa:matrix` 9/9. Review
+lane: conformance of the R2+R3 diff vs #256/#257 + adversarial pass filed five
+findings (three P3 conformance gaps, one P3 race, one P3 doc gap) — all fixed in
+PR #279 and closed with evidence on GitHub:
+
+| finding | severity | surface | source | fixed |
+|---|---|---|---|---|
+| qa-recipe-list-no-origin-drift | P3 | recipes | review | #280 |
+| qa-recipe-rows-no-last-run | P3 | recipes | review | #281 |
+| qa-recipe-library-missing-guide-link | P3 | recipes | review | #282 |
+| qa-recipe-rename-double-commit | P3 | recipes | review | #283 |
+| qa-skill-export-label-provenance | P3 | recipes/docs | review | #284 |
+
+Review-lane catch fixed in-flight: `lastRunStatus` now guards null/corrupt
+library entries (user storage must never 500 `RECIPE_LIST`). Findings queue
+drained (GitHub-filed + closed), `qa-gate` green on the release PRs (#285/#286).
+Machine evidence: work item `311` (fix) + `rel-0.3.1.1` (release), both terminal
+`done`; gate payloads recorded via `scripts/swamp/record-gate.sh`.
+
+**Queue:** 0 open at close. **Next:** 0.9.0 slate per BACKLOG (autonomy
+foundation #124–#131 first).
