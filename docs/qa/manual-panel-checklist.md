@@ -116,7 +116,7 @@ open the side panel on a normal website.
       only" card; one click saves (version bumps a patch); local-origin runs and
       already-saved runs show no offer.
 - [ ] **Skill export (#257)** — ⤓ Export writes SKILL.md + references/recipes.md
-      under /home/workspace/Skills/<slug>/ and posts a system line with both
+      under `/home/workspace/Skills/<slug>/` and posts a system line with both
       paths; the bundle contains "documentation only" and no captured values.
 
 ## 0.3.0 walkthrough log (#244)
