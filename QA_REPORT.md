@@ -444,3 +444,27 @@ Machine evidence: work item `311` (fix) + `rel-0.3.1.1` (release), both terminal
 
 **Queue:** 0 open at close. **Next:** 0.9.0 slate per BACKLOG (autonomy
 foundation #124–#131 first).
+
+## 2026-09-19 — 0.3.2 build round (zo-loop work items 289/290/rel-0.3.2.0)
+
+Deterministic half: `bun run verify` 4/4 on both lane PRs and at the release
+SHA (tests 1468/0 across 63 files at the C2 merge; lint, transpile, and the
+prompt-budget gate green — the two new compose prompts sit inside the
+per-mode ceilings). Evals 24/24 (two new cases:
+`recipe-compose-cleanup` graded live, `recipe-compose-instructions` static).
+QA matrix 9/9 (`bun run qa:matrix`) at the release-prep SHA. Full Playwright
+e2e 68 passed + 4 ZO_DEMO-gated skipped, including the new
+`27-recipe-compose.spec.ts` (park → human fill → draft → rehearsal promotes).
+
+Adversarial review lanes (per the factory's review stage): C1 took two rounds
+(round 1: adopt-time default stripping, sink alignment, promotion identity —
+all fixed and re-verified); C2 took two rounds — round 1 found a **critical**
+`fill_form` boundary bypass (the batch-fill shape skipped the handoff gate
+entirely; also a pre-existing readonly hole), literal-value injection via
+cleanup replies, a missing sensitive-page collapse in the compose assembler,
+session-disarm and resume-UI gaps — all fixed in `5a68d0e`; round 2 found one
+blocking residual (unanchored literal-value check), fixed in `192ee69`.
+No findings ride the `docs/qa/findings/` queue — all were fixed in-slate.
+
+The manual shell checklist gains 0.3.2 rows (save offer, rehearsal
+strictness, compose park cards, single-session rule) — run before promotion.

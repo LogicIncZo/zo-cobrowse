@@ -128,3 +128,21 @@ Every friction point found files per the QA playbook with a concrete UX proposal
 quick wins fix in-slate, larger redesigns triage to the backlog with rationale.
 
 Log results (pass/fail + commit SHA) in the release PR description.
+
+## 0.3.2 — composed recipes (C1 #289 / C2 #290)
+
+- [ ] **↧ Save-as-recipe offer** — complete a `!handoff` run; the done line
+      offers the save; the name is prefilled from the goal slug; a
+      validation failure renders the validator's reasons (never a silent
+      no-op); a saved draft shows in the library as 🤖 composed · unverified.
+- [ ] **Rehearsal strictness** — run a composed draft; the checkpoint card
+      has NO "Skip check"; verify passes/fails honestly; passing the done
+      step promotes (verified badge, version bump); an aborted rehearsal
+      leaves the entry a draft.
+- [ ] **Compose park cards** — `!recipe compose` on a form-bearing page: the
+      value park card appears (never an auto-filled field); filling the page
+      by hand + Done continues; a `PARK: q | a | b` reply renders option
+      buttons; `!recipe compose stop` and ✕ both abort and disarm (no further
+      capture).
+- [ ] **Single-session rule** — while composing, `!recipe record` refuses
+      with a clear error, and vice versa.

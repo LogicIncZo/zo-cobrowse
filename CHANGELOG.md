@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.3.2.0] — 2026-09-19
+
+### Added — Zo-composed recipes (0.3.2 slate: #289 C1, #290 C2)
+
+- **C1 — save a Zo-run as a recipe (#289, PR #292).** A completed `!handoff` run's executed flow no longer evaporates into the chat log: the executor completion feeds a **value-stripped observation sink** (one record per executed action + boundary parks), the done card offers **↧ Save as recipe**, and `RECIPE_COMPOSE_SAVE` assembles the log into a validated draft — `assembleComposedDraft` (retry collapse, same-page navigation dedup, boundary parks → human checkpoints, Zo fills → required params with NO default). A best-effort compose-cleanup pass (stable `## Composed Recipe Draft` marker) prunes and names; its output must pass `validateRecipe()` or the deterministic draft is kept. Library rows badge composed provenance (🤖 · unverified until the rehearsal passes).
+- **C2 — `!recipe compose <goal>` (#290, PR #293).** Zo composes by driving: a handoff-engine run with a new `compose` boundary — navigate + non-submitish clicks only; **fills and submits are refused in code**, never prompt-only. Zo parks at forms (**value park** cards), ambiguities (`done(response:"PARK: q | a | b")` → **choice** cards), and submits (**checkpoint** cards); the human fills on the live page and resumes. The human's actions stream into the same observation log (`source:'human'`, the recorder's redaction unchanged) and become the draft's param defaults — the only way a default enters a composed artifact. Compose sessions are single-armed (bidirectional with the recorder) and disarm on every exit path.
+- **Rehearsal semantics.** Composed drafts ship `draft:true, composedBy:'zo', verified:false`; the first `!recipe run` is a mandatory rehearsal — checkpoint cards without "Skip check", `force` refused — and passing it promotes the entry (`verified:true, draft:false`, patch bump). Aborted/failed rehearsals leave the draft unverified.
+- **Safety invariants (machine-checked).** The E-INVARIANT holds at compose time for both producers; no Zo-invented value can persist (the sink strips values at source; cleanup replies that author literal or hybrid fill values are rejected via the anchored `literalFillValueCount`; sensitive-page spans collapse so human values on checkout/payment pages never persist); the `fill_form` batch shape no longer bypasses handoff boundaries (also closed a pre-existing readonly hole found by review); rehearsal promotion verifies the entry is the artifact that actually rehearsed.
+- **Prompt evals.** New `recipe-compose-cleanup` + `recipe-compose-instructions` cases; cache refreshed — 24/24.
+
+Adversarial review: 3 rounds across the two lanes (C1: 2 rounds; C2: 2 rounds incl. a critical `fill_form` boundary bypass), all findings fixed and re-verified. Spec: `docs/superpowers/specs/2026-09-19-0.3.2-slate-design.md`.
+
+
 ## [0.3.1.1] — 2026-09-19
 
 ### Fixed — stabilization round 1 over the recipes R2/R3 surface (#280–#284)

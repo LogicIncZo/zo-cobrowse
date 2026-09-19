@@ -3,6 +3,29 @@
 New features in Zo Co-browse, newest first. Each entry explains what shipped;
 open **How to use it** for the hands-on steps.
 
+## Teach by stating: Zo composes your recipes <span class="badge-new">NEW</span> {#recipe-compose}
+
+_2026-09-19 · [#289](https://github.com/LogicIncZo/zo-cobrowse/issues/289) + [#290](https://github.com/LogicIncZo/zo-cobrowse/issues/290) · v0.3.2.0_
+
+The strongest recipe-authoring act is the one you already did: watching Zo
+complete a flow. Two new ways to turn that into a reusable artifact:
+
+- **Save a Zo-run as a recipe.** When a `!handoff` run finishes, the done card
+  offers **↧ Save as recipe**. The executed steps — minus everything Zo was
+  refused — become a draft: refused actions turn into human checkpoints, and
+  anything Zo filled becomes a parameter *you* fill on every run (Zo-invented
+  values are discarded, never saved). A cleanup pass tidies the steps; the
+  artifact must pass the same validator every recipe answers to.
+- **`!recipe compose <goal>`.** Zo walks a flow to compose a recipe and is
+  **never allowed to fill or submit — enforced in code, not by politeness**.
+  When a form blocks the path, a park card asks you to fill it on the page;
+  when two controls are ambiguous, you pick; submits stay yours. Your
+  on-page actions become the draft's defaults. `!recipe compose stop` ends it.
+- **The first run verifies.** Composed drafts are marked
+  🤖 composed · unverified. Their first replay is a **rehearsal** — checkpoints
+  cannot be skipped — and passing it marks the recipe verified. A failed or
+  abandoned rehearsal leaves it a draft, honestly.
+
 ## Recipes go portable — workspace write-back, library panel, skill export <span class="badge-new">NEW</span> {#recipe-library}
 
 _2026-09-19 · [#256](https://github.com/LogicIncZo/zo-cobrowse/issues/256) + [#257](https://github.com/LogicIncZo/zo-cobrowse/issues/257) · v0.3.1.0 / v0.3.1.1_

@@ -120,7 +120,54 @@ titles and instructions, and generated-fill prompts. If a flow was recorded on
 a page with manipulative copy, that copy can appear in the skill; give a bundle
 a quick skim before sharing it.
 
+## Save a Zo-run as a recipe (C1)
+
+When a `!handoff` run completes, its done card offers **↧ Save as recipe**.
+The run's executed flow becomes a composed draft:
+
+- Executed actions become steps (navigations dedupe, retry loops collapse).
+- Actions Zo was **refused** (boundary parks) become `human` checkpoints —
+  the recipe never automates what Zo wasn't allowed to do.
+- Anything Zo **filled** becomes a `{{param}}` with **no default**: the
+  invented value is discarded at the sink, and you supply the real value on
+  every run. Zo-invented values can never persist in an artifact.
+- A cleanup pass (one Zo call) prunes dead steps and names params; its output
+  must pass the validator or the deterministic draft is kept.
+
+Library rows badge composed drafts **🤖 composed · unverified**.
+
+## Composing with Zo (C2)
+
+`!recipe compose <goal>` starts a compose session: Zo drives the browser
+toward the goal, and the boundary **refuses fills and submits in code** —
+the rule is not prompt discipline, it's a check in the executor.
+
+- **Value park** — at a form, a card asks you to fill it on the page; press
+  **Done — continue** when finished. What you typed becomes the step's
+  default, so rehearsed runs can prefill it.
+- **Choice park** — when the next step is ambiguous, Zo sends
+  `PARK: question | option A | option B`; the card renders one button per
+  option (plus "None of these — continue").
+- **Checkpoint** — submit/terminal controls are never clicked by Zo; the card
+  asks you to review and click them yourself.
+- **Resume everywhere** — paused (budget, extension restart) and parked runs
+  resume from their cards or the ▶ Resume control; `!recipe compose stop`
+  aborts.
+
+On completion the ↧ Save-as-recipe offer appears automatically. The draft
+carries `composedBy: zo` and `verified: false`.
+
+## The rehearsal (first run verifies)
+
+A composed draft's first `!recipe run` is a **rehearsal**: checkpoint cards
+have **no "Skip check"** — verify the postcondition or abort — and the
+manual fallback is refused in the background. Passing the done step promotes
+the recipe (`verified: true`, patch bump); a failed or aborted rehearsal
+leaves it a draft. You can always abort and re-run later; the draft is not
+lost, it just stays honestly unverified.
+
 ## Commands
+
 
 | Command | What it does |
 |---|---|
@@ -129,6 +176,8 @@ a quick skim before sharing it.
 | `!recipe save <name> [path]` | Write a local recipe to the workspace |
 | `!recipe list` | Text list of saved recipes |
 | `!recipe stop` | Stop the recording or the live run |
+| `!recipe compose <goal>` | Zo walks the flow to compose a draft (parks for your values) |
+| `!recipe compose stop` | Stop the compose session |
 
 The [recipes design spec](https://github.com/LogicIncZo/zo-cobrowse/blob/main/docs/superpowers/specs/2026-09-14-recipes-design.md)
 covers the artifact format and the player internals.
