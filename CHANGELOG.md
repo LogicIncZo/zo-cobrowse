@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.3.1.0] — 2026-09-19
+
 ### Added — Recipes R2 + R3 (0.3.1 slate: #256, #257)
 
 - **Workspace write-back (#256).** `!recipe save <name> [path] [--force]` writes a local recipe to `/home/workspace/recipes/<slug>.json` over deterministic MCP `write_file`; the learned-recipe card offers **↥ Save to workspace**; an existing target renders an overwrite confirm card. Content drift bumps the patch version; the round-trip (save → load → validate → replay) is byte-equivalent. After a healed run whose origin is a workspace file, the completion line offers **↥ Save healed cues** — `RECIPE_SAVE_HEALED` patches the healed `{index, type, cues}` into the *parameterized* source file (the run's substituted copy never travels), so parameterization survives the write-back and re-imports need no second heal.
