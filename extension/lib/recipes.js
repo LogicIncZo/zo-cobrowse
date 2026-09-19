@@ -549,6 +549,19 @@ export function generateRecipePrompt(draft) {
   ].join('\n');
 }
 
+// Human-values-only backstop: learned/composed params are born without
+// defaults — a cleanup reply that echoes one gets it stripped on adopt, so a
+// model-invented value can never auto-fill a field on replay (values enter
+// artifacts from human input only; the prompt-side rule is the belt, this is
+// the braces).
+export function withoutParamDefaults(params) {
+  return (Array.isArray(params) ? params : []).map((p) => {
+    if (!p || typeof p !== 'object' || p.default === undefined) return p;
+    const { default: _omit, ...rest } = p;
+    return rest;
+  });
+}
+
 // Parse the cleanup reply. Shape-check only — the caller runs validateRecipe
 // (which enforces the invariant) before anything is saved.
 export function parseGeneratedRecipe(text) {  const raw = typeof text === 'string' ? text : '';

@@ -8,6 +8,7 @@ import {
   assembleComposedDraft,
   composeCleanupPrompt,
   driftedFromWorkspace,
+  withoutParamDefaults,
 } from "../extension/lib/recipes.js";
 import {
   Recipe,
@@ -779,5 +780,19 @@ describe("driftedFromWorkspace — composed provenance is drift-stable (0.3.2 C1
     expect(driftedFromWorkspace(promoted, JSON.stringify(draft))).toBe(false);
     const edited = { ...draft, steps: [{ type: "done" }] };
     expect(driftedFromWorkspace(edited, JSON.stringify(draft))).toBe(true);
+  });
+});
+
+describe("withoutParamDefaults (review F1 backstop)", () => {
+  it("strips model-echoed defaults on adopt; keeps everything else", () => {
+    const out = withoutParamDefaults([
+      { name: "a", type: "string", required: true, question: "q", default: "MODEL-INVENTED" },
+      { name: "b", type: "string", required: true, question: "q" },
+      null,
+    ]);
+    expect(out[0]).not.toHaveProperty("default");
+    expect(out[1]).toEqual({ name: "b", type: "string", required: true, question: "q" });
+    expect(out[2]).toBe(null);
+    expect(withoutParamDefaults(undefined)).toEqual([]);
   });
 });

@@ -98,6 +98,7 @@ import {
   generateRecipePrompt,
   composeCleanupPrompt,
   parseGeneratedRecipe,
+  withoutParamDefaults,
   generateValuePrompt,
   recipeSaveTarget,
   serializeRecipe,
@@ -2525,11 +2526,11 @@ async function handoffGet({ runId, chatId } = {}) {
 // ({source:'boundary'}) — the raw material assembleComposedDraft turns into a
 // draft when the user saves the run. Values NEVER land here: fill actions'
 // `value` is dropped unconditionally (defense-in-depth with the #243
-// redaction round), only targeting cues ride along.
-function handoffObsRecords(request, res) {
-  const actions = request.actions || [];
+// redaction round), only targeting cues ride along. `actions` must be the
+// SAME isContextAction-filtered list the executor saw — res.results is
+// index-aligned with it (F2, review round 1).
+function handoffObsRecords(actions, res, pageUrl) {
   const results = (res && res.results) || [];
-  const pageUrl = request.url || '';
   const records = [];
   const cuesFromAction = (a) => [
     ...(a.selector ? [{ strategy: 'selector', value: String(a.selector) }] : []),
@@ -2583,7 +2584,7 @@ async function handoffAfterExecute(runId, request, res) {
 
     // Compose sink (C1 #289): remember what this turn executed/parked before
     // anything else — records persist even when the run ends on this turn.
-    const obs = handoffObsRecords(request, res);
+    const obs = handoffObsRecords(actions, res, request.url);
     if (obs.length) run = handoffRecordObs(run, obs);
 
     // Tally the completed turn; navigations from successful navigate actions.
@@ -2881,6 +2882,9 @@ async function recipePromoteComposed(run) {
   const lib = await recipeLibrary.load();
   const entry = lib[run.name];
   if (!entry) return 'rehearsal finished — the recipe is no longer in the library, nothing to promote';
+  // Promote the artifact that actually rehearsed — a mid-run replacement
+  // under the same name never earned verified.
+  if (entry.id !== run.recipeId) return 'rehearsal finished — the library entry was replaced mid-run, nothing to promote';
   entry.verified = true;
   entry.draft = false;
   entry.version = bumpVersion(entry.version, 'patch') || entry.version;
@@ -3204,7 +3208,9 @@ async function recipeComposeSave({ runId, name } = {}) {
         const data = await resp.json().catch(() => ({}));
         const parsed = parseGeneratedRecipe(String(data?.output ?? ''));
         if (parsed.ok) {
-          const merged = { ...recipe, params: parsed.recipe.params, steps: parsed.recipe.steps, updatedAt: Date.now() };
+          // Adopt-time backstop: a cleanup reply can never inject a param
+          // default — composed values are human-supplied on every run.
+          const merged = { ...recipe, params: withoutParamDefaults(parsed.recipe.params), steps: parsed.recipe.steps, updatedAt: Date.now() };
           const verdict = validateRecipe(merged);
           if (verdict.ok) {
             recipe = merged;
@@ -3577,7 +3583,9 @@ async function recipeRecordStop() {
         const data = await resp.json().catch(() => ({}));
         const parsed = parseGeneratedRecipe(String(data?.output ?? ''));
         if (parsed.ok) {
-          const merged = { ...recipe, params: parsed.recipe.params, steps: parsed.recipe.steps, updatedAt: Date.now() };
+          // Adopt-time backstop: the reply can never inject a param default —
+          // recorded values stay local and human-sourced.
+          const merged = { ...recipe, params: withoutParamDefaults(parsed.recipe.params), steps: parsed.recipe.steps, updatedAt: Date.now() };
           const verdict = validateRecipe(merged);
           if (verdict.ok) {
             recipe = merged;

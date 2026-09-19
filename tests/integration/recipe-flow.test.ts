@@ -1086,3 +1086,93 @@ describe("C1: save a handoff run as a composed draft, rehearse it, promote it", 
     askResponder = null;
   });
 });
+
+describe("C1 review round 1 findings", () => {
+  function seedDoneRun2(obs: any[]) {
+    const runId = `run-c1-${Math.random().toString(36).slice(2, 8)}`;
+    const runs = (bus.storage.session._store.cobrowse_handoff_runs ??= {});
+    runs[runId] = {
+      runId, chatId: "chat-c1", goal: "File the RTI application", boundaryMode: "no-submit",
+      budget: { maxTurns: 12, maxNavigations: 25, maxMinutes: 20 },
+      usage: { turns: 2, navigations: 2, startedAt: T0 }, status: "done",
+      pagesVisited: [], parkLog: [], obs, createdAt: T0, updatedAt: T0,
+    };
+    return runId;
+  }
+  const OBS2 = [
+    { source: "zo", op: "navigate", url: "https://fixture.example/form", ts: T0 },
+    { source: "zo", op: "fill", url: "https://fixture.example/form", cues: [{ strategy: "question", value: "Applicant name" }], ts: T0 },
+    { source: "zo", op: "click", url: "https://fixture.example/form", cues: [{ strategy: "text", value: "Save draft" }], ts: T0 },
+  ];
+
+  it("F1: a cleanup reply that smuggles param defaults has them stripped on adopt", async () => {
+    const runId = seedDoneRun2(OBS2);
+    askResponder = () => jsonResponse({ output: JSON.stringify({
+      params: [{ name: "applicant", type: "string", required: true, question: "Who is filing?", default: "MODEL-INVENTED" }],
+      steps: [
+        { type: "navigate", url: "https://fixture.example/form", expectUrl: "/form" },
+        { type: "fill", cues: [{ strategy: "question", value: "Applicant name" }], value: "{{applicant}}" },
+        { type: "done", message: "ok" },
+      ],
+    }) });
+    const save = await bus.runtime.sendMessage({ type: "RECIPE_COMPOSE_SAVE", runId, name: "F1 Composed" });
+    expect(save.ok).toBe(true);
+    expect(save.llmCleaned).toBe(true);
+    const entry = bus.storage.local._store.cobrowse_recipes["F1 Composed"];
+    const param = entry.params.find((p: any) => p.name === "applicant");
+    expect(param).not.toHaveProperty("default");
+    expect(JSON.stringify(entry)).not.toContain("MODEL-INVENTED");
+    askResponder = null;
+  });
+
+  it("F3: a library entry replaced mid-rehearsal is NOT promoted by the run's done", async () => {
+    const runId = seedDoneRun2([
+      { source: "boundary", op: "click", url: "https://fixture.example/form", reason: "no-submit handoff: click targets a terminal action", cues: [{ strategy: "text", value: "Place order" }], ts: T0 },
+      { source: "zo", op: "navigate", url: "https://fixture.example/form?x=1", ts: T0 },
+      { source: "zo", op: "fill", url: "https://fixture.example/form", cues: [{ strategy: "question", value: "Applicant name" }], ts: T0 },
+    ]);
+    const save = await bus.runtime.sendMessage({ type: "RECIPE_COMPOSE_SAVE", runId, name: "F3 Composed" });
+    expect(save.ok).toBe(true);
+
+    const start1 = await bus.runtime.sendMessage({ type: "RECIPE_START", chatId: "chat-c1", tabId: 1, source: { localName: "F3 Composed" } });
+    expect(start1.needsParams).toBe(true);
+    const start2 = await bus.runtime.sendMessage({
+      type: "RECIPE_START", chatId: "chat-c1", tabId: 1,
+      source: { localName: "F3 Composed" }, paramValues: { applicant_name: "Ada" },
+    });
+    expect(start2.ok).toBe(true);
+    // The rehearsal parks at step 0 — the boundary-park checkpoint.
+    await waitUntil(() => bus.storage.session._store.cobrowse_recipe_runs[start2.run.runId]?.status === "waiting_human", 8000);
+
+    // While the rehearsal sits at its checkpoint, the entry is replaced under
+    // the same name by a DIFFERENT artifact (import/re-save pattern).
+    const lib = bus.storage.local._store.cobrowse_recipes;
+    lib["F3 Composed"] = { ...lib["F3 Composed"], id: "rcp-replaced-999", verified: false, draft: true, version: "1.0.0" };
+
+    // Drive the rehearsal to done — the run carries the ORIGINAL recipe.
+    await bus.tabs.update(1, { url: "https://fixture.example/form" });
+    const resumed = await bus.runtime.sendMessage({ type: "RECIPE_RESUME", runId: start2.run.runId });
+    expect(resumed.ok).toBe(true);
+    await waitUntil(() => bus.storage.session._store.cobrowse_recipe_runs[start2.run.runId]?.status === "done", 15000);
+    const doneRun = bus.storage.session._store.cobrowse_recipe_runs[start2.run.runId];
+    expect(doneRun.stopReason).toContain("nothing to promote");
+    // The REPLACED entry was never rehearsed — it stays unverified.
+    expect(lib["F3 Composed"].id).toBe("rcp-replaced-999");
+    expect(lib["F3 Composed"].verified).toBe(false);
+    expect(lib["F3 Composed"].draft).toBe(true);
+  });
+
+  it("an aborted rehearsal leaves the entry a draft (verify-or-abort leaves no false verified)", async () => {
+    const runId = seedDoneRun2(OBS2);
+    await bus.runtime.sendMessage({ type: "RECIPE_COMPOSE_SAVE", runId, name: "Abort Composed" });
+    const start = await bus.runtime.sendMessage({
+      type: "RECIPE_START", chatId: "chat-c1", tabId: 1,
+      source: { localName: "Abort Composed" }, paramValues: { applicant_name: "Ada" },
+    });
+    expect(start.ok).toBe(true);
+    await bus.runtime.sendMessage({ type: "RECIPE_STOP", runId: start.run.runId, reason: "cannot finish now" });
+    const entry = bus.storage.local._store.cobrowse_recipes["Abort Composed"];
+    expect(entry.verified).toBe(false);
+    expect(entry.draft).toBe(true);
+  });
+});

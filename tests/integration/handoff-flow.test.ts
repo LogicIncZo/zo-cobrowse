@@ -370,3 +370,33 @@ describe("compose sink (C1 #289)", () => {
     expect(obs.filter((o: any) => o.source === "boundary").map((o: any) => o.op)).toEqual(["click"]);
   });
 });
+
+describe("compose sink — alignment (review F2)", () => {
+  it("context/pull actions mixed into the batch do not shift obs records off their actions", async () => {
+    // Seeded 'running' run — handoffAfterExecute processes the batch without
+    // a live stream (no turn context → the continuation chain no-ops).
+    const runId = `run-f2-${Math.random().toString(36).slice(2, 8)}`;
+    const runs = (bus.storage.session._store.cobrowse_handoff_runs ??= {});
+    runs[runId] = {
+      runId, chatId: "chat-f2", goal: "Fill the demo form", boundaryMode: "no-submit",
+      budget: { maxTurns: 12, maxNavigations: 25, maxMinutes: 20 },
+      usage: { turns: 0, navigations: 0, startedAt: Date.now() }, status: "running",
+      pagesVisited: [], parkLog: [], obs: [], createdAt: Date.now(), updatedAt: Date.now(),
+    };
+    await bus.runtime.sendMessage({
+      type: "EXECUTE_ACTIONS", tabId: 1, handoffRunId: runId, boundaryMode: "no-submit",
+      actions: [
+        // Degenerate mixed reply: a context action rides BEFORE the DOM fill —
+        // the executor never sees it, so results align with the FILTERED list.
+        { type: "read_page" },
+        { type: "fill", selector: "#qty", value: "ZO-INVENTED-77" },
+      ],
+    });
+    await flush();
+    const st = await bus.runtime.sendMessage({ type: "HANDOFF_STATUS", runId });
+    const fill = (st.run.obs || []).find((o: any) => o.op === "fill");
+    // The fill record carries the FILL's cues — not shifted onto a neighbor.
+    expect(fill?.cues).toContainEqual({ strategy: "selector", value: "#qty" });
+    expect(JSON.stringify(st.run.obs)).not.toContain("ZO-INVENTED-77");
+  });
+});
