@@ -39,8 +39,12 @@ import {
   park as handoffPark,
   withinBudget as handoffWithinBudget,
   checkBoundary as handoffCheckBoundary,
+  isSubmitish as handoffIsSubmitish,
+  isFillish as handoffIsFillish,
+  recordObs as handoffRecordObs,
+  addComposePark,
+  resolveComposePark,
   buildContinuationTurn,
-  handoffInstructions,
   continuationPayload as handoffContinuationPayload,
   DEFAULT_BUDGET,
 } from './lib/handoff.js';
@@ -92,8 +96,12 @@ import {
   healPrompt,
   parseRecipeHealResponse,
   assembleDraftRecipe,
+  assembleComposedDraft,
   generateRecipePrompt,
+  composeCleanupPrompt,
   parseGeneratedRecipe,
+  withoutParamDefaults,
+  literalFillValueCount,
   generateValuePrompt,
   recipeSaveTarget,
   serializeRecipe,
@@ -481,6 +489,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       handoffGet({ runId: request.runId }).then(async (run) => {
         if (!run) return sendResponse({ ok: false, error: 'no such handoff run' });
         handoffTurnCtx.delete(request.runId);
+        // C2: stopping a compose run by any path (✕ on the line, tab close)
+        // disarms the compose session — the human-obs producer goes with it.
+        if (run.compose) {
+          await composeStore.clear();
+          composeBroadcastRecordState(false).catch(() => {});
+        }
         // A run that already left the loop (done/aborted) has nothing to stop.
         // Saving it again would re-fire handoffMaybeNotify + re-push
         // HANDOFF_UPDATE, showing the user a second "Handoff done" line for a
@@ -588,6 +602,31 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       recipeSave(request).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
       return true;
     }
+    case 'RECIPE_COMPOSE_SAVE': {
+      // 0.3.2 C1 (#289): {runId, name} → {ok, name, version, steps, params} |
+      // {ok:false, error, errors?} — assemble a completed handoff run's
+      // observation log into a validated composed draft in the local library.
+      recipeComposeSave(request).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
+      return true;
+    }
+    case 'RECIPE_COMPOSE_START': {
+      // 0.3.2 C2 (#290): {chatId, tabId, goal, name?} → {ok, run} — a compose
+      // session: handoff run with the compose boundary + recorder armed; Zo
+      // drives, parks at values/ambiguity, never fills or submits.
+      recipeComposeStart(request).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
+      return true;
+    }
+    case 'RECIPE_COMPOSE_RESUME': {
+      // {runId?, parkId, text?} → {ok, run, continuationQuery} — the human
+      // resolved a park; the panel re-issues the continuation as ASK_ZO.
+      recipeComposeResume(request).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
+      return true;
+    }
+    case 'RECIPE_COMPOSE_STOP': {
+      // {runId?} → {ok, run} — abort the compose session + disarm recording.
+      recipeComposeStop(request).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
+      return true;
+    }
     case 'RECIPE_LIST': {
       // `!recipe list` — the local learned-recipes library + any live run.
       recipeList().then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
@@ -604,8 +643,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
     }
     case 'RECIPE_OBS': {
-      // One observation record from the content recorder.
-      recipeRecordObserve(request.obs).then(sendResponse).catch(() => sendResponse({ ok: false }));
+      // One observation record: the recorder's store (if recording), AND the
+      // live compose run's obs (C2 second producer, source:'human').
+      Promise.all([recipeRecordObserve(request.obs), composeObserve(request.obs)])
+        .then(() => sendResponse({ ok: true }))
+        .catch(() => sendResponse({ ok: false }));
       return true;
     }
     case 'RECIPE_RECORD_STOP': {
@@ -2509,12 +2551,71 @@ async function handoffGet({ runId, chatId } = {}) {
   }).catch(() => { /* storage unavailable — nothing to sweep */ });
 })();
 
+// C1 (#289): the compose sink. One value-stripped observation record per
+// executed action ({source:'zo'}) plus one per boundary park
+// ({source:'boundary'}) — the raw material assembleComposedDraft turns into a
+// draft when the user saves the run. Values NEVER land here: fill actions'
+// `value` is dropped unconditionally (defense-in-depth with the #243
+// redaction round), only targeting cues ride along. `actions` must be the
+// SAME isContextAction-filtered list the executor saw — res.results is
+// index-aligned with it (F2, review round 1).
+function handoffObsRecords(actions, res, pageUrl) {
+  const results = (res && res.results) || [];
+  const records = [];
+  const cuesFromAction = (a) => [
+    ...(a.selector ? [{ strategy: 'selector', value: String(a.selector) }] : []),
+    ...(a.text ? [{ strategy: 'text', value: String(a.text) }] : []),
+  ];
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    const a = actions[i] || {};
+    if (!r || !r.type || r.type === 'done') continue;
+    if (r.handoffParked) {
+      records.push({
+        source: 'boundary',
+        op: r.type,
+        url: pageUrl,
+        cues: cuesFromAction(a),
+        reason: safeText(r.error || 'refused by the run boundary'),
+        ts: Date.now(),
+      });
+      continue;
+    }
+    if (!r.ok) continue; // failed attempts aren't steps — the retry (if any) records the working cue
+    if (r.type === 'navigate') {
+      records.push({ source: 'zo', op: 'navigate', url: String(a.url || pageUrl), ts: Date.now() });
+      continue;
+    }
+    if (['click', 'fill', 'check', 'extract'].includes(r.type)) {
+      records.push({
+        source: 'zo',
+        op: r.type,
+        url: pageUrl,
+        cues: cuesFromAction(a),
+        ...(r.type === 'click' && handoffIsSubmitish(a) ? { submitish: true } : {}),
+        ...(r.type === 'check' && a.checked !== undefined ? { checked: !!a.checked } : {}),
+        ...(r.type === 'extract' ? { evidenceKey: safeText(a.evidenceKey || a.text || '') } : {}),
+        ts: Date.now(),
+      });
+    }
+    // scroll/wait/read_* results are traversal noise — not steps, dropped.
+  }
+  return records;
+}
+
 async function handoffAfterExecute(runId, request, res) {
   try {
     let run = await handoffGet({ runId });
     if (!run || run.status !== 'running') return;
-    const actions = request.actions || [];
+    // Same filter the executor saw — res.results is index-aligned with the
+    // DOM actions only (context/pull actions never reach it).
+    const actions = (request.actions || []).filter((a) => a && !isContextAction(a));
     const results = (res && res.results) || [];
+
+    // Compose sink (C1 #289): remember what this turn executed/parked before
+    // anything else — records persist even when the run ends on this turn.
+    const obs = handoffObsRecords(actions, res, request.url);
+    if (obs.length) run = handoffRecordObs(run, obs);
 
     // Tally the completed turn; navigations from successful navigate actions.
     const navOk = results.filter((r) => r && r.type === 'navigate' && r.ok).length;
@@ -2530,12 +2631,58 @@ async function handoffAfterExecute(runId, request, res) {
       if (r && r.handoffParked) run = handoffPark(run, r.action || { type: r.type }, r.error, request.url);
     }
 
+    // C2 (#290): compose turns never chain past a park — the human acts on
+    // the page and resolves it. Two park sources: the boundary REFUSING a
+    // fillish/submitish action (kind: value/checkpoint), and Zo explicitly
+    // asking via done(response:"PARK: …") (kind: value/choice).
+    if (run.compose) {
+      const refused = results.filter((r) => r && r.handoffParked);
+      for (const r of refused) {
+        const a = r.action || {};
+        const fillish = handoffIsFillish(a);
+        run = addComposePark(run, {
+          kind: fillish ? 'value' : 'checkpoint',
+          question: fillish
+            ? `Fill the form${a.text ? ` (${safeText(a.text).slice(0, 60)})` : ''} on the page`
+            : `Review and click ${safeText(a.text || a.selector || 'the control').slice(0, 60)} yourself`,
+          action: {
+            type: a.type,
+            ...(a.selector ? { selector: safeText(a.selector).slice(0, 120) } : {}),
+            ...(a.text ? { text: safeText(a.text).slice(0, 60) } : {}),
+          },
+          url: request.url,
+        });
+      }
+      const doneAct = results.find((r) => r && r.type === 'done') || actions.find((a) => a && a.type === 'done');
+      const doneResp = safeText(doneAct?.response || '');
+      if (!refused.length && doneResp.startsWith('PARK:')) {
+        const parts = doneResp.slice(5).split('|').map((s) => s.trim()).filter(Boolean);
+        run = addComposePark(run, {
+          kind: parts.length > 1 ? 'choice' : 'value',
+          question: parts[0] || 'Your turn',
+          ...(parts.length > 1 ? { options: parts.slice(1) } : {}),
+          url: request.url,
+        });
+      }
+      if ((run.parks || []).some((p) => !p.resolved)) {
+        const t = handoffTransition(run, 'block', { now: Date.now(), reason: 'compose parked — waiting for you' });
+        await handoffPut(t.ok ? t.run : run);
+        return; // no continuation: the human resolves the park first
+      }
+    }
+
     // done() ends the run — its response is the deliverable.
     const doneResult = results.find((r) => r && r.type === 'done') || actions.find((a) => a && a.type === 'done');
     if (doneResult) {
       const reason = safeText(doneResult.response || '').slice(0, 200) || 'goal reached';
       const t = handoffTransition(run, 'complete', { now: Date.now(), reason });
       handoffTurnCtx.delete(runId);
+      // C2: a compose session that completed naturally disarms — the human
+      // producer goes with the run (review F4).
+      if (t.ok && t.run.compose) {
+        await composeStore.clear();
+        composeBroadcastRecordState(false).catch(() => {});
+      }
       await handoffPut(t.ok ? t.run : run);
       return;
     }
@@ -2598,6 +2745,129 @@ async function handoffChainNextTurn(runId) {
       await handoffPut(t.ok ? t.run : r);
     }
   });
+}
+
+// ---- Compose sessions (0.3.2 C2, #290) -------------------------------------
+// `!recipe compose <goal>`: a handoff-engine run with the COMPOSE boundary —
+// Zo drives (navigate + non-submitish clicks; the boundary REFUSES fills and
+// submits in code), parks at values/ambiguity/checkpoints, and the human's
+// on-page actions stream into the same obs log via the recorder listeners
+// (source:'human' — the second producer). Completion rides C1: ↧ Save as
+// recipe → composed draft → mandatory rehearsal.
+
+const composeStore = {
+  key: 'cobrowse_recipe_compose',
+  async load() {
+    const o = await chrome.storage.session.get(this.key);
+    return (o && o[this.key]) || null;
+  },
+  async save(s) { await chrome.storage.session.set({ [this.key]: s }); },
+  async clear() { await chrome.storage.session.remove(this.key); },
+};
+
+// The recorder's re-arm broadcast, shared with compose — content scripts only
+// care THAT recording is armed, not which flavor started it.
+function composeBroadcastRecordState(armed) {
+  return recipeBroadcastRecordState(armed);
+}
+
+async function recipeComposeStart({ chatId, tabId, goal, name } = {}) {
+  const safeGoal = safeText(goal);
+  if (!safeGoal) return { ok: false, error: 'compose needs a goal — `!recipe compose <goal>`' };
+  // One armed session at a time (the recorder's rule, extended to compose).
+  const rec = await recipeRecStore.load();
+  if (rec && rec.armed) return { ok: false, error: `already recording "${rec.name}" — stop it first` };
+  const compose = await composeStore.load();
+  if (compose && compose.armed) {
+    const live = await handoffGet({ runId: compose.runId });
+    if (live && !['done', 'aborted'].includes(live.status)) {
+      return { ok: false, error: `a compose session is already live ("${safeText(live.compose?.name || live.goal)}") — stop it first` };
+    }
+  }
+  // One live run per chat (mirrors the library popup's one-run rule).
+  const liveRun = await handoffGet({ chatId });
+  if (liveRun) return { ok: false, error: 'this chat already has a live run — stop it before composing' };
+
+  const run = handoffCreateRunPure({
+    chatId,
+    goal: safeGoal,
+    boundaryMode: 'compose',
+    budget: config.cobrowse_handoff_budget || undefined,
+  });
+  run.compose = { name: safeText(name) || slugifyTitle(safeGoal, 48) || `composed-${new Date().toISOString().slice(0, 10)}` };
+  if (tabId) run.tabId = tabId;
+  await handoffPut(run);
+  await composeStore.save({ armed: true, runId: run.runId, startedAt: Date.now() });
+  composeBroadcastRecordState(true).catch(() => {});
+  return { ok: true, run };
+}
+
+async function recipeComposeStop({ runId, reason } = {}) {
+  const compose = await composeStore.load();
+  const targetId = safeText(runId) || (compose ? compose.runId : '');
+  const run = targetId ? await handoffGet({ runId: targetId }) : null;
+  if (!run) return { ok: false, error: 'no live compose session' };
+  await composeStore.clear();
+  composeBroadcastRecordState(false).catch(() => {});
+  if (['done', 'aborted'].includes(run.status)) return { ok: true, run };
+  const res = handoffTransition(run, 'abort', { now: Date.now(), reason: safeText(reason) || 'compose stopped' });
+  const saved = await handoffPut(res.ok ? res.run : run);
+  return { ok: true, run: saved };
+}
+
+// Resolve a park: the human filled the page / picked an option / did the step
+// by hand. Hands back the continuation turn — the PANEL re-issues it as an
+// ASK_ZO carrying handoffRunId (the #164 mechanism re-registers the loop).
+async function recipeComposeResume({ runId, parkId, text } = {}) {
+  const compose = await composeStore.load();
+  const targetId = safeText(runId) || (compose ? compose.runId : '');
+  const run = targetId ? await handoffGet({ runId: targetId }) : null;
+  if (!run || !run.compose) return { ok: false, error: 'no compose session for this run' };
+  if (!['blocked', 'paused'].includes(run.status)) {
+    return { ok: false, error: `run is ${run.status}, not waiting on you` };
+  }
+  let next = run;
+  if (parkId) {
+    const rec = (run.parks || []).find((p) => p.parkId === safeText(parkId) && !p.resolved);
+    if (!rec) return { ok: false, error: 'that park is already resolved (or unknown)' };
+    next = resolveComposePark(next, safeText(parkId), safeText(text) || 'done on the page');
+  }
+  const res = handoffTransition(next, 'resume', { now: Date.now(), reason: 'park resolved' });
+  if (!res.ok) return { ok: false, error: res.error };
+  const saved = await handoffPut(res.run);
+  const pending = (saved.parks || []).find((p) => !p.resolved);
+  const parkLine = pending
+    ? `[compose park] Another step still needs the human: ${safeText(pending.question)} — work around it or park again.`
+    : `[compose park resolved] The human ${safeText(text) ? `did: ${safeText(text).slice(0, 120)}` : 'completed the parked step on the page'}. Continue toward the goal.`;
+  return { ok: true, run: saved, continuationQuery: `${buildContinuationTurn(saved)}\n\n${parkLine}` };
+}
+
+// C2: during a compose session the recorder's human events stream into the
+// RUN's obs log (source:'human') — the second producer of the composed draft.
+// Values ride ONLY here, from the human's own keyboard; the recorder's #243
+// redaction already stripped sensitive ones upstream.
+const COMPOSE_OBS_OPS = ['navigate', 'click', 'fill', 'check', 'attach', 'extract'];
+async function composeObserve(obs) {
+  const session = await composeStore.load();
+  if (!session || !session.armed || !obs || typeof obs !== 'object' || !obs.op) return;
+  if (!COMPOSE_OBS_OPS.includes(obs.op)) return;
+  const run = await handoffGet({ runId: session.runId });
+  if (!run || !run.compose || ['done', 'aborted'].includes(run.status)) return;
+  // Whitelist the fields the recorder emits — nothing else reaches the obs
+  // log (the artifact's raw material) from a runtime message (review F7).
+  await handoffPut(handoffRecordObs(run, {
+    source: 'human',
+    op: String(obs.op),
+    ...(typeof obs.url === 'string' ? { url: obs.url.slice(0, 500) } : {}),
+    ...(Array.isArray(obs.cues) ? { cues: obs.cues } : {}),
+    ...(obs.op === 'fill' && typeof obs.value === 'string' ? { value: obs.value.slice(0, 2000) } : {}),
+    ...(typeof obs.checked === 'boolean' ? { checked: obs.checked } : {}),
+    ...(typeof obs.submitish === 'boolean' ? { submitish: obs.submitish } : {}),
+    ...(typeof obs.fieldSensitive === 'boolean' ? { fieldSensitive: obs.fieldSensitive } : {}),
+    ...(typeof obs.pageSensitive === 'boolean' ? { pageSensitive: obs.pageSensitive } : {}),
+    ...(obs.op === 'extract' || obs.op === 'attach' ? { evidenceKey: safeText(obs.evidenceKey || '') } : {}),
+    ts: Date.now(),
+  }));
 }
 
 // ---- Recipes: deterministic player (#220) ---------------------------------
@@ -2740,6 +3010,9 @@ async function recipeStart(request) {
   if (!sub.ok) return { ok: false, error: sub.errors.join('; ') };
 
   const now = Date.now();
+  // C1 (#289): a composed draft's first run is its rehearsal — checkpoints
+  // are unskippable and success promotes the library entry.
+  const composedRehearsal = recipe.composedBy === 'zo' && recipe.verified !== true;
   const run = {
     runId: `rec-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
     recipeId: recipe.id,
@@ -2753,6 +3026,7 @@ async function recipeStart(request) {
     params: values,
     evidence: [],
     healCount: 0,
+    ...(composedRehearsal ? { composedRehearsal: true } : {}),
     startedAt: now,
     createdAt: now,
     updatedAt: now,
@@ -2787,14 +3061,36 @@ async function recipeAdvance(runId) {
   run.updatedAt = Date.now();
   if (run.stepIndex >= run.stepsTotal) {
     // Ran off the end without a done step — still a completion, honestly noted.
+    const promoteNote = await recipePromoteComposed(run);
     run.status = 'done';
-    run.stopReason = 'recipe finished (no done step)';
+    run.stopReason = promoteNote ? `recipe finished (no done step) — ${promoteNote}` : 'recipe finished (no done step)';
     const saved = await recipePut(run);
     recipeMaybeNotify(saved);
     return;
   }
   await recipePut(run);
   recipePlayStep(runId).catch((e) => console.debug('recipePlayStep:', e));
+}
+
+// C1 (#289): a composed draft's rehearsal just finished — promote the library
+// entry (verified:true, draft:false, patch bump) so the next run skips the
+// rehearsal. Missing entry (deleted mid-run) promotes nothing. Returns the
+// honest note to append to the run's done line, or '' for non-rehearsals.
+async function recipePromoteComposed(run) {
+  if (!run.composedRehearsal) return '';
+  const lib = await recipeLibrary.load();
+  const entry = lib[run.name];
+  if (!entry) return 'rehearsal finished — the recipe is no longer in the library, nothing to promote';
+  // Promote the artifact that actually rehearsed — a mid-run replacement
+  // under the same name never earned verified.
+  if (entry.id !== run.recipeId) return 'rehearsal finished — the library entry was replaced mid-run, nothing to promote';
+  entry.verified = true;
+  entry.draft = false;
+  entry.version = bumpVersion(entry.version, 'patch') || entry.version;
+  entry.updatedAt = Date.now();
+  lib[run.name] = entry;
+  await recipeLibrary.save(lib);
+  return '✅ Rehearsal passed — recipe verified';
 }
 
 async function recipePlayStep(runId) {
@@ -2845,8 +3141,10 @@ async function recipePlayStep(runId) {
   }
 
   if (step.type === 'done') {
+    const promoteNote = await recipePromoteComposed(run);
     run.status = 'done';
-    run.stopReason = recipeInterpolateEvidence(step.message, run.evidence) || 'recipe complete';
+    const message = recipeInterpolateEvidence(step.message, run.evidence) || 'recipe complete';
+    run.stopReason = promoteNote ? `${message} — ${promoteNote}` : message;
     run.updatedAt = Date.now();
     const saved = await recipePut(run);
     recipeMaybeNotify(saved);
@@ -2972,6 +3270,11 @@ async function recipeResume(request = {}) {
   const step = run.recipe.steps[run.stepIndex];
 
   if (run.status === 'waiting_human' && step && step.type === 'human') {
+    // C1 (#289): a composed draft's rehearsal has NO manual fallback —
+    // "verify or abort" is what makes the promotion mean something.
+    if (force && run.composedRehearsal) {
+      return { ok: false, error: 'rehearsal checkpoints must be verified — complete the step, or abort the run; the draft stays unverified', run };
+    }
     if (step.timeoutMinutes && !force && Date.now() - run.updatedAt > step.timeoutMinutes * 60000) {
       return { ok: false, error: `checkpoint timed out (${step.timeoutMinutes} min) — resume with "skip check" to continue anyway`, run };
     }
@@ -3061,6 +3364,104 @@ async function recipeSave({ name, path, confirm } = {}) {
   return { ok: true, path: target.path, version: stamped.version };
 }
 
+// 0.3.2 C1 (#289): turn a COMPLETED handoff run's observation log into a
+// composed draft recipe. Same pipeline as the recorder's stop: deterministic
+// assembly → best-effort LLM cleanup (compose variant; output must pass
+// validateRecipe or the deterministic draft is kept) → validate → library put
+// with composed provenance. Values never reach the artifact: the sink stripped
+// them, and assembleComposedDraft births every Zo fill as a param WITHOUT a
+// default. Save is idempotent per name (library upsert).
+async function recipeComposeSave({ runId, name } = {}) {
+  const run = await handoffGet({ runId });
+  if (!run) return { ok: false, error: 'no such handoff run' };
+  if (run.status !== 'done') {
+    return { ok: false, error: `run is ${run.status} — only a completed run can be composed` };
+  }
+  const safeName = safeText(name) || `composed-${new Date().toISOString().slice(0, 10)}`;
+
+  // 1) Deterministic draft (retry collapse, nav dedup, boundary parks →
+  // human checkpoints, Zo fills → params without defaults).
+  const assembled = assembleComposedDraft(safeName, run.goal, run.obs);
+  if (!assembled.ok) return { ok: false, error: assembled.errors?.[0] || 'could not compose a draft from this run' };
+  let recipe = assembled.recipe;
+  let llmCleaned = false;
+  let note;
+
+  // 2) Best-effort LLM cleanup — the compose variant of the recorder's pass.
+  // A cleaned draft that fails validateRecipe is discarded for the
+  // deterministic one, never tolerated.
+  if (config.zoAccessToken) {
+    try {
+      const resp = await fetch(config.zoApiUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${config.zoAccessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          input: composeCleanupPrompt(recipe),
+          model_name: config.zoModel || undefined,
+        }),
+      });
+      if (resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        const parsed = parseGeneratedRecipe(String(data?.output ?? ''));
+        if (parsed.ok && literalFillValueCount(parsed.recipe.steps) > 0) {
+          note = 'LLM draft rejected (literal fill value) — kept the deterministic draft';
+        } else if (parsed.ok) {
+          // Adopt-time backstop: a cleanup reply can never inject a param
+          // default — composed values are human-supplied on every run.
+          const merged = { ...recipe, params: withoutParamDefaults(parsed.recipe.params), steps: parsed.recipe.steps, updatedAt: Date.now() };
+          const verdict = validateRecipe(merged);
+          if (verdict.ok) {
+            recipe = merged;
+            llmCleaned = true;
+            note = parsed.note;
+          } else {
+            note = `LLM draft rejected (${verdict.errors[0]}) — kept the deterministic draft`;
+          }
+        } else {
+          note = `LLM cleanup unusable (${parsed.error}) — kept the deterministic draft`;
+        }
+      } else {
+        note = `LLM cleanup HTTP ${resp.status} — kept the deterministic draft`;
+      }
+    } catch (e) {
+      note = `LLM cleanup failed (${e?.message || e}) — kept the deterministic draft`;
+    }
+  }
+
+  // 3) The gate, whichever draft survived.
+  const finalVerdict = validateRecipe(recipe);
+  if (!finalVerdict.ok) {
+    return { ok: false, error: `composed draft failed validation: ${finalVerdict.errors[0]}`, errors: finalVerdict.errors };
+  }
+
+  // 4) Library put with composed provenance — the first replay is the
+  // rehearsal that verifies it.
+  const lib = await recipeLibrary.load();
+  const stamped = {
+    ...recipe,
+    draft: true,
+    composedBy: 'zo',
+    verified: false,
+    goal: safeText(run.goal),
+    updatedAt: Date.now(),
+  };
+  lib[safeName] = stamped;
+  await recipeLibrary.save(lib);
+  return {
+    ok: true,
+    name: safeName,
+    version: stamped.version,
+    steps: stamped.steps.length,
+    params: stamped.params.length,
+    llmCleaned,
+    note,
+    warnings: finalVerdict.warnings,
+  };
+}
+
 // R2 (#256): the heal write-back. The origin file stays the parameterized
 // artifact — only the healed steps' cues are patched in (patchHealedCues
 // refuses structurally diverged files), then the same validate → write →
@@ -3126,6 +3527,11 @@ async function recipeList() {
       version: (r && typeof r.version === 'string') ? r.version : '?',
       steps: Array.isArray(r?.steps) ? r.steps.length : 0,
       draft: !!(r && r.draft),
+      // C1 (#289): composed provenance — the popup badges 🤖 drafts and
+      // their unverified state.
+      composedBy: r?.composedBy === 'zo' ? 'zo' : undefined,
+      verified: r?.verified === true,
+      goal: typeof r?.goal === 'string' ? r.goal : undefined,
       origin: r?.origin,
       source: r?.origin && String(r.origin).startsWith('/home/workspace') ? 'workspace' : 'local',
       updatedAt: (r && (r.updatedAt || r.createdAt)) || null,
@@ -3307,6 +3713,15 @@ async function recipeRecordStart({ chatId, name } = {}) {
   if (existing && existing.armed) {
     return { ok: false, error: `already recording "${existing.name}" — stop it first (✕ on the recording line)` };
   }
+  // One armed session at a time (C2 #290): a live compose session owns the
+  // recorder listeners.
+  const compose = await composeStore.load();
+  if (compose && compose.armed) {
+    const live = await handoffGet({ runId: compose.runId });
+    if (live && !['done', 'aborted'].includes(live.status)) {
+      return { ok: false, error: `a compose session is live ("${safeText(live.compose?.name || live.goal)}") — stop it first` };
+    }
+  }
   const session = {
     armed: true,
     name: safeText(name) || `recorded-${new Date().toISOString().slice(0, 10)}`,
@@ -3331,7 +3746,9 @@ async function recipeBroadcastRecordState(armed) {
 
 async function recipeRecordPeek() {
   const s = await recipeRecStore.load();
-  return { ok: true, armed: !!(s && s.armed), name: s ? s.name : undefined };
+  const c = await composeStore.load();
+  const armed = !!(s && s.armed) || !!(c && c.armed);
+  return { ok: true, armed, name: s && s.armed ? s.name : (c && c.armed ? 'compose' : undefined) };
 }
 
 async function recipeRecordObserve(obs) {
@@ -3377,8 +3794,12 @@ async function recipeRecordStop() {
       if (resp.ok) {
         const data = await resp.json().catch(() => ({}));
         const parsed = parseGeneratedRecipe(String(data?.output ?? ''));
-        if (parsed.ok) {
-          const merged = { ...recipe, params: parsed.recipe.params, steps: parsed.recipe.steps, updatedAt: Date.now() };
+        if (parsed.ok && literalFillValueCount(parsed.recipe.steps) > 0) {
+          note = 'LLM draft rejected (literal fill value) — kept the deterministic draft';
+        } else if (parsed.ok) {
+          // Adopt-time backstop: the reply can never inject a param default —
+          // recorded values stay local and human-sourced.
+          const merged = { ...recipe, params: withoutParamDefaults(parsed.recipe.params), steps: parsed.recipe.steps, updatedAt: Date.now() };
           const verdict = validateRecipe(merged);
           if (verdict.ok) {
             recipe = merged;
@@ -3659,10 +4080,12 @@ async function executeActions(actions, tabId, opts = {}) {
       }
     }
 
-    // Handoff boundary (Lane E): readonly/no-submit runs PARK interactive
-    // actions instead of executing them — the user performs them later from
-    // the review card. Push + continue: parking must not stop sibling actions.
-    if (opts.boundaryMode && (action.type === 'click' || action.type === 'fill')) {
+    // Handoff boundary (Lane E): readonly/no-submit/compose runs PARK
+    // interactive actions instead of executing them — the user performs them
+    // later from the review card. Push + continue: parking must not stop
+    // sibling actions. isFillish covers fill_form too (review F1: the
+    // canonical batch-fill shape must not bypass the compose/no-submit gate).
+    if (opts.boundaryMode && (action.type === 'click' || handoffIsFillish(action))) {
       const verdict = handoffCheckBoundary(action, opts.boundaryMode);
       if (!verdict.allowed) {
         results.push({ ok: false, type: action.type, blocked: true, handoffParked: true, action, error: verdict.reason });

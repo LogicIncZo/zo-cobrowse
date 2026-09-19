@@ -20,8 +20,8 @@ import { zoChatUrl, truncateId } from './lib/zo-links.js';
 import { WORKSPACE_ROOT, filterPickerEntries } from './lib/pickers.js';
 import { applyI18nDom } from './lib/i18n.js';
 import { handoffInstructions, runProgress } from './lib/handoff.js';
-import { recipeProgress } from './lib/recipes.js';
-import { conversationToMarkdown, exportFileName, pageContextToMarkdown, pageExportFileName } from './lib/export.js';
+import { recipeProgress, composeInstructions } from './lib/recipes.js';
+import { conversationToMarkdown, exportFileName, pageContextToMarkdown, pageExportFileName, slugifyTitle } from './lib/export.js';
 import {
   openChatTab,
   closeChatTab,
@@ -332,7 +332,33 @@ async function finishInit() {
           // raw markdown (#138). Other statuses carry a real reason worth showing.
           const reason = run.status !== 'done' && run.stopReason ? ` — ${safeText(run.stopReason)}` : '';
           const line = addMessage('system', `${icon} Handoff ${run.status}${reason}`);
-          if (run.status === 'paused' || run.status === 'blocked') {
+          if (run.compose) {
+            // C2: a compose run's blocked state IS the park — render the park
+            // cards (value/choice/checkpoint). Paused or park-less blocked
+            // runs (budget, stream error, SW restart) get the plain resume
+            // (review F5) — RECIPE_COMPOSE_RESUME without a parkId continues.
+            if (run.status === 'blocked' && (run.parks || []).some((p) => !p.resolved)) renderComposeParkCards(run);
+            if (run.status === 'paused' || run.status === 'blocked') {
+              const body = line.querySelector('.msg-body') || line;
+              const resume = document.createElement('button');
+              resume.type = 'button';
+              resume.textContent = '▶ Resume composing';
+              resume.className = 'btn btn-ghost btn-sm';
+              resume.addEventListener('click', () => resolveComposePark(run.runId, undefined));
+              body.appendChild(document.createElement('br'));
+              body.appendChild(resume);
+              const stop = document.createElement('button');
+              stop.type = 'button';
+              stop.textContent = '🛑 Stop composing';
+              stop.className = 'btn btn-ghost btn-sm';
+              stop.addEventListener('click', async () => {
+                stop.disabled = true;
+                await chrome.runtime.sendMessage({ type: 'RECIPE_COMPOSE_STOP', runId: run.runId, reason: 'stopped by user' }).catch(() => {});
+              });
+              body.appendChild(document.createElement('br'));
+              body.appendChild(stop);
+            }
+          } else if (run.status === 'paused' || run.status === 'blocked') {
             // #164: paused runs are resumable — offer the control inline.
             const body = line.querySelector('.msg-body') || line;
             const btn = document.createElement('button');
@@ -343,6 +369,9 @@ async function finishInit() {
             body.appendChild(document.createElement('br'));
             body.appendChild(btn);
           }
+          // C1 (#289): a completed run's work shouldn't evaporate — offer to
+          // save the executed flow as a composed draft recipe.
+          if (run.status === 'done') renderComposeSaveOffer(run);
         }
       }
       // Recipes (#220): run-state pushes from the deterministic player.
@@ -1394,6 +1423,76 @@ async function resumeHandoffRun(runId) {
   if (activeId !== run.chatId) await switchToConversation(run.chatId);
   input.value = safeText(res.continuationQuery) || `Resume the handoff run: ${safeText(run.goal)}`;
   await sendQuery();
+}
+
+// C2 (#290): resolve a compose park and continue the loop — same continuation
+// mechanics as resumeHandoffRun, riding RECIPE_COMPOSE_RESUME.
+async function resolveComposePark(runId, parkId, text) {
+  let res;
+  try {
+    res = await chrome.runtime.sendMessage({ type: 'RECIPE_COMPOSE_RESUME', runId, parkId, ...(text ? { text } : {}) });
+  } catch (e) {
+    addMessage('error', `Compose resume failed: ${safeText(e)}`);
+    return;
+  }
+  if (!res || !res.ok) {
+    addMessage('error', `Compose resume failed: ${safeText(res?.error || 'no response')}`);
+    return;
+  }
+  const run = res.run;
+  activeHandoffRun = run;
+  removeHandoffLine();
+  renderChatTabs();
+  if (activeId !== run.chatId) await switchToConversation(run.chatId);
+  document.querySelectorAll('.recipe-compose-park').forEach((el) => el.remove());
+  input.value = safeText(res.continuationQuery) || `Resume the compose session: ${safeText(run.goal)}`;
+  await sendQuery();
+}
+
+/** C2 (#290): the compose park cards — what the human must do on the page.
+ * value: fill it by hand; choice: pick an option; checkpoint: do the submit
+ * yourself. Each resolves the park and continues the session. */
+function renderComposeParkCards(run) {
+  document.querySelectorAll('.recipe-compose-park').forEach((el) => el.remove());
+  const pending = (run.parks || []).filter((p) => !p.resolved);
+  for (const parkRec of pending) {
+    const host = document.createElement('div');
+    host.className = 'msg form-review-card recipe-checkpoint-card recipe-compose-park';
+    const title = document.createElement('div');
+    title.className = 'form-review-title';
+    title.textContent = { value: '🖐 Your turn — fill it on the page', choice: '🖐 Your call', checkpoint: '🖐 Your turn — the submit stays yours' }[parkRec.kind] || '🖐 Compose parked';
+    host.appendChild(title);
+    const body = document.createElement('div');
+    body.className = 'recipe-checkpoint-instructions';
+    body.textContent = safeText(parkRec.question) || 'Complete this step on the page, then continue.';
+    host.appendChild(body);
+    const bar = document.createElement('div');
+    bar.className = 'form-review-actions';
+    if (parkRec.kind === 'choice' && (parkRec.options || []).length) {
+      for (const opt of parkRec.options) {
+        const b = document.createElement('button');
+        b.className = 'btn btn-primary form-review-confirm';
+        b.textContent = safeText(opt).slice(0, 40);
+        b.addEventListener('click', () => resolveComposePark(run.runId, parkRec.parkId, opt));
+        bar.appendChild(b);
+      }
+      const skip = document.createElement('button');
+      skip.className = 'btn btn-ghost form-review-cancel';
+      skip.textContent = 'None of these — continue';
+      skip.title = 'Zo mis-parked; continue without choosing';
+      skip.addEventListener('click', () => resolveComposePark(run.runId, parkRec.parkId, 'skipped the choice'));
+      bar.appendChild(skip);
+    } else {
+      const done = document.createElement('button');
+      done.className = 'btn btn-primary form-review-confirm';
+      done.textContent = 'Done — continue';
+      done.addEventListener('click', () => resolveComposePark(run.runId, parkRec.parkId));
+      bar.appendChild(done);
+    }
+    host.appendChild(bar);
+    msgsEl?.appendChild(host);
+    host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
 }
 
 function listConversationSummaries() {
@@ -5019,10 +5118,57 @@ function renderRecipeSaveOffer(name) {
   host.appendChild(bar);
 }
 
+/** C1 (#289): the done run's "↧ Save as recipe" offer — assemble the run's
+ * executed flow into a composed draft (composedBy:'zo', unverified) whose
+ * first replay is the rehearsal. Name prefilled from the goal slug; failures
+ * render the validator's reasons honestly. */
+function renderComposeSaveOffer(run) {
+  const host = recipeActionCard(
+    '🧠 Save this run as a recipe?',
+    'Zo executed this flow under the boundary rules. Save the steps as a draft recipe — the first run rehearses it, and passing the rehearsal marks it verified.',
+  );
+  const input = document.createElement('input');
+  input.className = 'recipe-compose-name';
+  input.placeholder = 'Recipe name';
+  input.value = slugifyTitle(safeText(run.goal), 48) || `composed-${new Date().toISOString().slice(0, 10)}`;
+  input.setAttribute('aria-label', 'Name for the composed recipe');
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); save.click(); }
+    e.stopPropagation(); // the composer's Enter-to-send must not fire
+  });
+  host.appendChild(input);
+  const save = document.createElement('button');
+  save.className = 'btn btn-primary form-review-confirm';
+  save.textContent = '↧ Save as recipe';
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    const resp = await chrome.runtime.sendMessage({
+      type: 'RECIPE_COMPOSE_SAVE', runId: run.runId, name: input.value.trim(),
+    }).catch(() => null);
+    if (resp?.ok) {
+      host.remove();
+      const cleaned = resp.llmCleaned ? ` Cleaned by Zo${resp.note ? `: ${safeText(resp.note)}` : ''}.` : '';
+      addMessage('system', `🧠 Composed draft "**${safeText(resp.name)}**" v${safeText(resp.version)} — ${resp.steps} steps, ${resp.params} params.${cleaned}\n\nRehearse with \`!recipe run ${safeText(resp.name)}\` — the first run verifies it.`);
+    } else {
+      save.disabled = false;
+      addMessage('error', resp?.errors?.length
+        ? `Could not compose the recipe: ${resp.errors.map(safeText).join(' ')}`
+        : (resp?.error || 'Could not compose the recipe from this run.'));
+    }
+  });
+  const dismiss = document.createElement('button');
+  dismiss.className = 'btn btn-ghost form-review-cancel';
+  dismiss.textContent = 'Not now';
+  dismiss.addEventListener('click', () => host.remove());
+  const bar = document.createElement('div');
+  bar.className = 'form-review-actions';
+  bar.append(save, dismiss);
+  host.appendChild(bar);
+}
+
 /** R2 (#256): overwrite confirm card — probe-then-confirm, never a silent
  * clobber. "Overwrite" re-sends with confirm:true. */
-function renderRecipeOverwriteCard(name, path) {
-  const host = recipeActionCard(`⚠️ ${safeText(path)} already exists`, 'Overwrite the workspace file with this recipe?');
+function renderRecipeOverwriteCard(name, path) {  const host = recipeActionCard(`⚠️ ${safeText(path)} already exists`, 'Overwrite the workspace file with this recipe?');
   const overwrite = document.createElement('button');
   overwrite.className = 'btn btn-primary form-review-confirm';
   overwrite.textContent = 'Overwrite';
@@ -5115,14 +5261,24 @@ function renderRecipeCheckpoint(run) {
   verify.className = 'btn btn-primary form-review-confirm';
   verify.textContent = 'Done — verify';
   verify.addEventListener('click', () => resumeRecipeRun(run.runId, false));
-  const skip = document.createElement('button');
-  skip.className = 'btn btn-ghost form-review-cancel';
-  skip.textContent = 'Skip check';
-  skip.title = 'Continue without verifying the resume condition';
-  skip.addEventListener('click', () => resumeRecipeRun(run.runId, true));
   const bar = document.createElement('div');
   bar.className = 'form-review-actions';
-  bar.append(verify, skip);
+  bar.append(verify);
+  if (run.composedRehearsal) {
+    // C1 (#289): the composed draft's first run is the rehearsal — verify or
+    // abort; there is no "Skip check" to wave through an unverified artifact.
+    const note = document.createElement('div');
+    note.className = 'recipe-checkpoint-instructions';
+    note.textContent = 'Rehearsal: first run of a composed recipe — checkpoints must be verified (no skip).';
+    host.appendChild(note);
+  } else {
+    const skip = document.createElement('button');
+    skip.className = 'btn btn-ghost form-review-cancel';
+    skip.textContent = 'Skip check';
+    skip.title = 'Continue without verifying the resume condition';
+    skip.addEventListener('click', () => resumeRecipeRun(run.runId, true));
+    bar.append(skip);
+  }
   host.appendChild(bar);
   msgsEl?.appendChild(host);
   recipeCheckpointEl = host;
@@ -5296,6 +5452,17 @@ function recipeLibraryRow(r, liveRun) {
     el.className = 'recipe-lib-badge';
     el.textContent = b;
     head.appendChild(el);
+  }
+  // C1 (#289): composed provenance — 🤖 while unverified, with the rehearsal
+  // expectation spelled out; verified composed recipes keep the 🤖 badge only.
+  if (r.composedBy === 'zo') {
+    const comp = document.createElement('span');
+    comp.className = 'recipe-lib-badge';
+    comp.textContent = r.verified ? '🤖 composed' : '🤖 composed · unverified';
+    comp.title = r.verified
+      ? 'Composed by Zo and verified by a rehearsal run'
+      : 'Composed by Zo — the first run is a rehearsal that verifies it (checkpoints cannot be skipped)';
+    head.appendChild(comp);
   }
   head.appendChild(badge);
   if (r.lastRun) {
@@ -5706,6 +5873,42 @@ sendQuery = async function() {
       // chat turn is sent.
       addMessage('user', query);
       const reenable = () => { input.disabled = false; sendBtn.disabled = false; input.focus(); };
+      if (bang.sub === 'compose') {
+        // 0.3.2 C2 (#290): `!recipe compose <goal>` / `!recipe compose stop`.
+        // Zo drives with the compose boundary; the human fills/picks when
+        // parked. Completion offers ↧ Save as recipe (C1 machinery).
+        if (bang.target === 'stop') {
+          const resp = await chrome.runtime.sendMessage({ type: 'RECIPE_COMPOSE_STOP', reason: 'stopped by user' }).catch(() => null);
+          if (resp?.ok) {
+            removeHandoffLine();
+            document.querySelectorAll('.recipe-compose-park').forEach((el) => el.remove());
+            activeHandoffRun = null;
+            addMessage('system', '🛑 Compose session stopped.');
+          } else {
+            addMessage('error', resp?.error || 'No live compose session.');
+          }
+          reenable();
+          return;
+        }
+        const start = await chrome.runtime.sendMessage({
+          type: 'RECIPE_COMPOSE_START',
+          chatId: activeId,
+          tabId: currentContext?.tabId,
+          goal: bang.target,
+        }).catch(() => null);
+        if (!start?.ok || !start.run) {
+          addMessage('error', start?.error || 'Could not start the compose session.');
+          reenable();
+          return;
+        }
+        activeHandoffRun = start.run;
+        renderChatTabs();
+        addMessage('system', `🧩 Composing "**${safeText(start.run.compose.name)}**" — Zo walks the flow (never fills, never submits); park cards will ask you for values and choices. Stop with \`!recipe compose stop\`.`);
+        // The first compose turn: goal + compose instructions (stable marker),
+        // cobrowse envelope, compose boundary — the loop takes over from here.
+        effectiveQuery = `${bang.target}\n\n${composeInstructions(bang.target)}`;
+        tempMode = 'cobrowse';
+      }
       if (bang.sub === 'record') {
         // #220 recorder: arm a session; the user clicks through the flow, the
         // ✕ on the recording line assembles + learns the recipe.
@@ -5774,13 +5977,17 @@ sendQuery = async function() {
         reenable();
         return;
       }
-      // sub === 'run'
-      const source = (bang.target.includes('/') || bang.target.endsWith('.json'))
-        ? { workspacePath: bang.target }
-        : { localName: bang.target };
-      await startRecipeRun(source);
-      reenable();
-      return;
+      if (bang.sub === 'run') {
+        const source = (bang.target.includes('/') || bang.target.endsWith('.json'))
+          ? { workspacePath: bang.target }
+          : { localName: bang.target };
+        await startRecipeRun(source);
+        reenable();
+        return;
+      }
+      // sub === 'compose' (success) falls through to the normal send path —
+      // effectiveQuery carries the goal + compose instructions (isHandoff
+      // pattern: the loop's first turn rides the standard composer).
     }
     if (bang.isDuckdb) {
       addMessage('user', query);

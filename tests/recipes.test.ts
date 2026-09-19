@@ -5,6 +5,12 @@ import {
   bumpVersion,
   recipeProgress,
   MAX_WAIT_MS,
+  assembleComposedDraft,
+  composeCleanupPrompt,
+  composeInstructions,
+  literalFillValueCount,
+  driftedFromWorkspace,
+  withoutParamDefaults,
 } from "../extension/lib/recipes.js";
 import {
   Recipe,
@@ -655,5 +661,234 @@ describe("buildRecipeSkillExport", () => {
     const bad = buildRecipeSkillExport([{ ...rec, steps: [{ type: "click", submitish: true, cues: [] }] }]);
     expect(bad.ok).toBe(false);
     expect(String((bad as any).error)).toContain("does not validate");
+  });
+});
+
+// ---- Composed drafts (0.3.2 C1, #289) --------------------------------------
+
+describe("assembleComposedDraft", () => {
+  const zo = (op: string, extra: Record<string, unknown> = {}) => ({ source: "zo", op, url: "https://portal.example/form", ts: T0, ...extra });
+  const boundary = (op: string, extra: Record<string, unknown> = {}) => ({ source: "boundary", op, url: "https://portal.example/form", reason: "no-submit handoff: click targets a terminal action", ts: T0, ...extra });
+
+  it("turns a Zo fill into a REQUIRED param with NO default — the invented value is gone", () => {
+    // The sink stripped the value before this record ever existed: a composed
+    // fill cannot carry a Zo-invented value even in principle.
+    const out = assembleComposedDraft("RTI", "File the RTI", [
+      zo("fill", { cues: [cue("question", "Applicant name"), cue("selector", "#fullname")] }),
+    ], T0);
+    expect(out.ok).toBe(true);
+    const r = (out as any).recipe;
+    expect(r.params).toHaveLength(1);
+    expect(r.params[0].required).toBe(true);
+    expect(r.params[0]).not.toHaveProperty("default");
+    expect(r.params[0].question).toBe("Applicant name");
+    expect(r.steps[0].value).toBe(`{{${r.params[0].name}}}`);
+  });
+
+  it("boundary parks become human checkpoints — the E-INVARIANT holds by construction", () => {
+    const out = assembleComposedDraft("Buy", "Buy the thing", [
+      zo("click", { cues: [cue("text", "Add to cart")] }),
+      boundary("click", { cues: [cue("text", "Place order")] }),
+      zo("navigate", { url: "https://portal.example/done" }),
+    ], T0);
+    expect(out.ok).toBe(true);
+    const r = (out as any).recipe;
+    const humanIdx = r.steps.findIndex((s: any) => s.type === "human");
+    expect(humanIdx).toBeGreaterThanOrEqual(0);
+    expect(r.steps[humanIdx].instructions).toContain("terminal action");
+    const verdict = validateRecipe(r);
+    expect(verdict.ok).toBe(true);
+    // No click step carries submitish — refused actions never become clicks.
+    expect(r.steps.some((s: any) => s.type === "click" && s.submitish)).toBe(false);
+  });
+
+  it("dedupes consecutive same-page navigations and collapses retry loops", () => {
+    const out = assembleComposedDraft("Nav", "Nav goal", [
+      zo("navigate", { url: "https://portal.example/a?x=1" }),
+      zo("navigate", { url: "https://portal.example/a?x=2" }), // reload churn — same origin+path
+      zo("click", { cues: [cue("selector", "#stale")] }),
+      zo("click", { cues: [cue("selector", "#stale")] }), // retry of the same target
+      zo("navigate", { url: "https://portal.example/b" }),
+    ], T0);
+    expect(out.ok).toBe(true);
+    const navs = (out as any).recipe.steps.filter((s: any) => s.type === "navigate");
+    expect(navs).toHaveLength(2); // /a once, /b once
+    expect(navs[0].expectUrl).toBe("https://portal.example/a");
+    const clicks = (out as any).recipe.steps.filter((s: any) => s.type === "click");
+    expect(clicks).toHaveLength(1);
+  });
+
+  it("records provenance (composedBy/verified/draft/goal) and closes with a done step", () => {
+    const out = assembleComposedDraft("Flow", "Reach the goal", [
+      zo("navigate", { url: "https://portal.example/" }),
+    ], T0);
+    const r = (out as any).recipe;
+    expect(r.composedBy).toBe("zo");
+    expect(r.verified).toBe(false);
+    expect(r.draft).toBe(true);
+    expect(r.goal).toBe("Reach the goal");
+    expect(r.origin).toBe("composed");
+    expect(r.steps[r.steps.length - 1].type).toBe("done");
+    const parsed = Recipe.parse(r); // schema contract
+    expect(parsed.steps.length).toBeGreaterThan(0);
+  });
+
+  it("honestly refuses empty logs and logs with no composable actions", () => {
+    expect(assembleComposedDraft("X", "g", [], T0).ok).toBe(false);
+    const scrollOnly = assembleComposedDraft("X", "g", [
+      { source: "zo", op: "scroll", url: "https://portal.example/", ts: T0 },
+    ], T0);
+    expect(scrollOnly.ok).toBe(false);
+    expect(String(scrollOnly.errors[0])).toContain("nothing to compose");
+  });
+
+  it("shapes extract records with evidenceKey + label", () => {
+    const out = assembleComposedDraft("Ex", "g", [
+      zo("extract", { cues: [cue("question", "Registration number")], evidenceKey: "registration" }),
+    ], T0);
+    const step = (out as any).recipe.steps[0];
+    expect(step.type).toBe("extract");
+    expect(step.evidenceKey).toBe("registration");
+    expect(step.label).toBe("Registration number");
+  });
+});
+
+describe("composeCleanupPrompt (0.3.2 C1)", () => {
+  it("carries the stable marker and forbids invented param defaults", () => {
+    const out = assembleComposedDraft("Flow", "g", [
+      { source: "zo", op: "navigate", url: "https://portal.example/", ts: T0 },
+    ], T0);
+    const draft = (out as any).recipe;
+    // Composed params are born without defaults — prove the prompt ALSO
+    // strips one if a caller ever handed it a dirty object.
+    draft.params.push({ name: "a", type: "string", required: true, question: "q", default: "secret" });
+    const prompt = composeCleanupPrompt(draft);
+    expect(prompt).toContain("## Composed Recipe Draft");
+    expect(prompt).toContain('NEVER add a "default" to any param');
+    expect(prompt).toContain('"submitish": true is ONLY legal immediately after a human step');
+    expect(prompt).not.toContain("secret");
+  });
+});
+
+describe("driftedFromWorkspace — composed provenance is drift-stable (0.3.2 C1)", () => {
+  it("promotion (verified/draft flips) is NOT content drift; step edits ARE", () => {
+    const out = assembleComposedDraft("Flow", "g", [
+      { source: "zo", op: "navigate", url: "https://portal.example/", ts: T0 },
+    ], T0);
+    const draft = (out as any).recipe;
+    // Promotion flips ONLY provenance — version drift still counts (it is the
+    // artifact's version, not provenance), so promote without a bump here.
+    const promoted = { ...draft, verified: true, draft: false };
+    expect(driftedFromWorkspace(promoted, JSON.stringify(draft))).toBe(false);
+    const edited = { ...draft, steps: [{ type: "done" }] };
+    expect(driftedFromWorkspace(edited, JSON.stringify(draft))).toBe(true);
+  });
+});
+
+describe("withoutParamDefaults (review F1 backstop)", () => {
+  it("strips model-echoed defaults on adopt; keeps everything else", () => {
+    const out = withoutParamDefaults([
+      { name: "a", type: "string", required: true, question: "q", default: "MODEL-INVENTED" },
+      { name: "b", type: "string", required: true, question: "q" },
+      null,
+    ]);
+    expect(out[0]).not.toHaveProperty("default");
+    expect(out[1]).toEqual({ name: "b", type: "string", required: true, question: "q" });
+    expect(out[2]).toBe(null);
+    expect(withoutParamDefaults(undefined)).toEqual([]);
+  });
+});
+
+describe("composeInstructions (0.3.2 C2, #290)", () => {
+  it("carries the stable marker and the never-fill/never-submit rules", () => {
+    const prompt = composeInstructions("File the RTI application");
+    expect(prompt).toContain("## Compose Run");
+    expect(prompt).toContain("compose-run marker");
+    expect(prompt).toContain("NEVER fill a field");
+    expect(prompt).toContain("NEVER click submit/terminal controls");
+    expect(prompt).toContain("PARK:");
+    expect(prompt).toContain("File the RTI application");
+  });
+});
+
+describe("assembleComposedDraft — two producers (0.3.2 C2)", () => {
+  it("a human fill becomes a param WITH the human default; a Zo fill never does", () => {
+    const out = assembleComposedDraft("Compose", "g", [
+      { source: "zo", op: "navigate", url: "https://portal.example/form", ts: T0 },
+      // Zo ATTEMPTED the fill (value stripped at the sink — never lands)…
+      { source: "boundary", op: "fill", url: "https://portal.example/form", cues: [cue("question", "Applicant name")], reason: "COMPOSE: Zo never fills", ts: T0 },
+      // …the human filled it on the page (recorder listeners, value rides).
+      { source: "human", op: "fill", url: "https://portal.example/form", cues: [cue("question", "Applicant name")], value: "Ada Lovelace", ts: T0 },
+    ], T0);
+    expect(out.ok).toBe(true);
+    const r = (out as any).recipe;
+    // The refused attempt collapsed into the human record — one fill step.
+    expect(r.steps.filter((st: any) => st.type === "fill")).toHaveLength(1);
+    expect(r.params[0].default).toBe("Ada Lovelace");
+    expect(r.params[0].required).toBe(false);
+    // No checkpoint from the resolved value park — the human fill IS the step.
+    expect(r.steps.filter((st: any) => st.type === "human")).toHaveLength(0);
+  });
+
+  it("a sensitive human fill (value never captured) stays a required defaultless param", () => {
+    const out = assembleComposedDraft("Compose", "g", [
+      { source: "human", op: "fill", url: "https://portal.example/pay", cues: [cue("question", "Card number")], fieldSensitive: true, ts: T0 },
+    ], T0);
+    const r = (out as any).recipe;
+    expect(r.params[0].required).toBe(true);
+    expect(r.params[0]).not.toHaveProperty("default");
+  });
+
+  it("a human submitish click still authors the checkpoint (E-INVARIANT for both producers)", () => {
+    const out = assembleComposedDraft("Compose", "g", [
+      { source: "human", op: "click", url: "https://portal.example/form", cues: [cue("text", "Place order")], submitish: true, ts: T0 },
+    ], T0);
+    expect(out.ok).toBe(true);
+    const r = (out as any).recipe;
+    expect(r.steps[0].type).toBe("human");
+    expect(r.steps[1].submitish).toBe(true);
+    expect(validateRecipe(r).ok).toBe(true);
+  });
+
+  it("an unresolved boundary fill park (human never filled) becomes a checkpoint honestly", () => {
+    const out = assembleComposedDraft("Compose", "g", [
+      { source: "boundary", op: "fill", url: "https://portal.example/form", cues: [cue("question", "Applicant name")], reason: "COMPOSE: Zo never fills", ts: T0 },
+    ], T0);
+    const r = (out as any).recipe;
+    expect(r.steps.some((st: any) => st.type === "human")).toBe(true);
+    expect(validateRecipe(r).ok).toBe(true);
+  });
+});
+
+describe("compose assembler — sensitive-page collapse (review F3)", () => {
+  it("a sensitive-page span collapses to ONE checkpoint; human values there never become defaults", () => {
+    const out = assembleComposedDraft("Compose", "g", [
+      { source: "zo", op: "navigate", url: "https://portal.example/checkout", ts: T0 },
+      // The human typed an address on the CHECKOUT page — the recorder still
+      // emits the value (field not field-sensitive), but pageSensitive wins.
+      { source: "human", op: "fill", url: "https://portal.example/checkout", cues: [cue("question", "Address")], value: "12 Civil Lines", pageSensitive: true, ts: T0 },
+      { source: "human", op: "click", url: "https://portal.example/checkout", cues: [cue("text", "Pay now")], submitish: true, ts: T0 },
+      { source: "zo", op: "navigate", url: "https://portal.example/done", ts: T0 },
+    ], T0);
+    expect(out.ok).toBe(true);
+    const r = (out as any).recipe;
+    expect(r.steps.filter((st: any) => st.type === "human")).toHaveLength(1);
+    expect(r.params).toHaveLength(0); // no value from the sensitive span
+    expect(JSON.stringify(r)).not.toContain("12 Civil Lines");
+    expect(JSON.stringify(r)).not.toContain("submitish");
+    expect(validateRecipe(r).ok).toBe(true);
+  });
+});
+
+describe("literalFillValueCount (review F2)", () => {
+  it("counts fill steps whose value is not a {{param}}/{{evidence}} reference", () => {
+    expect(literalFillValueCount([{ type: "fill", cues: [], value: "{{name}}" }])).toBe(0);
+    expect(literalFillValueCount([{ type: "fill", cues: [], value: "MODEL-INVENTED" }])).toBe(1);
+    // Anchored (review round 2): a hybrid value wraps the human's input in
+    // model-authored text — it must count as a literal too.
+    expect(literalFillValueCount([{ type: "fill", cues: [], value: "Free text {{name}}" }])).toBe(1);
+    expect(literalFillValueCount([{ type: "fill", cues: [], value: "  {{name}}  " }])).toBe(0);
+    expect(literalFillValueCount([{ type: "navigate", url: "x" }])).toBe(0);
+    expect(literalFillValueCount(undefined)).toBe(0);
   });
 });

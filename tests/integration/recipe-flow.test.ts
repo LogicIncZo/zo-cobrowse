@@ -920,3 +920,259 @@ describe("R3: library surface (#257) — list/rename/delete/import/export", () =
     expect(unknown.ok).toBe(false);
   });
 });
+
+// ---- C1 #289: compose save + rehearsal -------------------------------------
+
+describe("C1: save a handoff run as a composed draft, rehearse it, promote it", () => {
+  const validate = async () => (await import("../../extension/lib/recipes.js")).validateRecipe;
+  function seedDoneRun(obs: any[]) {
+    const runId = `run-c1-${Math.random().toString(36).slice(2, 8)}`;
+    const runs = (bus.storage.session._store.cobrowse_handoff_runs ??= {});
+    runs[runId] = {
+      runId, chatId: "chat-c1", goal: "File the RTI application", boundaryMode: "no-submit",
+      budget: { maxTurns: 12, maxNavigations: 25, maxMinutes: 20 },
+      usage: { turns: 2, navigations: 2, startedAt: T0 }, status: "done",
+      pagesVisited: [], parkLog: [], obs, createdAt: T0, updatedAt: T0,
+    };
+    return runId;
+  }
+  const C1_OBS = [
+    { source: "boundary", op: "click", url: "https://fixture.example/form", reason: "no-submit handoff: click targets a terminal action", cues: [{ strategy: "text", value: "Place order" }], ts: T0 },
+    { source: "zo", op: "navigate", url: "https://fixture.example/form?x=1", ts: T0 },
+    { source: "zo", op: "fill", url: "https://fixture.example/form", cues: [{ strategy: "question", value: "Applicant name" }], ts: T0 },
+    { source: "zo", op: "click", url: "https://fixture.example/form", cues: [{ strategy: "text", value: "Save draft" }], ts: T0 },
+  ];
+
+  it("refuses runs that are not done, unknown runs, and runs with nothing to compose", async () => {
+    const live = seedDoneRun(C1_OBS);
+    bus.storage.session._store.cobrowse_handoff_runs[live].status = "running";
+    const notDone = await bus.runtime.sendMessage({ type: "RECIPE_COMPOSE_SAVE", runId: live, name: "X" });
+    expect(notDone.ok).toBe(false);
+    expect(notDone.error).toContain("only a completed run");
+
+    const missing = await bus.runtime.sendMessage({ type: "RECIPE_COMPOSE_SAVE", runId: "run-c1-nope", name: "X" });
+    expect(missing.ok).toBe(false);
+
+    const empty = seedDoneRun([]);
+    const nothing = await bus.runtime.sendMessage({ type: "RECIPE_COMPOSE_SAVE", runId: empty, name: "X" });
+    expect(nothing.ok).toBe(false);
+    expect(nothing.error).toContain("nothing to compose");
+  });
+
+  it("saves the deterministic draft (Zo fill → defaultless param, no invented values) and the rehearsal promotes it", async () => {
+    const runId = seedDoneRun(C1_OBS);
+    // No askResponder → the LLM cleanup one-shot returns {} → parse fails →
+    // the deterministic draft is kept (llmCleaned: false).
+    const save = await bus.runtime.sendMessage({ type: "RECIPE_COMPOSE_SAVE", runId, name: "Composed RTI" });
+    expect(save.ok).toBe(true);
+    expect(save.llmCleaned).toBe(false);
+    expect(save.steps).toBeGreaterThanOrEqual(3);
+
+    const lib = bus.storage.local._store.cobrowse_recipes;
+    const entry = lib["Composed RTI"];
+    expect(entry.composedBy).toBe("zo");
+    expect(entry.verified).toBe(false);
+    expect(entry.draft).toBe(true);
+    expect(entry.goal).toBe("File the RTI application");
+    expect(entry.origin).toBe("composed");
+    // Schema contract + the E-INVARIANT at compose time.
+    expect(() => Recipe.parse(entry)).not.toThrow();
+    expect((await validate())(entry).ok).toBe(true);
+    // Values provenance: the artifact carries NO invented value — the Zo fill
+    // is a REQUIRED param with no default.
+    expect(JSON.stringify(entry)).not.toContain("ZO-INVENTED");
+    const fillParam = entry.params.find((p: any) => p.question === "Applicant name");
+    expect(fillParam.required).toBe(true);
+    expect(fillParam).not.toHaveProperty("default");
+    // The submitish boundary park became a human checkpoint, not a click.
+    expect(entry.steps.some((s: any) => s.type === "human")).toBe(true);
+    expect(entry.steps.some((s: any) => s.type === "click" && s.submitish)).toBe(false);
+
+    // ---- Rehearsal: the first run verifies the hypothesis ----
+    const start1 = await bus.runtime.sendMessage({ type: "RECIPE_START", chatId: "chat-c1", tabId: 1, source: { localName: "Composed RTI" } });
+    expect(start1.needsParams).toBe(true); // the human supplies the value
+    const start2 = await bus.runtime.sendMessage({
+      type: "RECIPE_START", chatId: "chat-c1", tabId: 1,
+      source: { localName: "Composed RTI" }, paramValues: { [fillParam.name]: "Ada Lovelace" },
+    });
+    expect(start2.ok).toBe(true);
+    expect(start2.run.composedRehearsal).toBe(true);
+
+    // Step 0 is the boundary-park checkpoint — waiting_human.
+    await waitUntil(() => bus.storage.session._store.cobrowse_recipe_runs[start2.run.runId]?.status === "waiting_human", 8000);
+    const parked = bus.storage.session._store.cobrowse_recipe_runs[start2.run.runId];
+    expect(parked.stepIndex).toBe(0);
+    expect(parked.recipe.steps[0].type).toBe("human");
+    // NO manual fallback in a rehearsal.
+    const forced = await bus.runtime.sendMessage({ type: "RECIPE_RESUME", runId: start2.run.runId, force: true });
+    expect(forced.ok).toBe(false);
+    expect(forced.error).toContain("rehearsal");
+    // Verify lands: the tab is on the checkpoint's postcondition URL.
+    await bus.tabs.update(1, { url: "https://fixture.example/form" });
+    const resumed = await bus.runtime.sendMessage({ type: "RECIPE_RESUME", runId: start2.run.runId });
+    expect(resumed.ok).toBe(true);
+
+    await waitUntil(() => bus.storage.session._store.cobrowse_recipe_runs[start2.run.runId]?.status === "done", 15000);
+    const doneRun = bus.storage.session._store.cobrowse_recipe_runs[start2.run.runId];
+    expect(doneRun.stopReason).toContain("Rehearsal passed");
+    // The human-supplied value executed, not a Zo-invented one.
+    const fillExec = executedSteps.findLast((s: any) => s.type === "fill");
+    expect(fillExec?.value).toBe("Ada Lovelace");
+    // Promotion: verified, no longer a draft, patch bump.
+    const promoted = bus.storage.local._store.cobrowse_recipes["Composed RTI"];
+    expect(promoted.verified).toBe(true);
+    expect(promoted.draft).toBe(false);
+    expect(promoted.version).toBe("1.0.1");
+    // A re-run is NOT a rehearsal anymore — but the human still supplies the
+    // composed fill's value every run (needsParams again, by design).
+    const again1 = await bus.runtime.sendMessage({ type: "RECIPE_START", chatId: "chat-c1", tabId: 1, source: { localName: "Composed RTI" } });
+    expect(again1.needsParams).toBe(true);
+    const again = await bus.runtime.sendMessage({
+      type: "RECIPE_START", chatId: "chat-c1", tabId: 1,
+      source: { localName: "Composed RTI" }, paramValues: { [fillParam.name]: "Ada Lovelace" },
+    });
+    expect(again.ok).toBe(true);
+    expect(again.run.composedRehearsal).toBeUndefined();
+    await bus.runtime.sendMessage({ type: "RECIPE_STOP", runId: again.run.runId });
+  });
+
+  it("uses the compose-cleanup prompt variant; a cleaned draft wins only if it validates", async () => {
+    const runId = seedDoneRun(C1_OBS);
+    let seenInput = "";
+    askResponder = () => {
+      const req = (fm as any).to("/zo/ask").at(-1);
+      seenInput = String((req?.body as any)?.input || "");
+      return jsonResponse({ output: JSON.stringify({
+        params: [{ name: "applicant", type: "string", required: true, question: "Who is filing?" }],
+        steps: [
+          { type: "navigate", url: "https://fixture.example/form", expectUrl: "/form" },
+          { type: "fill", cues: [{ strategy: "question", value: "Applicant name" }], value: "{{applicant}}" },
+          { type: "human", title: "Submit by hand", instructions: "Review and submit.", resumeOn: { url: "/form" } },
+          { type: "click", cues: [{ strategy: "text", value: "Place order" }], submitish: true },
+          { type: "done", message: "ok" },
+        ],
+        note: "renamed + checkpointed",
+      }) });
+    };
+    const save = await bus.runtime.sendMessage({ type: "RECIPE_COMPOSE_SAVE", runId, name: "Cleaned RTI" });
+    expect(save.ok).toBe(true);
+    expect(save.llmCleaned).toBe(true);
+    expect(save.note).toBe("renamed + checkpointed");
+    // The compose variant's stable marker rode the one-shot.
+    expect(seenInput).toContain("## Composed Recipe Draft");
+    expect(seenInput).toContain("NEVER add a \"default\" to any param");
+    const entry = bus.storage.local._store.cobrowse_recipes["Cleaned RTI"];
+    expect(entry.steps.some((s: any) => s.type === "human")).toBe(true);
+    askResponder = null;
+  });
+
+  it("keeps the deterministic draft when the LLM cleanup breaks the invariant", async () => {
+    const runId = seedDoneRun(C1_OBS);
+    askResponder = () => jsonResponse({ output: JSON.stringify({
+      params: [],
+      // submitish click with NO preceding human step — must be rejected.
+      steps: [
+        { type: "navigate", url: "https://fixture.example/form", expectUrl: "/form" },
+        { type: "click", cues: [{ strategy: "text", value: "Place order" }], submitish: true },
+        { type: "done", message: "ok" },
+      ],
+    }) });
+    const save = await bus.runtime.sendMessage({ type: "RECIPE_COMPOSE_SAVE", runId, name: "Broken RTI" });
+    expect(save.ok).toBe(true);
+    expect(save.llmCleaned).toBe(false);
+    expect(save.note).toContain("LLM draft rejected");
+    const entry = bus.storage.local._store.cobrowse_recipes["Broken RTI"];
+    expect((await validate())(entry).ok).toBe(true);
+    askResponder = null;
+  });
+});
+
+describe("C1 review round 1 findings", () => {
+  function seedDoneRun2(obs: any[]) {
+    const runId = `run-c1-${Math.random().toString(36).slice(2, 8)}`;
+    const runs = (bus.storage.session._store.cobrowse_handoff_runs ??= {});
+    runs[runId] = {
+      runId, chatId: "chat-c1", goal: "File the RTI application", boundaryMode: "no-submit",
+      budget: { maxTurns: 12, maxNavigations: 25, maxMinutes: 20 },
+      usage: { turns: 2, navigations: 2, startedAt: T0 }, status: "done",
+      pagesVisited: [], parkLog: [], obs, createdAt: T0, updatedAt: T0,
+    };
+    return runId;
+  }
+  const OBS2 = [
+    { source: "zo", op: "navigate", url: "https://fixture.example/form", ts: T0 },
+    { source: "zo", op: "fill", url: "https://fixture.example/form", cues: [{ strategy: "question", value: "Applicant name" }], ts: T0 },
+    { source: "zo", op: "click", url: "https://fixture.example/form", cues: [{ strategy: "text", value: "Save draft" }], ts: T0 },
+  ];
+
+  it("F1: a cleanup reply that smuggles param defaults has them stripped on adopt", async () => {
+    const runId = seedDoneRun2(OBS2);
+    askResponder = () => jsonResponse({ output: JSON.stringify({
+      params: [{ name: "applicant", type: "string", required: true, question: "Who is filing?", default: "MODEL-INVENTED" }],
+      steps: [
+        { type: "navigate", url: "https://fixture.example/form", expectUrl: "/form" },
+        { type: "fill", cues: [{ strategy: "question", value: "Applicant name" }], value: "{{applicant}}" },
+        { type: "done", message: "ok" },
+      ],
+    }) });
+    const save = await bus.runtime.sendMessage({ type: "RECIPE_COMPOSE_SAVE", runId, name: "F1 Composed" });
+    expect(save.ok).toBe(true);
+    expect(save.llmCleaned).toBe(true);
+    const entry = bus.storage.local._store.cobrowse_recipes["F1 Composed"];
+    const param = entry.params.find((p: any) => p.name === "applicant");
+    expect(param).not.toHaveProperty("default");
+    expect(JSON.stringify(entry)).not.toContain("MODEL-INVENTED");
+    askResponder = null;
+  });
+
+  it("F3: a library entry replaced mid-rehearsal is NOT promoted by the run's done", async () => {
+    const runId = seedDoneRun2([
+      { source: "boundary", op: "click", url: "https://fixture.example/form", reason: "no-submit handoff: click targets a terminal action", cues: [{ strategy: "text", value: "Place order" }], ts: T0 },
+      { source: "zo", op: "navigate", url: "https://fixture.example/form?x=1", ts: T0 },
+      { source: "zo", op: "fill", url: "https://fixture.example/form", cues: [{ strategy: "question", value: "Applicant name" }], ts: T0 },
+    ]);
+    const save = await bus.runtime.sendMessage({ type: "RECIPE_COMPOSE_SAVE", runId, name: "F3 Composed" });
+    expect(save.ok).toBe(true);
+
+    const start1 = await bus.runtime.sendMessage({ type: "RECIPE_START", chatId: "chat-c1", tabId: 1, source: { localName: "F3 Composed" } });
+    expect(start1.needsParams).toBe(true);
+    const start2 = await bus.runtime.sendMessage({
+      type: "RECIPE_START", chatId: "chat-c1", tabId: 1,
+      source: { localName: "F3 Composed" }, paramValues: { applicant_name: "Ada" },
+    });
+    expect(start2.ok).toBe(true);
+    // The rehearsal parks at step 0 — the boundary-park checkpoint.
+    await waitUntil(() => bus.storage.session._store.cobrowse_recipe_runs[start2.run.runId]?.status === "waiting_human", 8000);
+
+    // While the rehearsal sits at its checkpoint, the entry is replaced under
+    // the same name by a DIFFERENT artifact (import/re-save pattern).
+    const lib = bus.storage.local._store.cobrowse_recipes;
+    lib["F3 Composed"] = { ...lib["F3 Composed"], id: "rcp-replaced-999", verified: false, draft: true, version: "1.0.0" };
+
+    // Drive the rehearsal to done — the run carries the ORIGINAL recipe.
+    await bus.tabs.update(1, { url: "https://fixture.example/form" });
+    const resumed = await bus.runtime.sendMessage({ type: "RECIPE_RESUME", runId: start2.run.runId });
+    expect(resumed.ok).toBe(true);
+    await waitUntil(() => bus.storage.session._store.cobrowse_recipe_runs[start2.run.runId]?.status === "done", 15000);
+    const doneRun = bus.storage.session._store.cobrowse_recipe_runs[start2.run.runId];
+    expect(doneRun.stopReason).toContain("nothing to promote");
+    // The REPLACED entry was never rehearsed — it stays unverified.
+    expect(lib["F3 Composed"].id).toBe("rcp-replaced-999");
+    expect(lib["F3 Composed"].verified).toBe(false);
+    expect(lib["F3 Composed"].draft).toBe(true);
+  });
+
+  it("an aborted rehearsal leaves the entry a draft (verify-or-abort leaves no false verified)", async () => {
+    const runId = seedDoneRun2(OBS2);
+    await bus.runtime.sendMessage({ type: "RECIPE_COMPOSE_SAVE", runId, name: "Abort Composed" });
+    const start = await bus.runtime.sendMessage({
+      type: "RECIPE_START", chatId: "chat-c1", tabId: 1,
+      source: { localName: "Abort Composed" }, paramValues: { applicant_name: "Ada" },
+    });
+    expect(start.ok).toBe(true);
+    await bus.runtime.sendMessage({ type: "RECIPE_STOP", runId: start.run.runId, reason: "cannot finish now" });
+    const entry = bus.storage.local._store.cobrowse_recipes["Abort Composed"];
+    expect(entry.verified).toBe(false);
+    expect(entry.draft).toBe(true);
+  });
+});

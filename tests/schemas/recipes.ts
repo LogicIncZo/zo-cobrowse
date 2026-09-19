@@ -147,8 +147,13 @@ export const Recipe = z.object({
   id: z.string().min(1), // 'rcp-<slug>'
   name: z.string().min(1),
   version: z.string().regex(/^\d+\.\d+\.\d+$/), // semver, bumped on heal/param changes
-  origin: z.string().min(1), // workspace path | 'local' | 'recorded'
+  origin: z.string().min(1), // workspace path | 'local' | 'recorded' | 'composed'
   draft: z.boolean().optional(), // learned, not yet cleaned/reviewed
+  // C1 (#289): composed provenance — Zo assembled the draft from a handoff
+  // run's observation log; `verified` flips true when the rehearsal passes.
+  composedBy: z.literal("zo").optional(),
+  verified: z.boolean().optional(),
+  goal: z.string().optional(), // the composing run's goal
   createdAt: z.number(),
   updatedAt: z.number(),
   params: z.array(RecipeParam),
@@ -220,6 +225,10 @@ export const RecipeRun = z.object({
   // The player parks waiting_human with the draft here; RECIPE_RESUME carries
   // the possibly-edited text (or discard) to continue.
   pendingReview: z.object({ text: z.string() }).optional(),
+  // C1 (#289): true when this run replays a composed-and-unverified draft —
+  // checkpoints are unskippable (no "Skip check", force refused) and the done
+  // step promotes the library entry.
+  composedRehearsal: z.boolean().optional(),
   // The driven tab (stamped by background at RECIPE_START); optional so the
   // pure helpers stay tab-agnostic.
   tabId: z.number().optional(),
@@ -236,6 +245,10 @@ export const RecipeListItem = z.object({
   version: z.string(),
   steps: z.number().int().nonnegative(), // 0 = corrupt entry, listed for deletion
   draft: z.boolean(),
+  // C1 (#289): composed provenance for the popup's 🤖 badge.
+  composedBy: z.literal("zo").optional(),
+  verified: z.boolean().optional(),
+  goal: z.string().optional(),
   origin: z.string().optional(),
   source: z.enum(['local', 'workspace']),
   updatedAt: z.number().nullable(),

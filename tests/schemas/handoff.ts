@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Cue } from "./recipes.js";
 
 // Handoff (Lane E) — delegate-mode runs where Zo works unattended up to a hard
 // boundary. Contract for lib/handoff.js's exported shapes; the run object also
@@ -18,6 +19,7 @@ export type HandoffStatus = z.infer<typeof HandoffStatus>;
 export const HandoffBoundaryMode = z.enum([
   "readonly", // 0.2.7 reference scenario: navigate/extract/scroll/read only
   "no-submit", // 0.3.0 form scenarios: fill allowed, submit-ish clicks parked
+  "compose", // 0.3.2 C2 (#290): recipe composition — Zo never fills/submits
 ]);
 export type HandoffBoundaryMode = z.infer<typeof HandoffBoundaryMode>;
 
@@ -43,6 +45,44 @@ export const ParkedAction = z.object({
 });
 export type ParkedAction = z.infer<typeof ParkedAction>;
 
+// C1 (#289)/C2 (#290): one compose-sink record — what a turn EXECUTED
+// (source:'zo' from the executor sink), what was PARKED by the boundary
+// (source:'boundary'), or what the HUMAN did on the page during a compose
+// session (source:'human' via the recorder listeners — the only source whose
+// fill values may ride, and only for non-sensitive fields; the recorder's #243
+// redaction strips sensitive ones upstream).
+export const HandoffObsRecord = z.object({
+  source: z.enum(["zo", "boundary", "human"]),
+  op: z.string(), // navigate | click | fill | check | extract
+  url: z.string().optional(), // navigate target, else the page URL
+  cues: z.array(Cue).optional(),
+  submitish: z.boolean().optional(),
+  checked: z.boolean().optional(),
+  evidenceKey: z.string().optional(),
+  label: z.string().optional(),
+  reason: z.string().optional(), // boundary parks: why the action was refused
+  fieldSensitive: z.boolean().optional(), // human fills: sensitive → no value
+  value: z.string().optional(), // human fills ONLY — never from the sink
+  ts: z.number(),
+});
+export type HandoffObsRecord = z.infer<typeof HandoffObsRecord>;
+
+// C2 (#290): one compose park — Zo asked for the human (a form to fill, an
+// ambiguity to tie-break, a submit to do by hand). Persists on the run so the
+// panel renders the card and a resume resolves it.
+export const ComposePark = z.object({
+  parkId: z.string().min(1), // 'park-<n>'
+  kind: z.enum(["value", "choice", "checkpoint"]),
+  question: z.string(),
+  options: z.array(z.string()).optional(), // choice parks
+  action: z.record(z.unknown()).optional(), // the refused action (stripped)
+  url: z.string().optional(),
+  resolved: z.boolean().optional(),
+  resolution: z.string().optional(),
+  ts: z.number(),
+});
+export type ComposePark = z.infer<typeof ComposePark>;
+
 export const HandoffRun = z.object({
   runId: z.string().min(1),
   chatId: z.string().min(1),
@@ -53,6 +93,14 @@ export const HandoffRun = z.object({
   status: HandoffStatus,
   pagesVisited: z.array(z.string()),
   parkLog: z.array(ParkedAction),
+  // C1 (#289): the compose sink's log — optional so pre-C1 persisted runs
+  // (storage.session from an older build) still validate.
+  obs: z.array(HandoffObsRecord).optional(),
+  // C2 (#290): compose-session marker (the draft's future name) + parks —
+  // optional so pre-C2 persisted runs still validate.
+  compose: z.object({ name: z.string().min(1) }).optional(),
+  parks: z.array(ComposePark).optional(),
+  parkSeq: z.number().int().nonnegative().optional(),
   stopReason: z.string().optional(),
   // The driven tab (panel-bound at HANDOFF_START). Optional so the pure
   // createRun stays tab-agnostic; the background stamps it.

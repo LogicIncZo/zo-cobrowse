@@ -8,6 +8,17 @@ This page mirrors everything **unreleased** on `dev`.
 
 
 
+## [0.3.2.0] — 2026-09-19
+
+### Added — Zo-composed recipes (#289 C1, #290 C2)
+
+- **Save a Zo-run as a recipe (#289).** A completed `!handoff` run's flow becomes a validated draft recipe (↧ Save as recipe on the done card) — boundary parks become human checkpoints, Zo fills become params with no default.
+- **`!recipe compose <goal>` (#290).** Zo walks the flow to compose a recipe and never fills or submits (enforced in code): park cards ask you for values, choices, and submits; your on-page actions become the draft's defaults.
+- **Rehearsal.** Composed drafts verify on their first run — checkpoints cannot be skipped; passing the rehearsal marks the recipe verified.
+
+
+
+
 ## [0.2.7.1] — 2026-09-05
 
 ### Fixed — stabilization round (2026-09-05 end-to-end pass)
