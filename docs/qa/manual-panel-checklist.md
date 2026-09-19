@@ -19,7 +19,8 @@ open the side panel on a normal website.
       tabs; 🧩 DOM off → 🚫 DOM label sticks across panel reopen; tier chip shows the cap reason
       after a send.
 - [ ] **Page title in header** — title truncates without pushing the action buttons out; tooltip
-      shows the full URL; blank/new-tab pages show "— no page —".
+      shows the full URL; blank/new-tab pages show "— no page —". At dock width (~400px) the
+      brand collapses to the icon and a long page title still shows ≥16 characters (#296).
 - [ ] **`/` skills picker** — opens instantly on the second use (no "Loading skills…" flash, given
       a warm session); "+N more skill folders" note appears when folders were skipped.
 - [ ] **`%` picker folder arming** — ＋ on a folder arms a 📁 chip; row click still navigates.
