@@ -3,7 +3,66 @@
 New features in Zo Co-browse, newest first. Each entry explains what shipped;
 open **How to use it** for the hands-on steps.
 
-## Recipes — repeatable multi-page workflows <span class="badge-new">NEW</span> {#recipes}
+## Recipes go portable — workspace write-back, library panel, skill export <span class="badge-new">NEW</span> {#recipe-library}
+
+_2026-09-19 · [#256](https://github.com/LogicIncZo/zo-cobrowse/issues/256) + [#257](https://github.com/LogicIncZo/zo-cobrowse/issues/257) · v0.3.1.0 / v0.3.1.1_
+
+The recipes story from [September 14](#recipes) closes its roadmap — your
+learned flows are no longer stuck in one browser:
+
+- **Save to workspace.** Any learned recipe writes back to
+  `/home/workspace/recipes/<name>.json` — plain, inspectable JSON that follows
+  you across machines. The learned-recipe card offers the save; an existing
+  target asks before overwriting; drifted content bumps the patch version so
+  the newest artifact always wins.
+- **Healed cues persist.** When a run self-heals a recipe that came from the
+  workspace, the completion card offers **↥ Save healed cues** — the fix is
+  patched into the source file (parameters intact), so the next run from that
+  file doesn't pay the heal cost again.
+- **🧾 Recipe library panel.** A new button by the composer opens every saved
+  flow: run it, rename it, delete it (local only — workspace files are never
+  touched), import a workspace JSON (invalid files show the validator's exact
+  errors), or export it.
+- **SKILL.md export.** One click bundles a recipe to
+  `/home/workspace/Skills/<name>/SKILL.md` following the Zo skill format, so
+  Zo itself can *suggest* a saved flow when it recognizes the task.
+  Documentation only — flows still execute in the extension's deterministic
+  player, never Zo-side, and captured values are redacted before anything
+  leaves the browser.
+- **v0.3.1.1 polish** (stabilization round): `!recipe list` shows where each
+  recipe lives and its last-run status; library rows badge the last run; the
+  popup links to the [guide](https://logicinczo.github.io/zo-cobrowse/guide/recipes).
+
+<details>
+<summary><b>How to use it</b></summary>
+
+**Save a learned recipe to the workspace** — right after recording, the
+"🧠 Learned locally" card offers the one-click save, or from the command line:
+
+```
+!recipe save my-flow                    ! → /home/workspace/recipes/my-flow.json
+!recipe save my-flow recipes/custom.json --force   ! custom path, overwrite
+```
+
+**Open the library:** press **🧾 Recipes** by the composer's option row. Each
+row shows name, version, steps, required parameters (`*`), where it lives
+(💻 local vs 🌐 workspace), and its last-run status. **▶ Run** starts it
+(the params card appears for required parameters), **✎ Rename** edits inline,
+**🗑 Delete** removes the local entry after a confirming second click.
+
+**Import from the workspace:** paste a path into the popup's
+`/home/workspace/recipes/…` footer and press **＋ Import** — the file is
+validated before it lands, and bad files explain exactly which rule they broke.
+
+**Export a skill:** **⤓ Export** on a row writes
+`/home/workspace/Skills/<name>/SKILL.md` (+ `references/recipes.md`) — give it
+a skim before sharing: values are redacted, but labels and checkpoint text come
+from the pages you recorded. Full details in the
+[recipes guide](https://logicinczo.github.io/zo-cobrowse/guide/recipes).
+
+</details>
+
+## Recipes — repeatable multi-page workflows {#recipes}
 
 _2026-09-14 · [#220](https://github.com/LogicIncZo/zo-cobrowse/issues/220)_
 
