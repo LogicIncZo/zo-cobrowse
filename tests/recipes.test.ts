@@ -301,7 +301,7 @@ describe("healPrompt / parseRecipeHealResponse", () => {
 
 // ---- recorder pure halves (PR4) --------------------------------------------
 
-import { assembleDraftRecipe, generateRecipePrompt, parseGeneratedRecipe } from "../extension/lib/recipes.js";
+import { assembleDraftRecipe, generateRecipePrompt, parseGeneratedRecipe, recipeSaveTarget, serializeRecipe, driftedFromWorkspace, patchHealedCues } from "../extension/lib/recipes.js";
 
 describe("assembleDraftRecipe", () => {
   const T = 1757800000000;
@@ -520,5 +520,80 @@ describe("recipeProgress — surfaced warnings (#270)", () => {
     expect(recipeProgress(run, T0 + 60_000)).toContain('⚠ checkpoint "Pay by hand" skipped');
     const clean: any = { status: "running", stepIndex: 1, stepsTotal: 3, evidence: [], startedAt: T0 };
     expect(recipeProgress(clean, T0 + 60_000)).not.toContain("⚠");
+  });
+});
+
+// ---- R2: workspace write-back (#256) ----------------------------------------
+
+describe("recipeSaveTarget", () => {
+  it("defaults to /home/workspace/recipes/<slug>.json", () => {
+    expect(recipeSaveTarget("RTI filing")).toEqual({ ok: true, path: "/home/workspace/recipes/rti-filing.json" });
+    expect(recipeSaveTarget("!!!").ok).toBe(true); // degenerate name → 'recipe' fallback slug
+  });
+  it("confines a caller-supplied path to the workspace", () => {
+    expect(recipeSaveTarget("x", "/home/workspace/recipes/deep/thing.json")).toEqual({ ok: true, path: "/home/workspace/recipes/deep/thing.json" });
+    const bad = recipeSaveTarget("x", "/etc/passwd");
+    expect(bad.ok).toBe(false);
+    expect((bad as any).error).toContain("must be inside");
+    expect(recipeSaveTarget("x", "../../escape.json").ok).toBe(false);
+  });
+});
+
+describe("serializeRecipe + driftedFromWorkspace", () => {
+  const base = { id: "r", name: "R", version: "1.0.0", params: [], steps: [{ type: "done" }] };
+
+  it("serializes pretty-printed with a trailing newline", () => {
+    expect(serializeRecipe(base)).toBe(JSON.stringify(base, null, 2) + "\n");
+  });
+  it("content drifts bump; provenance-only diffs do not; garbage counts as drift", () => {
+    const wsCopy = serializeRecipe({ ...base, origin: "/home/workspace/recipes/r.json", updatedAt: 123 });
+    expect(driftedFromWorkspace(base, wsCopy)).toBe(false); // origin/updatedAt ignored
+    expect(driftedFromWorkspace({ ...base, steps: [{ type: "done", message: "x" }] }, wsCopy)).toBe(true);
+    expect(driftedFromWorkspace(base, "not json at all")).toBe(true);
+  });
+});
+
+describe("patchHealedCues — heal write-back's pure half (#256)", () => {
+  const ws: any = {
+    id: "rcp-h", name: "Heal me", version: "2.1.0",
+    params: [{ name: "applicant", required: true }],
+    steps: [
+      { type: "fill", cues: [{ strategy: "question", value: "Ghost field" }], value: "{{applicant}}" },
+      { type: "click", cues: [{ strategy: "text", value: "Go" }] },
+      { type: "done" },
+    ],
+  };
+
+  it("patches only the healed steps' cues and leaves params intact", () => {
+    const patched = patchHealedCues(ws, [{ index: 0, cues: [{ strategy: "selector", value: "#fullname" }] }]);
+    expect(patched.ok).toBe(true);
+    const r: any = (patched as any).recipe;
+    expect(r.steps[0].cues).toEqual([{ strategy: "selector", value: "#fullname" }]);
+    expect(r.steps[0].value).toBe("{{applicant}}"); // parameterization survives
+    expect(r.steps[1].cues[0].value).toBe("Go"); // untouched steps untouched
+    expect(r.version).toBe("2.1.0"); // version bump is the background's call
+    expect(ws.steps[0].cues[0].value).toBe("Ghost field"); // input not mutated
+  });
+
+  it("applies multiple healed steps in one pass", () => {
+    const patched = patchHealedCues(ws, [
+      { index: 0, cues: [{ strategy: "selector", value: "#a" }] },
+      { index: 1, cues: [{ strategy: "selector", value: "#b" }] },
+    ]);
+    expect(patched.ok).toBe(true);
+    expect((patched as any).recipe.steps[1].cues[0].value).toBe("#b");
+  });
+
+  it("refuses structurally diverged workspace copies and empty heal records", () => {
+    expect(patchHealedCues(ws, []).ok).toBe(false);
+    const oor = patchHealedCues(ws, [{ index: 9, cues: [] }]);
+    expect(oor.ok).toBe(false);
+    expect(String((oor as any).error)).toContain("no step at index");
+    const stale = JSON.parse(JSON.stringify({ ...ws, steps: ws.steps.slice(1) }));
+    const shifted = patchHealedCues(stale, [{ index: 1, type: "click", cues: [{ strategy: "selector", value: "#b" }] }]);
+    expect(shifted.ok).toBe(false);
+    expect(String((shifted as any).error)).toContain("type mismatch");
+    // No recorded type → index range still guards.
+    expect(patchHealedCues(stale, [{ index: 1, cues: [] }]).ok).toBe(true);
   });
 });

@@ -95,6 +95,10 @@ import {
   generateRecipePrompt,
   parseGeneratedRecipe,
   generateValuePrompt,
+  recipeSaveTarget,
+  serializeRecipe,
+  driftedFromWorkspace,
+  patchHealedCues,
 } from './lib/recipes.js';
 import { createSessionCache } from './lib/sw-cache.js';
 import { createDebugLog } from './lib/debug-log.js';
@@ -545,6 +549,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     case 'RECIPE_STATUS': {
       recipeGet(request.runId ? { runId: request.runId } : { chatId: request.chatId }).then((run) => sendResponse({ ok: true, run }));
+      return true;
+    }
+    case 'RECIPE_SAVE_HEALED': {
+      // R2 (#256): {runId} → {ok, path, version} — push a healed run's cue
+      // patches into the recipe's workspace origin file (parameterized copy,
+      // cues only). The panel offer fires this; never automatic.
+      recipeSaveHealed(request).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
+      return true;
+    }
+    case 'RECIPE_SAVE': {
+      // R2 (#256): {name, path?, confirm?} → {ok, path, version} | {ok:false,
+      // exists:true, path} (overwrite needs confirm) | {ok:false, error}.
+      recipeSave(request).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
       return true;
     }
     case 'RECIPE_LIST': {
@@ -2982,6 +2999,82 @@ async function recipeStop({ runId, reason } = {}) {
   return { ok: true, run: saved };
 }
 
+// R2 (#256): write a local-library recipe back to workspace JSON. The gate
+// order matters: only validated recipes ever reach write_file (rule 2 of the
+// 0.3.1 slate — a written file can never contain a state the player would
+// refuse). Existence probing reuses read_file (the loader's transport); a
+// content-drifted overwrite bumps the patch version first so the workspace
+// copy stays the newest artifact.
+async function recipeSave({ name, path, confirm } = {}) {
+  const lib = await recipeLibrary.load();
+  const key = safeText(name);
+  const recipe = lib[key];
+  if (!recipe) return { ok: false, error: `no local recipe named "${key}" (!recipe list shows what's saved)` };
+  const verdict = validateRecipe(recipe);
+  if (!verdict.ok) return { ok: false, error: `invalid recipe: ${verdict.errors[0]}`, errors: verdict.errors };
+  const target = recipeSaveTarget(recipe.name || key, path);
+  if (!target.ok) return { ok: false, error: target.error };
+  if (!config.zoAccessToken) return { ok: false, error: 'Zo access token not configured.' };
+
+  const probe = await readWorkspaceFile(target.path);
+  const exists = probe.ok;
+  if (exists && confirm !== true) {
+    return { ok: false, exists: true, path: target.path, error: `${target.path} already exists — confirm the overwrite` };
+  }
+
+  let out = recipe;
+  if (exists && driftedFromWorkspace(recipe, probe.content)) {
+    out = { ...recipe, version: bumpVersion(recipe.version, 'patch') };
+  }
+  const stamped = { ...out, origin: target.path, updatedAt: Date.now() };
+  try {
+    await mcpToolCall('write_file', { target_file: target.path, content: serializeRecipe(stamped) });
+  } catch (err) {
+    return { ok: false, error: `write_file failed: ${err?.message || err}` };
+  }
+  lib[key] = stamped;
+  await recipeLibrary.save(lib);
+  return { ok: true, path: target.path, version: stamped.version };
+}
+
+// R2 (#256): the heal write-back. The origin file stays the parameterized
+// artifact — only the healed steps' cues are patched in (patchHealedCues
+// refuses structurally diverged files), then the same validate → write →
+// cache pipeline as recipeSave. One explicit user click; never automatic.
+async function recipeSaveHealed({ runId } = {}) {
+  const run = await recipeGet({ runId });
+  if (!run) return { ok: false, error: 'run not found' };
+  if (!(run.healedSteps || []).length) return { ok: false, error: 'this run recorded no healed cues' };
+  const origin = safeText(run.origin);
+  if (!safeWorkspacePath(origin)) return { ok: false, error: `run origin "${origin}" is not a workspace file` };
+  if (!config.zoAccessToken) return { ok: false, error: 'Zo access token not configured.' };
+  const probe = await readWorkspaceFile(origin);
+  if (!probe.ok) return { ok: false, error: `cannot read ${origin}: ${probe.error}` };
+  let wsRecipe;
+  try {
+    wsRecipe = JSON.parse(probe.content);
+  } catch (e) {
+    return { ok: false, error: `workspace recipe is not valid JSON: ${e.message}` };
+  }
+  const patched = patchHealedCues(wsRecipe, run.healedSteps);
+  if (!patched.ok) return { ok: false, error: patched.error };
+  const verdict = validateRecipe(patched.recipe);
+  if (!verdict.ok) return { ok: false, error: `invalid recipe: ${verdict.errors[0]}`, errors: verdict.errors };
+  const stamped = { ...patched.recipe, version: bumpVersion(patched.recipe.version, 'patch') || patched.recipe.version, origin, updatedAt: Date.now() };
+  try {
+    await mcpToolCall('write_file', { target_file: origin, content: serializeRecipe(stamped) });
+  } catch (err) {
+    return { ok: false, error: `write_file failed: ${err?.message || err}` };
+  }
+  const lib = await recipeLibrary.load();
+  lib[run.recipeId] = stamped; // both copies carry the healed cues now
+  await recipeLibrary.save(lib);
+  run.healedSaved = true;
+  run.updatedAt = Date.now();
+  await recipePut(run);
+  return { ok: true, path: origin, version: stamped.version };
+}
+
 async function recipeList() {
   const lib = await recipeLibrary.load();
   const runs = await recipeStore.load();
@@ -3048,6 +3141,9 @@ async function recipeHeal(runId, step, missResult) {
     run = await recipeGet({ runId });
     if (!run || run.status !== 'healing') return;
     run.recipe.steps[run.stepIndex].cues = parsed.cues;
+    // The heal write-back (#256) patches these into the ORIGIN file later —
+    // the run copy is substituted, so only {index, type, cues} travel.
+    run.healedSteps = [...(run.healedSteps || []), { index: run.stepIndex, type: run.recipe.steps[run.stepIndex].type, cues: parsed.cues }];
     run.version = bumpVersion(run.version, 'patch') || run.version;
     run.healCount = (run.healCount || 0) + 1;
     run.updatedAt = Date.now();

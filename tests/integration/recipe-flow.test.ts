@@ -83,6 +83,9 @@ let captureBehavior: () => any = () => ({ url: tabUrl(), title: "Fixture page", 
 // The healer's one-shot /zo/ask call (null → default {} response → parse fail).
 let askResponder: (() => any) | null = null;
 const executedSteps: any[] = [];
+// R2 (#256): files written via MCP write_file during tests — read_file serves
+// them back so save → load round-trips on the bus.
+const savedFiles = new Map<string, string>();
 target.onMessage.addListener((msg: any, _sender: any, sendResponse: Function) => {
   if (msg.type === "CAPTURE_CONTEXT") {
     sendResponse(captureBehavior());
@@ -111,9 +114,23 @@ beforeAll(async () => {
       );
     }
     if (body.method === "notifications/initialized") return textResponse("", 202);
+    if (body.method === "tools/call" && body.params?.name === "write_file") {
+      const targetFile = String(body.params.arguments?.target_file || "");
+      savedFiles.set(targetFile, String(body.params.arguments?.content || ""));
+      return jsonResponse({
+        jsonrpc: "2.0", id: body.id,
+        result: { isError: false, content: [{ type: "text", text: "ok" }] },
+      });
+    }
     if (body.method === "tools/call" && body.params?.name === "read_file") {
       // Route by path: the #228 source-notes path returns plain notes text.
       const targetFile = String(body.params.arguments?.target_file || "");
+      if (savedFiles.has(targetFile)) {
+        return jsonResponse({
+          jsonrpc: "2.0", id: body.id,
+          result: { isError: false, content: [{ type: "text", text: JSON.stringify([savedFiles.get(targetFile), "file_ref"]) }] },
+        });
+      }
       if (targetFile.includes("notes/source.md")) {
         return jsonResponse({
           jsonrpc: "2.0", id: body.id,
@@ -688,5 +705,120 @@ describe("recipe generate-at-runtime fills (#228)", () => {
     expect(done2.status).toBe("done");
     expect(genCount).toBe(3); // DRAFT 1, DRAFT 2 (discarded run), DRAFT 3 (regenerated)
     askResponder = null;
+  });
+});
+
+describe("R2: workspace write-back (#256)", () => {
+  it("refuses unknown names and unconfirmed overwrites; confirms into a loadable artifact", async () => {
+    const none = await bus.runtime.sendMessage({ type: "RECIPE_SAVE", name: "ghost" });
+    expect(none.ok).toBe(false);
+    expect(String(none.error)).toContain("no local recipe");
+
+    // The mock's read_file answers for every path → the probe reports the
+    // target exists → the overwrite must refuse until confirmed.
+    const refused = await bus.runtime.sendMessage({ type: "RECIPE_SAVE", name: "rti" });
+    expect(refused.ok).toBe(false);
+    expect(refused.exists).toBe(true);
+    expect(refused.path).toBe("/home/workspace/recipes/rti-filing.json");
+
+    // The phantom occupant the mock serves differs from the local copy → the
+    // confirmed overwrite is content-drifted → patch bump on the way in.
+    const saved = await bus.runtime.sendMessage({ type: "RECIPE_SAVE", name: "rti", confirm: true });
+    expect(saved.ok).toBe(true);
+    expect(saved.path).toBe("/home/workspace/recipes/rti-filing.json");
+    expect(saved.version).toBe("1.0.1");
+    expect(savedFiles.get(saved.path)).toContain('"name": "RTI filing"');
+
+    // Traversal never reaches MCP.
+    const evil = await bus.runtime.sendMessage({ type: "RECIPE_SAVE", name: "rti", path: "/home/other/x.json", confirm: true });
+    expect(evil.ok).toBe(false);
+    expect(String(evil.error)).toContain("must be inside");
+  });
+
+  it("an unchanged re-save does NOT bump; drifted content does; the artifact replays", async () => {
+    captureBehavior = () => ({ url: "https://fixture.example/form", title: "F", formFields: [] });
+    executeBehavior = (action) => ({ ok: true, type: action.step?.type ?? action.type });
+
+    // Now the workspace file IS our last write — an unchanged re-save must
+    // leave the version alone (no drift).
+    const same = await bus.runtime.sendMessage({ type: "RECIPE_SAVE", name: "rti", confirm: true });
+    expect(same.ok).toBe(true);
+    expect(same.version).toBe("1.0.1");
+
+    // Content drift → patch bump.
+    bus.storage.local._store.cobrowse_recipes.rti.steps[1].value = "Grace";
+    const saved2 = await bus.runtime.sendMessage({ type: "RECIPE_SAVE", name: "rti", confirm: true });
+    expect(saved2.ok).toBe(true);
+    expect(saved2.version).toBe("1.0.2");
+    expect(savedFiles.get(saved2.path)).toContain("Grace");
+
+    // Round-trip: run straight from the written workspace file.
+    const res = await start({ workspacePath: "/home/workspace/recipes/rti-filing.json" });
+    expect(res.ok).toBe(true);
+    const done = await settle(res.run.runId, ["done"]);
+    expect(done.status).toBe("done");
+  });
+});
+
+describe("R2: heal write-back (#256) — RECIPE_SAVE_HEALED", () => {
+  it("patches healed cues into the parameterized origin file; re-import needs no heal", async () => {
+    const wsPath = "/home/workspace/recipes/heal-origin.json";
+    savedFiles.set(wsPath, JSON.stringify(makeRecipe({
+      id: "rcp-ws-heal", name: "Heal origin", version: "3.0.0", origin: wsPath,
+      params: [{ name: "who", type: "string", required: true, question: "Name?" }],
+      steps: [
+        { type: "navigate", url: "https://fixture.example/form", expectUrl: "/form" },
+        { type: "fill", cues: [{ strategy: "question", value: "Ghost field" }], value: "{{who}}" },
+        { type: "done", message: "Filed" },
+      ],
+    }), null, 2) + "\n");
+
+    executedSteps.length = 0;
+    executeBehavior = (action) => {
+      const st = action.step;
+      if (st.type === "fill" && st.cues[0]?.value === "Ghost field") {
+        return { ok: false, type: "fill", cueMiss: true, tried: ["question=Ghost field"], candidates: [{ text: "Your name", selector: "#fullname" }], error: "no element matched" };
+      }
+      return { ok: true, type: st.type };
+    };
+    askResponder = () => jsonResponse({ output: JSON.stringify({ cues: [{ strategy: "selector", value: "#fullname" }, { strategy: "question", value: "Your name" }], note: "renamed field" }) });
+
+    const res = await start({ workspacePath: wsPath }, { who: "Ada" });
+    expect(res.ok).toBe(true);
+    const run = await settle(res.run.runId, ["done"]);
+    expect(run.status).toBe("done");
+    expect(run.healCount).toBe(1);
+    expect(run.healedSteps).toEqual([{ index: 1, type: "fill", cues: [{ strategy: "selector", value: "#fullname" }, { strategy: "question", value: "Your name" }] }]);
+
+    // Origin file still stale until the user saves.
+    expect(String(savedFiles.get(wsPath))).toContain("Ghost field");
+
+    const saved = await bus.runtime.sendMessage({ type: "RECIPE_SAVE_HEALED", runId: run.runId });
+    expect(saved.ok).toBe(true);
+    expect(saved.version).toBe("3.0.1");
+    const written: any = JSON.parse(String(savedFiles.get(wsPath)));
+    expect(written.steps[1].cues).toEqual([{ strategy: "selector", value: "#fullname" }, { strategy: "question", value: "Your name" }]);
+    expect(written.steps[1].value).toBe("{{who}}"); // parameterization survives the write-back
+    // The local cache carries the healed cues too.
+    expect(bus.storage.local._store.cobrowse_recipes["rcp-ws-heal"].steps[1].cues[0].value).toBe("#fullname");
+
+    // Re-import from origin: the patched cue hits — no second heal.
+    executedSteps.length = 0;
+    askResponder = null;
+    const res2 = await start({ workspacePath: wsPath }, { who: "Grace" });
+    expect(res2.ok).toBe(true);
+    const run2 = await settle(res2.run.runId, ["done"]);
+    expect(run2.status).toBe("done");
+    expect(run2.healCount || 0).toBe(0);
+    const fills = executedSteps.filter((st: any) => st.type === "fill");
+    expect(fills).toHaveLength(1); // single attempt, no retry
+    expect(fills[0].cues[0].value).toBe("#fullname");
+    executeBehavior = (action) => ({ ok: true, type: action.step?.type ?? action.type });
+  });
+
+  it("refuses unknown runs, local-origin runs, and already-saved duplicates stay honest", async () => {
+    const ghost = await bus.runtime.sendMessage({ type: "RECIPE_SAVE_HEALED", runId: "rec-nope" });
+    expect(ghost.ok).toBe(false);
+    expect(String(ghost.error)).toContain("run not found");
   });
 });

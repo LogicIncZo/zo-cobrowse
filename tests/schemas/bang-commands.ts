@@ -60,12 +60,12 @@ const Handoff = z.object({
   query: z.string().min(1), // the goal
 });
 
-// !recipe run|record|stop|list — multi-page workflow primitive (#220)
+// !recipe run|record|stop|list|save — multi-page workflow primitive (#220; save = R2 #256)
 const RecipeCmd = z.object({
   handled: z.literal(true),
   kind: z.literal("recipe"),
   isRecipe: z.literal(true),
-  sub: z.enum(["run", "record", "stop", "list"]),
+  sub: z.enum(["run", "record", "stop", "list", "save"]),
   target: z.string(), // path or name after the subcommand ('' when none)
 });
 

@@ -1,8 +1,12 @@
 // Recipes (#220) — repeatable multi-page workflows as a first-class primitive.
 // Pure half: validation (incl. the submitish-requires-human invariant),
-// parameter substitution, version bumping, run progress lines. No chrome.*
-// or DOM dependencies — imported by background.js and directly by tests.
+// parameter substitution, version bumping, run progress lines, and (R2 #256)
+// workspace write-back serialization. No chrome.* or DOM dependencies —
+// imported by background.js and directly by tests.
 // Contract: tests/schemas/recipes.ts. Design: docs/superpowers/specs/2026-09-14-recipes-design.md
+
+import { safeWorkspacePath, WORKSPACE_ROOT } from './pickers.js';
+import { slugifyTitle } from './export.js';
 
 export const RECIPE_STEP_TYPES = [
   'navigate', 'fill', 'click', 'check', 'attach', 'extract', 'waitFor', 'human', 'done',
@@ -589,4 +593,83 @@ export function generateValuePrompt(step) {
     'Respond with only the field text itself — no quotes, no explanation, no markdown fences.',
   );
   return lines.join('\n');
+}
+
+// ---- Workspace write-back (R2, #256) ---------------------------------------
+// Recipes are portable artifacts: the local library (storage.local) writes
+// back to workspace JSON via MCP write_file, and healed cue patches can be
+// pushed to the recipe's source file. The transport stays in background.js —
+// everything decision-shaped lives here.
+
+/**
+ * Resolve the save target for a recipe. Default:
+ *   <root>/recipes/<slug>.json
+ * A caller-supplied path is confined to the workspace root.
+ * @param {string} name
+ * @param {string|undefined} pathInput
+ * @param {string} [root]
+ * @returns {{ok:true, path:string}|{ok:false, error:string}}
+ */
+export function recipeSaveTarget(name, pathInput, root = WORKSPACE_ROOT) {
+  if (pathInput) {
+    const p = safeWorkspacePath(String(pathInput), root);
+    if (!p) return { ok: false, error: `path must be inside ${root}` };
+    return { ok: true, path: p };
+  }
+  const slug = slugifyTitle(String(name || ''), 48) || 'recipe';
+  return { ok: true, path: `${root}/recipes/${slug}.json` };
+}
+
+/** The exact bytes written to the workspace — and exactly what the loader parses back. */
+export function serializeRecipe(recipe) {
+  return `${JSON.stringify(recipe, null, 2)}\n`;
+}
+
+// Provenance fields change on every save; content drift is what bumps the version.
+function stableRecipe(recipe) {
+  const { origin, updatedAt, ...rest } = (recipe || {});
+  return JSON.stringify(rest);
+}
+
+/**
+ * Does the local recipe differ in CONTENT from the workspace copy (whose text
+ * is the read_file payload)? Unparseable workspace text counts as drift —
+ * the write will replace it with valid JSON either way.
+ */
+export function driftedFromWorkspace(localRecipe, workspaceText) {
+  let ws;
+  try { ws = JSON.parse(String(workspaceText ?? '')); } catch { return true; }
+  return stableRecipe(localRecipe) !== stableRecipe(ws);
+}
+
+/**
+ * Patch healed cue arrays into the workspace (parameterized) copy of the
+ * recipe — the heal write-back's pure half (#256). The run carries the
+ * SUBSTITUTED recipe, so writing it would de-parameterize the artifact;
+ * instead the origin file keeps its {{param}} refs and only the healed
+ * steps' cues change. Refuses when the workspace copy no longer lines up
+ * (step removed/retyped since the run) — an honest refusal beats a patch
+ * onto the wrong step. Version bumping is the background's call.
+ * @param {object} workspaceRecipe parsed from the origin file
+ * @param {{index:number, type:string, cues:object[]}[]} healedSteps — type as
+ *   it was at run time, recorded by the healer
+ * @returns {{ok:true, recipe:object}|{ok:false, error:string}}
+ */
+export function patchHealedCues(workspaceRecipe, healedSteps) {
+  if (!Array.isArray(healedSteps) || healedSteps.length === 0) {
+    return { ok: false, error: 'no healed steps recorded' };
+  }
+  const steps = Array.isArray(workspaceRecipe?.steps) ? workspaceRecipe.steps : [];
+  const out = JSON.parse(JSON.stringify(workspaceRecipe));
+  for (const h of healedSteps) {
+    const i = Number(h?.index);
+    if (!Number.isInteger(i) || i < 0 || i >= steps.length) {
+      return { ok: false, error: `workspace recipe has no step at index ${i} — the file changed since the run; save manually` };
+    }
+    if (h?.type && steps[i]?.type !== h.type) {
+      return { ok: false, error: `type mismatch at step ${i} (${steps[i]?.type} vs healed ${h.type}) — the file changed since the run; save manually` };
+    }
+    out.steps[i].cues = Array.isArray(h.cues) ? h.cues : [];
+  }
+  return { ok: true, recipe: out };
 }
