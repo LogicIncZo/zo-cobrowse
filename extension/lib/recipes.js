@@ -595,11 +595,19 @@ export function parseGeneratedRecipe(text) {  const raw = typeof text === 'strin
 // E-INVARIANT holds by construction and is re-checked at validate time).
 
 /**
- * Compose-observation log → draft Recipe.
+ * Compose-observation log → draft Recipe. Two producers feed one log:
+ * source 'zo' (executor sink — values stripped), 'boundary' (refused actions),
+ * and 'human' (the recorder's capture-phase listeners, live during compose).
+ * Zo-sourced fills become params WITHOUT defaults; a human-sourced fill is the
+ * ONE way a default enters a composed artifact (the human typed it). Boundary
+ * fill parks with a human fill twin (same field, the human did it) collapse to
+ * the human record. Same step-shaping rules as the recorder where they apply;
+ * boundary parks become human checkpoints (the E-INVARIANT holds by
+ * construction and is re-checked at validate time).
  * @param {string} name
  * @param {string} goal the handoff run's goal (recorded as provenance)
- * @param {object[]} obs records {source:'zo'|'boundary', op, url?, cues?,
- *   submitish?, checked?, reason?, ts}
+ * @param {object[]} obs records {source:'zo'|'boundary'|'human', op, url?,
+ *   cues?, value?, submitish?, checked?, reason?, ts}
  * @param {number} [now]
  * @returns {{ok:true, recipe:object}|{ok:false, errors:string[], recipe:null}}
  */
@@ -612,21 +620,38 @@ export function assembleComposedDraft(name, goal, obs, now = Date.now()) {
   const params = [];
   const steps = [];
   const usedNames = new Set();
-  const addParam = (question, nameBase) => {
+  const addParam = (question, nameBase, defaultValue) => {
     const base = slugParam(nameBase || question);
     let n = base;
     let k = 2;
     while (usedNames.has(n)) n = `${base}_${k++}`;
     usedNames.add(n);
-    // NO default: composed fills are human-supplied on every run (required).
-    params.push({ name: n, type: 'string', required: true, question: question || n });
+    // A default exists ONLY for human-sourced fills (the human typed it) —
+    // Zo-sourced and sensitive fills are required, supplied on every run.
+    const hasDefault = typeof defaultValue === 'string' && defaultValue !== '';
+    params.push({
+      name: n,
+      type: 'string',
+      required: !hasDefault,
+      question: question || n,
+      ...(hasDefault ? { default: defaultValue } : {}),
+    });
     return `{{${n}}}`;
   };
+
+  // A compose value park leaves a boundary fill record (Zo was refused) AND,
+  // once the human filled the page, a human fill record for the same field.
+  // The human record is the artifact's truth — the refused attempt drops.
+  const humanFillTwin = (ev) => events.some((h) => h
+    && h.source === 'human' && h.op === 'fill'
+    && (h.url || '') === (ev.url || '')
+    && JSON.stringify(cleanCues(h.cues) || null) === JSON.stringify(cleanCues(ev.cues) || null));
 
   // Retry collapse: consecutive records with the same op on the same target
   // are a failed-then-retried sequence — one step, not two.
   const pruned = [];
   for (const ev of events) {
+    if (ev.source === 'boundary' && ev.op === 'fill' && humanFillTwin(ev)) continue;
     const prev = pruned[pruned.length - 1];
     if (prev && prev.source === 'zo' && ev.source === 'zo'
       && prev.op === ev.op && prev.url === ev.url
@@ -674,11 +699,19 @@ export function assembleComposedDraft(name, goal, obs, now = Date.now()) {
     const cues = cleanCues(ev.cues);
     switch (ev.op) {
       case 'fill': {
-        // The sink stripped the value — the param is born without a default.
         if (!cues.length) break; // unidentifiable field — drop rather than misfire
         const question = cueText(cues) || 'Field';
-        const ref = addParam(question);
-        steps.push({ type: 'fill', cues, value: ref });
+        if (ev.source === 'human' && typeof ev.value === 'string' && ev.value) {
+          // The human typed this on the live page (recorder listeners) — the
+          // only human-sourced default a composed artifact may carry.
+          const ref = addParam(question, undefined, ev.value);
+          steps.push({ type: 'fill', cues, value: ref });
+        } else {
+          // Zo fill (C1) or a sensitive human fill (value never captured) —
+          // the param is born without a default.
+          const ref = addParam(question);
+          steps.push({ type: 'fill', cues, value: ref });
+        }
         break;
       }
       case 'check':
@@ -766,6 +799,28 @@ export function composeCleanupPrompt(draft) {
     '```json',
     JSON.stringify(slim, null, 2),
     '```',
+  ].join('\n');
+}
+
+// The C2 (#290) compose-session instruction block — appended to the first
+// turn's prompt (stable `compose-run` marker for mocks/evals). The belt: the
+// boundary checker in lib/handoff.js is the braces (fills/submits refused in
+// code regardless of what the model does). A park is signaled as a final
+// done(response:"PARK: …") — the compose loop intercepts it before completion.
+export function composeInstructions(goal) {
+  return [
+    '## Compose Run',
+    '',
+    `You are COMPOSING a reusable recipe by driving the browser yourself (compose-run marker). Goal: ${goal}`,
+    'The human watches and supplies what you cannot: values, tie-breaks, and the success signal.',
+    '',
+    'Rules:',
+    '- You may navigate and click ordinary controls (links, tabs, non-terminal buttons).',
+    '- NEVER fill a field — values are human-only. When a form blocks the path, end your turn with done(response: "PARK: Please fill <field list> on the page, then press Done") and stop.',
+    '- NEVER click submit/terminal controls (submit/pay/order/delete/send). End your turn with done(response: "PARK: Please review and click <control> yourself, then press Done").',
+    '- If the next step is genuinely ambiguous, end with done(response: "PARK: <question> | <option A> | <option B>").',
+    '- While parked, do nothing else — the human acts on the page and resumes you.',
+    '- When the flow is complete, finish with a normal done() whose response summarizes the flow in one line (this becomes the recipe\u2019s description).',
   ].join('\n');
 }
 

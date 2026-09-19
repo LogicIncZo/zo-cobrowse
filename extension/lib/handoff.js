@@ -16,6 +16,10 @@
 // 'no-submit'  — 0.3.0 form scenarios: fill allowed, submit-ish clicks parked
 //                (generalizes the #26 no-submit rule; per-site grants are the
 //                #47 autonomy dial, out of scope here).
+// 'compose'    — 0.3.2 C2 (#290): recipe composition. Zo navigates and clicks
+//                non-submitish controls only; fills are refused (value parks)
+//                and submits are refused (human checkpoints). Values are
+//                human-only, boundary-enforced — never prompt-enforced.
 
 export const DEFAULT_BUDGET = { maxTurns: 12, maxNavigations: 25, maxMinutes: 20 };
 
@@ -48,10 +52,33 @@ export function isSubmitish(action) {
   return SUBMITISH.some((w) => hay.includes(w));
 }
 
+// C2 (#290): fill-shaped actions — compose refuses them outright (Zo never
+// fills; values are human-only, enforced here rather than in any prompt).
+export function isFillish(action) {
+  return ['fill', 'fill_form'].includes(String(action?.type || ''));
+}
+
 /** Boundary decision for one Zo action under this run's mode.
  * @returns {{allowed: true} | {allowed: false, reason: string}} */
 export function checkBoundary(action, boundaryMode) {
   const type = String(action?.type || '');
+  if (boundaryMode === 'compose') {
+    // Zo supplies STRUCTURE only: navigate + non-submitish clicks. A refused
+    // fill is a value park; a refused submitish click is a human checkpoint.
+    if (isFillish(action)) {
+      return {
+        allowed: false,
+        reason: 'COMPOSE: Zo never fills — values are the human\u2019s; they fill it on the page',
+      };
+    }
+    if (type === 'click' && isSubmitish(action)) {
+      return {
+        allowed: false,
+        reason: 'COMPOSE: the submit stays human — this click becomes a checkpoint in the composed recipe',
+      };
+    }
+    return { allowed: true };
+  }
   if (boundaryMode === 'readonly') {
     if (READONLY_ALLOWED.has(type)) return { allowed: true };
     return {
@@ -87,6 +114,9 @@ export function createRun(opts) {
     status: 'priming',
     pagesVisited: [],
     parkLog: [],
+    // C2 (#290): compose parks awaiting the human (value/choice/checkpoint) —
+    // empty for ordinary handoff runs.
+    parks: [],
     // C1 (#289): the run's observation log — one record per EXECUTED action
     // ({source:'zo', …}) plus boundary parks ({source:'boundary', …}). Values
     // are stripped by the sink BEFORE a record lands here; assembleComposedDraft
@@ -171,6 +201,42 @@ export function park(run, action, reason, url) {
     parkLog: [...run.parkLog, { action, reason, url, ts: Date.now() }].slice(-50),
     updatedAt: Date.now(),
   };
+}
+
+// ── Compose parks (C2 #290) ────────────────────────────────────────────────
+// A compose session parks the run whenever Zo needs the human: a form to fill
+// (value), an ambiguity to tie-break (choice), or a submit to do by hand
+// (checkpoint). Parks persist on the run (storage.session) so the panel can
+// render the cards and a resume resolves them.
+
+/** Append a compose park. Pure. */
+export function addComposePark(run, { kind, question, options, action, url }) {
+  const n = (run.parks || []).length + 1;
+  const rec = {
+    parkId: `park-${n}`,
+    kind, // 'value' | 'choice' | 'checkpoint'
+    question: String(question || ''),
+    ...(Array.isArray(options) && options.length ? { options: options.map(String).slice(0, 6) } : {}),
+    ...(action ? { action } : {}),
+    ...(url ? { url } : {}),
+    ts: Date.now(),
+  };
+  return { ...run, parks: [...(run.parks || []), rec].slice(-20), updatedAt: Date.now() };
+}
+
+/** Mark one park resolved (the human did the step / picked an option). Pure. */
+export function resolveComposePark(run, parkId, resolution) {
+  const parks = (run.parks || []).map((p) => (
+    p.parkId === parkId && !p.resolved
+      ? { ...p, resolved: true, ...(resolution ? { resolution: String(resolution).slice(0, 200) } : {}) }
+      : p
+  ));
+  return { ...run, parks, updatedAt: Date.now() };
+}
+
+/** The most recent unresolved compose park, if any. */
+export function pendingComposePark(run) {
+  return (run.parks || []).find((p) => !p.resolved) || null;
 }
 
 /** Budget verdict for continuing the loop.

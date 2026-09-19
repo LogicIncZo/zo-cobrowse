@@ -40,7 +40,10 @@ import {
   withinBudget as handoffWithinBudget,
   checkBoundary as handoffCheckBoundary,
   isSubmitish as handoffIsSubmitish,
+  isFillish as handoffIsFillish,
   recordObs as handoffRecordObs,
+  addComposePark,
+  resolveComposePark,
   buildContinuationTurn,
   handoffInstructions,
   continuationPayload as handoffContinuationPayload,
@@ -97,6 +100,7 @@ import {
   assembleComposedDraft,
   generateRecipePrompt,
   composeCleanupPrompt,
+  composeInstructions,
   parseGeneratedRecipe,
   withoutParamDefaults,
   generateValuePrompt,
@@ -486,6 +490,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       handoffGet({ runId: request.runId }).then(async (run) => {
         if (!run) return sendResponse({ ok: false, error: 'no such handoff run' });
         handoffTurnCtx.delete(request.runId);
+        // C2: stopping a compose run by any path (✕ on the line, tab close)
+        // disarms the compose session — the human-obs producer goes with it.
+        if (run.compose) {
+          await composeStore.clear();
+          composeBroadcastRecordState(false).catch(() => {});
+        }
         // A run that already left the loop (done/aborted) has nothing to stop.
         // Saving it again would re-fire handoffMaybeNotify + re-push
         // HANDOFF_UPDATE, showing the user a second "Handoff done" line for a
@@ -600,6 +610,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       recipeComposeSave(request).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
       return true;
     }
+    case 'RECIPE_COMPOSE_START': {
+      // 0.3.2 C2 (#290): {chatId, tabId, goal, name?} → {ok, run} — a compose
+      // session: handoff run with the compose boundary + recorder armed; Zo
+      // drives, parks at values/ambiguity, never fills or submits.
+      recipeComposeStart(request).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
+      return true;
+    }
+    case 'RECIPE_COMPOSE_RESUME': {
+      // {runId?, parkId, text?} → {ok, run, continuationQuery} — the human
+      // resolved a park; the panel re-issues the continuation as ASK_ZO.
+      recipeComposeResume(request).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
+      return true;
+    }
+    case 'RECIPE_COMPOSE_STOP': {
+      // {runId?} → {ok, run} — abort the compose session + disarm recording.
+      recipeComposeStop(request).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
+      return true;
+    }
     case 'RECIPE_LIST': {
       // `!recipe list` — the local learned-recipes library + any live run.
       recipeList().then(sendResponse).catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
@@ -616,8 +644,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
     }
     case 'RECIPE_OBS': {
-      // One observation record from the content recorder.
-      recipeRecordObserve(request.obs).then(sendResponse).catch(() => sendResponse({ ok: false }));
+      // One observation record: the recorder's store (if recording), AND the
+      // live compose run's obs (C2 second producer, source:'human').
+      Promise.all([recipeRecordObserve(request.obs), composeObserve(request.obs)])
+        .then(() => sendResponse({ ok: true }))
+        .catch(() => sendResponse({ ok: false }));
       return true;
     }
     case 'RECIPE_RECORD_STOP': {
@@ -2601,6 +2632,46 @@ async function handoffAfterExecute(runId, request, res) {
       if (r && r.handoffParked) run = handoffPark(run, r.action || { type: r.type }, r.error, request.url);
     }
 
+    // C2 (#290): compose turns never chain past a park — the human acts on
+    // the page and resolves it. Two park sources: the boundary REFUSING a
+    // fillish/submitish action (kind: value/checkpoint), and Zo explicitly
+    // asking via done(response:"PARK: …") (kind: value/choice).
+    if (run.compose) {
+      const refused = results.filter((r) => r && r.handoffParked);
+      for (const r of refused) {
+        const a = r.action || {};
+        const fillish = handoffIsFillish(a);
+        run = addComposePark(run, {
+          kind: fillish ? 'value' : 'checkpoint',
+          question: fillish
+            ? `Fill the form${a.text ? ` (${safeText(a.text).slice(0, 60)})` : ''} on the page`
+            : `Review and click ${safeText(a.text || a.selector || 'the control').slice(0, 60)} yourself`,
+          action: {
+            type: a.type,
+            ...(a.selector ? { selector: safeText(a.selector).slice(0, 120) } : {}),
+            ...(a.text ? { text: safeText(a.text).slice(0, 60) } : {}),
+          },
+          url: request.url,
+        });
+      }
+      const doneAct = results.find((r) => r && r.type === 'done') || actions.find((a) => a && a.type === 'done');
+      const doneResp = safeText(doneAct?.response || '');
+      if (!refused.length && doneResp.startsWith('PARK:')) {
+        const parts = doneResp.slice(5).split('|').map((s) => s.trim()).filter(Boolean);
+        run = addComposePark(run, {
+          kind: parts.length > 1 ? 'choice' : 'value',
+          question: parts[0] || 'Your turn',
+          ...(parts.length > 1 ? { options: parts.slice(1) } : {}),
+          url: request.url,
+        });
+      }
+      if ((run.parks || []).some((p) => !p.resolved)) {
+        const t = handoffTransition(run, 'block', { now: Date.now(), reason: 'compose parked — waiting for you' });
+        await handoffPut(t.ok ? t.run : run);
+        return; // no continuation: the human resolves the park first
+      }
+    }
+
     // done() ends the run — its response is the deliverable.
     const doneResult = results.find((r) => r && r.type === 'done') || actions.find((a) => a && a.type === 'done');
     if (doneResult) {
@@ -2669,6 +2740,113 @@ async function handoffChainNextTurn(runId) {
       await handoffPut(t.ok ? t.run : r);
     }
   });
+}
+
+// ---- Compose sessions (0.3.2 C2, #290) -------------------------------------
+// `!recipe compose <goal>`: a handoff-engine run with the COMPOSE boundary —
+// Zo drives (navigate + non-submitish clicks; the boundary REFUSES fills and
+// submits in code), parks at values/ambiguity/checkpoints, and the human's
+// on-page actions stream into the same obs log via the recorder listeners
+// (source:'human' — the second producer). Completion rides C1: ↧ Save as
+// recipe → composed draft → mandatory rehearsal.
+
+const composeStore = {
+  key: 'cobrowse_recipe_compose',
+  async load() {
+    const o = await chrome.storage.session.get(this.key);
+    return (o && o[this.key]) || null;
+  },
+  async save(s) { await chrome.storage.session.set({ [this.key]: s }); },
+  async clear() { await chrome.storage.session.remove(this.key); },
+};
+
+// The recorder's re-arm broadcast, shared with compose — content scripts only
+// care THAT recording is armed, not which flavor started it.
+function composeBroadcastRecordState(armed) {
+  return recipeBroadcastRecordState(armed);
+}
+
+async function recipeComposeStart({ chatId, tabId, goal, name } = {}) {
+  const safeGoal = safeText(goal);
+  if (!safeGoal) return { ok: false, error: 'compose needs a goal — `!recipe compose <goal>`' };
+  // One armed session at a time (the recorder's rule, extended to compose).
+  const rec = await recipeRecStore.load();
+  if (rec && rec.armed) return { ok: false, error: `already recording "${rec.name}" — stop it first` };
+  const compose = await composeStore.load();
+  if (compose && compose.armed) {
+    const live = await handoffGet({ runId: compose.runId });
+    if (live && !['done', 'aborted'].includes(live.status)) {
+      return { ok: false, error: `a compose session is already live ("${safeText(live.compose?.name || live.goal)}") — stop it first` };
+    }
+  }
+  // One live run per chat (mirrors the library popup's one-run rule).
+  const liveRun = await handoffGet({ chatId });
+  if (liveRun) return { ok: false, error: 'this chat already has a live run — stop it before composing' };
+
+  const run = handoffCreateRunPure({
+    chatId,
+    goal: safeGoal,
+    boundaryMode: 'compose',
+    budget: config.cobrowse_handoff_budget || undefined,
+  });
+  run.compose = { name: safeText(name) || slugifyTitle(safeGoal, 48) || `composed-${new Date().toISOString().slice(0, 10)}` };
+  if (tabId) run.tabId = tabId;
+  await handoffPut(run);
+  await composeStore.save({ armed: true, runId: run.runId, startedAt: Date.now() });
+  composeBroadcastRecordState(true).catch(() => {});
+  return { ok: true, run };
+}
+
+async function recipeComposeStop({ runId, reason } = {}) {
+  const compose = await composeStore.load();
+  const targetId = safeText(runId) || (compose ? compose.runId : '');
+  const run = targetId ? await handoffGet({ runId: targetId }) : null;
+  if (!run) return { ok: false, error: 'no live compose session' };
+  await composeStore.clear();
+  composeBroadcastRecordState(false).catch(() => {});
+  if (['done', 'aborted'].includes(run.status)) return { ok: true, run };
+  const res = handoffTransition(run, 'abort', { now: Date.now(), reason: safeText(reason) || 'compose stopped' });
+  const saved = await handoffPut(res.ok ? res.run : run);
+  return { ok: true, run: saved };
+}
+
+// Resolve a park: the human filled the page / picked an option / did the step
+// by hand. Hands back the continuation turn — the PANEL re-issues it as an
+// ASK_ZO carrying handoffRunId (the #164 mechanism re-registers the loop).
+async function recipeComposeResume({ runId, parkId, text } = {}) {
+  const compose = await composeStore.load();
+  const targetId = safeText(runId) || (compose ? compose.runId : '');
+  const run = targetId ? await handoffGet({ runId: targetId }) : null;
+  if (!run || !run.compose) return { ok: false, error: 'no compose session for this run' };
+  if (!['blocked', 'paused'].includes(run.status)) {
+    return { ok: false, error: `run is ${run.status}, not waiting on you` };
+  }
+  let next = run;
+  if (parkId) {
+    const rec = (run.parks || []).find((p) => p.parkId === safeText(parkId) && !p.resolved);
+    if (!rec) return { ok: false, error: 'that park is already resolved (or unknown)' };
+    next = resolveComposePark(next, safeText(parkId), safeText(text) || 'done on the page');
+  }
+  const res = handoffTransition(next, 'resume', { now: Date.now(), reason: 'park resolved' });
+  if (!res.ok) return { ok: false, error: res.error };
+  const saved = await handoffPut(res.run);
+  const pending = (saved.parks || []).find((p) => !p.resolved);
+  const parkLine = pending
+    ? `[compose park] Another step still needs the human: ${safeText(pending.question)} — work around it or park again.`
+    : `[compose park resolved] The human ${safeText(text) ? `did: ${safeText(text).slice(0, 120)}` : 'completed the parked step on the page'}. Continue toward the goal.`;
+  return { ok: true, run: saved, continuationQuery: `${buildContinuationTurn(saved)}\n\n${parkLine}` };
+}
+
+// C2: during a compose session the recorder's human events stream into the
+// RUN's obs log (source:'human') — the second producer of the composed draft.
+// Values ride ONLY here, from the human's own keyboard; the recorder's #243
+// redaction already stripped sensitive ones upstream.
+async function composeObserve(obs) {
+  const session = await composeStore.load();
+  if (!session || !session.armed || !obs || typeof obs !== 'object' || !obs.op) return;
+  const run = await handoffGet({ runId: session.runId });
+  if (!run || !run.compose || ['done', 'aborted'].includes(run.status)) return;
+  await handoffPut(handoffRecordObs(run, { ...obs, source: 'human', ts: Date.now() }));
 }
 
 // ---- Recipes: deterministic player (#220) ---------------------------------
@@ -3512,6 +3690,15 @@ async function recipeRecordStart({ chatId, name } = {}) {
   if (existing && existing.armed) {
     return { ok: false, error: `already recording "${existing.name}" — stop it first (✕ on the recording line)` };
   }
+  // One armed session at a time (C2 #290): a live compose session owns the
+  // recorder listeners.
+  const compose = await composeStore.load();
+  if (compose && compose.armed) {
+    const live = await handoffGet({ runId: compose.runId });
+    if (live && !['done', 'aborted'].includes(live.status)) {
+      return { ok: false, error: `a compose session is live ("${safeText(live.compose?.name || live.goal)}") — stop it first` };
+    }
+  }
   const session = {
     armed: true,
     name: safeText(name) || `recorded-${new Date().toISOString().slice(0, 10)}`,
@@ -3536,7 +3723,9 @@ async function recipeBroadcastRecordState(armed) {
 
 async function recipeRecordPeek() {
   const s = await recipeRecStore.load();
-  return { ok: true, armed: !!(s && s.armed), name: s ? s.name : undefined };
+  const c = await composeStore.load();
+  const armed = !!(s && s.armed) || !!(c && c.armed);
+  return { ok: true, armed, name: s && s.armed ? s.name : (c && c.armed ? 'compose' : undefined) };
 }
 
 async function recipeRecordObserve(obs) {

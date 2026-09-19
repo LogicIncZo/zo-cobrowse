@@ -2,7 +2,11 @@ import { describe, it, expect } from "bun:test";
 import {
   DEFAULT_BUDGET,
   isSubmitish,
+  isFillish,
   checkBoundary,
+  addComposePark,
+  resolveComposePark,
+  pendingComposePark,
   createRun,
   transition,
   tally,
@@ -340,5 +344,48 @@ describe("continuationPayload — send-once attachments never replay", () => {
     expect(out.sessionId).toBe('s');
     expect(out.handoffRunId).toBe('r');
     expect(SEND_ONCE_FIELDS.every((f) => out[f] === undefined)).toBe(true);
+  });
+});
+
+describe("handoff — compose boundary (C2 #290)", () => {
+  it("isFillish covers fill and fill_form only", () => {
+    expect(isFillish({ type: "fill" })).toBe(true);
+    expect(isFillish({ type: "fill_form" })).toBe(true);
+    expect(isFillish({ type: "click" })).toBe(false);
+    expect(isFillish({ type: "navigate" })).toBe(false);
+  });
+
+  it("compose refuses fills and submitish clicks; allows navigation and plain clicks", () => {
+    expect(checkBoundary({ type: "fill", selector: "#name" }, "compose").allowed).toBe(false);
+    expect(checkBoundary({ type: "fill_form", selector: "form" }, "compose").allowed).toBe(false);
+    expect(checkBoundary({ type: "click", selector: "[type=submit]", text: "Place order" }, "compose").allowed).toBe(false);
+    expect(checkBoundary({ type: "click", selector: ".next", text: "Next page" }, "compose").allowed).toBe(true);
+    expect(checkBoundary({ type: "navigate", url: "https://x/" }, "compose").allowed).toBe(true);
+    expect(checkBoundary({ type: "extract", selector: "h1" }, "compose").allowed).toBe(true);
+    // The refusal reasons say WHY (they ride the park cards).
+    expect(checkBoundary({ type: "fill" }, "compose").reason).toContain("never fills");
+    expect(checkBoundary({ type: "click", text: "Pay now" }, "compose").reason).toContain("checkpoint");
+  });
+});
+
+describe("handoff — compose parks (C2 #290)", () => {
+  it("parks persist on the run, resolve once, and validate against the schema", () => {
+    let run = mkRun({ boundaryMode: "compose" });
+    run = addComposePark(run, { kind: "value", question: "Fill the applicant name" });
+    run = addComposePark(run, { kind: "choice", question: "Which plan?", options: ["Pro", "Team"] });
+    expect(run.parks).toHaveLength(2);
+    expect(run.parks[0].parkId).toBe("park-1");
+    expect(run.parks[1].options).toEqual(["Pro", "Team"]);
+    expect(pendingComposePark(run)?.kind).toBe("value");
+    expect(() => HandoffRun.parse(run)).not.toThrow();
+
+    run = resolveComposePark(run, "park-1", "typed it on the page");
+    expect(run.parks[0].resolved).toBe(true);
+    expect(run.parks[0].resolution).toBe("typed it on the page");
+    expect(pendingComposePark(run)?.parkId).toBe("park-2");
+    // Resolving twice is a no-op (the first resolution sticks).
+    const twice = resolveComposePark(run, "park-1", "again");
+    expect(twice.parks[0].resolution).toBe("typed it on the page");
+    expect(() => HandoffRun.parse(run)).not.toThrow();
   });
 });
