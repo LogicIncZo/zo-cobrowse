@@ -2067,6 +2067,16 @@ body.options-page {
 }
 
 /* ── Responsive tweaks ── */
+/* #296: dock-width header policy — the panel's real dock width is ~400–420px,
+   where the fixed brand row starved the page title (the user's primary
+   "where am I" signal) to a few characters. Below 480px the brand collapses
+   to the icon; .header-page (flex:1, min-width:0) takes the freed space, and
+   the title keeps its ellipsis + full-URL tooltip. ≥600px renders unchanged. */
+@media (max-width: 480px) {
+  .header-brand .brand-zo,
+  .header-brand .brand-sub { display: none; }
+  .header-brand { gap: 0; }
+}
 @media (max-width: 300px) {
   .header { padding: 0 8px; }
   .toolbar { padding: 4px 8px; }
