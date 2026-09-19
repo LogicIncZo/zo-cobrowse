@@ -831,6 +831,19 @@ describe("R3: library surface (#257) — list/rename/delete/import/export", () =
     // key-fallback name, 0 steps — visible and deletable, never a crash.
     const brokenRow = resp.recipes.find((r: any) => r.name === "broken");
     expect(brokenRow?.steps).toBe(0);
+    // qa-recipe-rows-no-last-run: a recipe with run history badges it (fresh
+    // recipeId — earlier tests leave real-timestamped runs on rti).
+    bus.storage.local._store.cobrowse_recipes.runbadge = makeRecipe({ id: "rcp-runbadge", name: "Runbadge", steps: [{ type: "done" }] });
+    bus.storage.session._store.cobrowse_recipe_runs["rec-last"] = {
+      runId: "rec-last", recipeId: "rcp-runbadge", name: "Runbadge", origin: "local:runbadge",
+      version: "1.0.0", chatId: "chat-x", status: "blocked", stepIndex: 1, stepsTotal: 1,
+      params: {}, evidence: [], healCount: 0, startedAt: T0, createdAt: T0, updatedAt: T0 + 5,
+    };
+    const resp2 = await bus.runtime.sendMessage({ type: "RECIPE_LIST" });
+    const withRun = resp2.recipes.find((r: any) => r.name === "Runbadge");
+    expect(withRun.lastRun).toEqual({ status: "blocked", endedAt: T0 + 5 });
+    const noRun = resp2.recipes.find((r: any) => r.name === "Other");
+    expect(noRun.lastRun ?? null).toBeNull();
     const rti = resp.recipes.find((r: any) => r.name === "RTI filing");
     expect(rti).toBeTruthy();
     // The R2 describe above saved rti to the workspace — its local copy now

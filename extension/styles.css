@@ -2616,6 +2616,13 @@ body.options-page {
   cursor: pointer;
 }
 .recipe-lib-import button:hover { border-color: var(--accent, #6c8cff); }
+.recipe-lib-guide {
+  color: var(--text-dim, #9aa);
+  font-size: 12px;
+  text-decoration: none;
+  align-self: center;
+}
+.recipe-lib-guide:hover { color: var(--accent, #6c8cff); }
 .recipe-lib-error {
   color: #ff6369;
   font-size: 12px;

@@ -5266,6 +5266,14 @@ async function renderRecipeLibrary() {
     e.stopPropagation(); // the composer's Enter-to-send must not fire
   });
   importBar.append(pathInput, importBtn);
+  const guide = document.createElement('a');
+  guide.className = 'recipe-lib-guide';
+  guide.href = 'https://logicinczo.github.io/zo-cobrowse/guide/recipes';
+  guide.target = '_blank';
+  guide.rel = 'noopener noreferrer';
+  guide.textContent = '📖 Guide';
+  guide.title = 'The recipes user guide — record, run, checkpoints, export';
+  importBar.appendChild(guide);
   pop.appendChild(importBar);
 }
 
@@ -5290,6 +5298,13 @@ function recipeLibraryRow(r, liveRun) {
     head.appendChild(el);
   }
   head.appendChild(badge);
+  if (r.lastRun) {
+    const runBadge = document.createElement('span');
+    runBadge.className = 'recipe-lib-badge';
+    runBadge.textContent = `▶ ${safeText(r.lastRun.status)}`;
+    runBadge.title = 'Status of this recipe\'s most recent run';
+    head.appendChild(runBadge);
+  }
   row.appendChild(head);
   if ((r.params || []).length) {
     const chips = document.createElement('div');
@@ -5353,10 +5368,14 @@ function recipeLibraryRow(r, liveRun) {
     };
     input.addEventListener('keydown', (e) => {
       e.stopPropagation();
-      if (e.key === 'Enter') { e.preventDefault(); commit(); }
-      if (e.key === 'Escape') { e.preventDefault(); renderRecipeLibrary(); }
+      if (e.key === 'Enter') { e.preventDefault(); commitOnce(); }
+      if (e.key === 'Escape') { e.preventDefault(); committed = true; renderRecipeLibrary(); }
     });
-    input.addEventListener('blur', commit);
+    // qa-recipe-rename-double-commit: Enter then blur must not send twice —
+    // the second RECIPE_RENAME would hit the moved key and error spuriously.
+    let committed = false;
+    const commitOnce = () => { if (!committed) { committed = true; commit(); } };
+    input.addEventListener('blur', commitOnce);
   });
   act('🗑 Delete', 'Remove from the LOCAL library (workspace files are never touched)', (b) => {
     if (!b.dataset.confirmed) {
@@ -5710,7 +5729,10 @@ sendQuery = async function() {
         if (!resp?.ok) addMessage('error', resp?.error || 'Could not list recipes.');
         else if (!(resp.recipes || []).length) addMessage('system', 'No saved recipes yet. Author JSON at `/home/workspace/recipes/`, or run one with `!recipe run <path>`.');
         else {
-          const lines = resp.recipes.map((r) => `- **${safeText(r.name)}** v${safeText(r.version)} — ${r.steps} steps${r.draft ? ' · draft' : ''}`);
+          // qa-recipe-list-no-origin-drift: the extended payload's provenance
+          // rides the text list too — workspace-sourced rows show their origin
+          // so local-vs-workspace drift is visible on the command surface.
+          const lines = resp.recipes.map((r) => `- **${safeText(r.name)}** v${safeText(r.version)} — ${r.steps} steps${r.draft ? ' · draft' : ''}${r.source === 'workspace' && r.origin ? ` · 🌐 \`${safeText(r.origin)}\`` : ''}${r.lastRun ? ` · last run: ${safeText(r.lastRun.status)}` : ''}`);
           const live = resp.liveRun ? `\n\nLive run: ${safeText(resp.liveRun.name)} (${safeText(resp.liveRun.status)})` : '';
           addMessage('system', `Saved recipes:\n\n${lines.join('\n')}${live}`);
         }
