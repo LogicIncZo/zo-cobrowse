@@ -94,12 +94,13 @@ test.describe("chat tabs mid-stream", () => {
     // #302: Skip must leave a record, not a silent discard — the note names
     // the dropped action count + types and survives a reload.
     await h.panel.locator("#skip-btn").click();
-    const note = h.panel.locator("#messages .msg-system", { hasText: "Skipped 2 parked actions" });
+    // The fill-slow envelope carries ONE fill action (+ done, not parked).
+    const note = h.panel.locator("#messages .msg-system", { hasText: "Skipped 1 parked action" });
     await expect(note).toBeVisible({ timeout: 5_000 });
     await expect(note).toContainText("fill");
     await expect(h.panel.locator("#actions-bar")).toBeHidden();
     await h.panel.reload();
-    await expect(h.panel.locator("#messages .msg-system", { hasText: "Skipped 2 parked actions" })).toBeVisible({
+    await expect(h.panel.locator("#messages .msg-system", { hasText: "Skipped 1 parked action" })).toBeVisible({
       timeout: 10_000,
     });
   });
