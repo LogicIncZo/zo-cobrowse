@@ -54,6 +54,7 @@
   --text: #e8e6f0;
   --text-muted: #8884a8;
   --text-faint: #5a5680;
+  --text-soft: #a29ebc; /* #298 readable floor */
   --text-inverse: #070914;
 
   /* Zo-neutral surface tokens (oklch-derived). Used by the chat surface
@@ -66,7 +67,7 @@
   --zo-primary-foreground: #070914;
   --zo-accent: var(--bg-elevated);
   --zo-accent-foreground: var(--text);
-  --zo-muted-foreground: var(--text-muted);
+  --zo-muted-foreground: var(--text-soft); /* #298: >=4.5 on message surfaces */
   --zo-border: #2a2d52;
   --zo-border-primary: rgba(196, 181, 253, 0.40);
 
@@ -111,8 +112,9 @@
     --bg-glass: rgba(255, 255, 255, 0.85);
 
     --text: #1a1814;
-    --text-muted: #7a756c;
+    --text-muted: #706b62; /* #298: 4.69:1 on --bg-deep (was 4.06, sub-AA) */
     --text-faint: #a8a298;
+  --text-soft: #5f5a52; /* #298 readable floor */
     --text-inverse: #f4f1ea;
 
     --amber: #c47f20;
@@ -133,7 +135,7 @@
     --zo-primary-foreground: #ffffff;
     --zo-accent: var(--bg-elevated);
     --zo-accent-foreground: var(--text);
-    --zo-muted-foreground: var(--text-muted);
+    --zo-muted-foreground: var(--text-soft); /* #298: >=4.5 on message surfaces */
     --zo-border: #e2ddd3;
     --zo-border-primary: rgba(109, 40, 217, 0.30);
 
@@ -156,6 +158,7 @@
   --text: #e8e6f0;
   --text-muted: #8884a8;
   --text-faint: #5a5680;
+  --text-soft: #a29ebc; /* #298 readable floor */
   --text-inverse: #070914;
   --amber: #f0a832;
   --amber-muted: #b07a2a;
@@ -174,7 +177,7 @@
   --zo-primary-foreground: #070914;
   --zo-accent: var(--bg-elevated);
   --zo-accent-foreground: var(--text);
-  --zo-muted-foreground: var(--text-muted);
+  --zo-muted-foreground: var(--text-soft); /* #298: >=4.5 on message surfaces */
   --zo-border: #2a2d52;
   --zo-border-primary: rgba(196, 181, 253, 0.40);
   --shadow-sm: 0 1px 3px rgba(0,0,0,0.4);
@@ -197,8 +200,9 @@
   --bg-input: #ffffff;
   --bg-glass: rgba(255, 255, 255, 0.85);
   --text: #1a1814;
-  --text-muted: #7a756c;
+  --text-muted: #706b62; /* #298: 4.69:1 on --bg-deep (was 4.06, sub-AA) */
   --text-faint: #a8a298;
+  --text-soft: #5f5a52; /* #298 readable floor */
   --text-inverse: #f4f1ea;
   --amber: #c47f20;
   --amber-muted: #dba14a;
@@ -217,7 +221,7 @@
   --zo-primary-foreground: #ffffff;
   --zo-accent: var(--bg-elevated);
   --zo-accent-foreground: var(--text);
-  --zo-muted-foreground: var(--text-muted);
+  --zo-muted-foreground: var(--text-soft); /* #298: >=4.5 on message surfaces */
   --zo-border: #e2ddd3;
   --zo-border-primary: rgba(109, 40, 217, 0.30);
   --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
@@ -236,8 +240,9 @@
   --bg-input: #faf2e2;
   --bg-glass: rgba(246, 236, 218, 0.88);
   --text: #3d3024;
-  --text-muted: #766756;  /* #297: 4.66:1 on --bg-surface (was 4.40, sub-AA) */
+  --text-muted: #6f6050; /* #297/#298: 4.76:1 on --bg-deep, floor with margin */  /* #297: 4.66:1 on --bg-surface (was 4.40, sub-AA) */
   --text-faint: #a89880;
+  --text-soft: #5f5142; /* #298 readable floor */
   --text-inverse: #f6ecda;
   --amber: #a0592a;
   --amber-muted: #b8733e;
@@ -256,7 +261,7 @@
   --zo-primary-foreground: #f6ecda;
   --zo-accent: var(--bg-elevated);
   --zo-accent-foreground: var(--text);
-  --zo-muted-foreground: var(--text-muted);
+  --zo-muted-foreground: var(--text-soft); /* #298: >=4.5 on message surfaces */
   --zo-border: #d4c8b0;
   --zo-border-primary: rgba(139, 90, 43, 0.30);
   --shadow-sm: 0 1px 3px rgba(61,48,36,0.10);
@@ -277,6 +282,7 @@
   --text: #dce8d4;
   --text-muted: #8a9e82;
   --text-faint: #5a7052;
+  --text-soft: #a4b89b; /* #298 readable floor */
   --text-inverse: #0f1a14;
   --amber: #c9a84c;
   --amber-muted: #a8883c;
@@ -295,7 +301,7 @@
   --zo-primary-foreground: #0f1a14;
   --zo-accent: var(--bg-elevated);
   --zo-accent-foreground: var(--text);
-  --zo-muted-foreground: var(--text-muted);
+  --zo-muted-foreground: var(--text-soft); /* #298: >=4.5 on message surfaces */
   --zo-border: #2a4032;
   --zo-border-primary: rgba(138, 170, 144, 0.40);
   --shadow-sm: 0 1px 3px rgba(0,0,0,0.5);
@@ -316,6 +322,7 @@
   --text: #d8eaf0;
   --text-muted: #7a9aaa;
   --text-faint: #4a7080;
+  --text-soft: #96b2c2; /* #298 readable floor */
   --text-inverse: #0a1820;
   --amber: #e06b5a;
   --amber-muted: #c05a4a;
@@ -334,7 +341,7 @@
   --zo-primary-foreground: #0a1820;
   --zo-accent: var(--bg-elevated);
   --zo-accent-foreground: var(--text);
-  --zo-muted-foreground: var(--text-muted);
+  --zo-muted-foreground: var(--text-soft); /* #298: >=4.5 on message surfaces */
   --zo-border: #1a3850;
   --zo-border-primary: rgba(122, 196, 218, 0.40);
   --shadow-sm: 0 1px 3px rgba(0,0,0,0.5);
@@ -838,7 +845,7 @@ input, textarea, select {
   border-radius: 20px;
   border: 1px solid var(--border);
   background: var(--bg-surface);
-  color: var(--text-muted);
+  color: var(--text-soft); /* #298: readable floor — was --text-muted, 4.06 worst-case */
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
@@ -976,7 +983,7 @@ input, textarea, select {
   border-radius: var(--radius-md);
   text-align: center;
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--text-soft); /* #298: was --text-muted @ 4.32 on --bg-elevated (dark) */
   padding: 6px 16px;
   max-width: 90%;
 }
@@ -1006,7 +1013,9 @@ input, textarea, select {
   font-size: 12.5px;
   line-height: 1.55;
   font-style: italic;
-  opacity: 0.9;
+  /* #298: no alpha dilution — --zo-muted-foreground resolves to --text-soft
+     (>=4.5:1); opacity 0.9 pushed readable prose back under AA. */
+  opacity: 1;
   word-wrap: break-word;
   overflow-wrap: break-word;
 }
@@ -1039,7 +1048,7 @@ input, textarea, select {
   width: 1em;
   text-align: center;
   transition: transform 0.15s ease;
-  color: var(--text-faint);
+  color: var(--text-muted); /* #298: was --text-faint, sub-AA everywhere */
 }
 .reasoning-toggle[aria-expanded="true"] .reasoning-caret {
   transform: rotate(90deg);
@@ -1057,7 +1066,7 @@ input, textarea, select {
   white-space: nowrap;
   color: var(--zo-muted-foreground);
   font-weight: 400;
-  opacity: 0.85;
+  opacity: 1; /* #298: was 0.85 — alpha pushed the preview under AA */
 }
 .reasoning-content {
   margin-top: 6px;
@@ -2345,7 +2354,7 @@ body.options-page {
 .msg-footer-time {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
-  color: var(--text-faint);
+  color: var(--text-muted); /* #298: turn duration is information, not decoration — was --text-faint @ 2.43-3.38:1 */
 }
 
 /* Live "processing" timer shown on the in-flight assistant bubble until the
