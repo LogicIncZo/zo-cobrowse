@@ -640,12 +640,14 @@ const OB_STEPS = [
   {
     title: 'Add Your API Token',
     desc: 'This connects the extension to your Zo.',
-    body: '<ol style="text-align:left;margin:0 auto;max-width:340px;line-height:1.8"><li>Open your Zo <strong>Settings → Advanced → Access Tokens</strong></li><li>Create a new token (or copy an existing one)</li><li>Paste it in the <strong>extension settings</strong> (gear icon below)</li></ol><p style="margin-top:12px">💡 Your token is stored locally and never shared.</p>',
+    body: '<ol style="text-align:left;margin:0 auto;max-width:340px;line-height:1.8"><li>Open your Zo <strong>Settings → Advanced → Access Tokens</strong></li><li>Create a new token (or copy an existing one)</li><li>Paste it in the <strong>extension settings</strong> — the button below opens them</li></ol><p style="margin-top:12px">💡 Your token is stored locally and never shared.</p>',
+    openSettings: true,
   },
   {
     title: 'Test Your Connection',
     desc: 'Let\'s make sure everything works.',
-    body: '<p>Click <strong>Test Connection</strong> below, or open the extension settings and hit "Test Connection" there.</p><p>If it works, you\'re all set! You can ask Zo anything about the page you\'re on.</p>',
+    body: '<p>Open the <strong>extension settings</strong> (button below) and hit <strong>Test Connection</strong> there.</p><p>If it works, you\'re all set! You can ask Zo anything about the page you\'re on.</p>',
+    openSettings: true,
     final: true,
   },
 ];
@@ -667,6 +669,23 @@ function renderOnboardingStep(step) {
   document.getElementById('ob-title').textContent = s.title;
   document.getElementById('ob-desc').textContent = s.desc;
   document.getElementById('ob-body').innerHTML = s.body;
+
+  // #313: steps may carry a REAL affordance — an in-card button that opens
+  // the extension settings (the tour used to point at a nonexistent gear
+  // icon and a Test Connection button the panel never had).
+  const actionsEl = document.getElementById('ob-actions');
+  actionsEl.replaceChildren();
+  actionsEl.classList.toggle('hidden', !s.openSettings);
+  if (s.openSettings) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.id = 'ob-open-settings';
+    b.className = 'btn btn-sm btn-primary';
+    b.textContent = '⚙ Open settings';
+    b.title = 'Open the extension settings (token + Test Connection live there)';
+    b.addEventListener('click', () => chrome.runtime.openOptionsPage());
+    actionsEl.appendChild(b);
+  }
 
   const backBtn = document.getElementById('ob-back');
   const nextBtn = document.getElementById('ob-next');

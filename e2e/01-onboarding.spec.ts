@@ -18,6 +18,28 @@ test.describe("onboarding (fresh profile)", () => {
       await expect(panel.locator("#onboarding-view")).toBeVisible({ timeout: 15_000 });
       await expect(panel.locator("#ob-title")).toContainText("Welcome to Zo Co-browse");
 
+      // #313: walk to step 3 (token step) — it must carry a REAL affordance
+      // ("Open settings") and reference NO nonexistent UI.
+      await panel.click("#ob-next");
+      await panel.click("#ob-next");
+      await expect(panel.locator("#ob-title")).toContainText("Add Your API Token");
+      await expect(panel.locator("#ob-open-settings")).toBeVisible();
+      const body3 = await panel.locator("#ob-body").textContent();
+      expect(body3).not.toContain("gear icon");
+      await panel.click("#ob-open-settings");
+      // openOptionsPage lands on the extension's options page.
+      await panel.waitForTimeout(800);
+      const pages = panel.context().pages().map((pg) => pg.url());
+      expect(pages.some((u) => u.includes("options.html"))).toBe(true);
+
+      // Step 4 likewise (Test Connection lives in options, not the panel).
+      await panel.bringToFront();
+      await panel.click("#ob-next");
+      await expect(panel.locator("#ob-title")).toContainText("Test Your Connection");
+      await expect(panel.locator("#ob-open-settings")).toBeVisible();
+      const body4 = await panel.locator("#ob-body").textContent();
+      expect(body4).not.toContain("Test Connection below");
+
       // Skip the tour → chat view + composer ready
       await panel.click("#ob-skip");
       await expect(panel.locator("#chat-view")).toBeVisible();
