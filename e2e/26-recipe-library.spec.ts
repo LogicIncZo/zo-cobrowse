@@ -57,7 +57,8 @@ test.describe("recipe library", () => {
     // ✎ Rename: inline edit commits on Enter and re-renders the row.
     await h.panel.locator("#recipe-lib-btn").click();
     await expect(row).toBeVisible({ timeout: 10_000 });
-    await row.locator("button", { hasText: "Rename" }).click();
+    await row.locator("button.recipe-lib-more").click(); // #314: overflow menu
+    await h.panel.locator(".chat-tab-menu button", { hasText: "Rename" }).click();
     // The name span swapped to an input (values aren't text) — locate it on
     // the popup, not under the now-unmatching row filter.
     const renameInput = pop.locator("input[aria-label='New name']");
@@ -66,7 +67,8 @@ test.describe("recipe library", () => {
     await expect(pop.locator(".recipe-lib-row", { hasText: "Filing renamed" })).toBeVisible({ timeout: 10_000 });
 
     // ⤓ Export: the deterministic write_file bundle lands, frontmatter intact.
-    await pop.locator(".recipe-lib-row", { hasText: "Filing renamed" }).locator("button", { hasText: "Export" }).click();
+    await pop.locator(".recipe-lib-row", { hasText: "Filing renamed" }).locator("button.recipe-lib-more").click();
+    await h.panel.locator(".chat-tab-menu button", { hasText: "Export" }).click();
     await expect(h.panel.locator("#messages .msg-system", { hasText: "Exported" })).toContainText("Skills/filing-renamed/SKILL.md", { timeout: 15_000 });
     const files: Record<string, string> = (await (await fetch(`${E2E_BASE}/__recipes`)).json()).files;
     const skill = files["/home/workspace/Skills/filing-renamed/SKILL.md"];
@@ -78,8 +80,10 @@ test.describe("recipe library", () => {
 
     // 🗑 Delete: two-click confirm removes the LOCAL entry only.
     const delRow = pop.locator(".recipe-lib-row", { hasText: "Filing renamed" });
-    // Title persists across the confirm-text change ("Sure? click again").
-    const delBtn = delRow.locator("button[title*='Remove from']");
+    await delRow.locator("button.recipe-lib-more").click();
+    // Title persists across the confirm-text change ("Sure? click again");
+    // the confirm lives INSIDE the open menu (keepOpen).
+    const delBtn = h.panel.locator(".chat-tab-menu button[title*='Remove from']");
     await delBtn.click();
     await expect(delBtn).toContainText("Sure?");
     await delBtn.click();
