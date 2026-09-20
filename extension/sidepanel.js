@@ -3296,6 +3296,15 @@ function closeTabAutocomplete() {
   tabAcIndex = 0;
 }
 
+// #304: one keyboard-affordance hint line for all three composer popups.
+const PICKER_HINT_TEXT = '↑↓ navigate · ↵ select · Esc close';
+function appendPickerHint(popup) {
+  const hint = document.createElement('div');
+  hint.className = 'picker-hint';
+  hint.textContent = PICKER_HINT_TEXT;
+  popup.appendChild(hint);
+}
+
 function renderTabAutocomplete(filterText) {
   const popup = document.getElementById('tab-autocomplete');
   if (!popup) return;
@@ -3311,6 +3320,9 @@ function renderTabAutocomplete(filterText) {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'tab-ac-item' + (i === tabAcIndex ? ' tab-ac-active' : '');
+    item.id = `tab-ac-opt-${i}`; // #304: aria-activedescendant target
+    item.setAttribute('role', 'option');
+    item.setAttribute('aria-selected', i === tabAcIndex ? 'true' : 'false');
     // #72: page title primary, dimmed host secondary — bare hostnames made
     // same-site tabs indistinguishable.
     const name = document.createElement('span');
@@ -3327,6 +3339,8 @@ function renderTabAutocomplete(filterText) {
     item.addEventListener('mousedown', (e) => { e.preventDefault(); selectTabAutocomplete(i); });
     popup.appendChild(item);
   });
+  popup.setAttribute('aria-activedescendant', 'tab-ac-opt-0'); // #304
+  appendPickerHint(popup);
   popup.classList.remove('hidden');
 }
 
@@ -3360,7 +3374,11 @@ function onComposerKeydownForTabs(e) {
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     e.preventDefault();
     tabAcIndex = (tabAcIndex + (e.key === 'ArrowDown' ? 1 : tabAcItems.length - 1)) % tabAcItems.length;
-    popup.querySelectorAll('.tab-ac-item').forEach((el, i) => el.classList.toggle('tab-ac-active', i === tabAcIndex));
+    popup.querySelectorAll('.tab-ac-item').forEach((el, i) => {
+      el.classList.toggle('tab-ac-active', i === tabAcIndex);
+      el.setAttribute('aria-selected', i === tabAcIndex ? 'true' : 'false');
+    });
+    popup.setAttribute('aria-activedescendant', `tab-ac-opt-${tabAcIndex}`); // #304
   } else if (e.key === 'Enter' || e.key === 'Tab') {
     e.preventDefault();
     e.stopPropagation();
@@ -3454,6 +3472,9 @@ function renderSkillPopup(filterText) {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'picker-item' + (i === 0 ? ' picker-item-active' : '');
+    item.id = `skill-ac-opt-${i}`; // #304
+    item.setAttribute('role', 'option');
+    item.setAttribute('aria-selected', i === 0 ? 'true' : 'false');
     const name = document.createElement('span');
     name.className = 'picker-item-name';
     name.textContent = `⚡ ${s.name}`;
@@ -3476,6 +3497,8 @@ function renderSkillPopup(filterText) {
   if (hidden > 0) {
     popup.appendChild(pickerNoteItem(`+${hidden} more skill folder${hidden === 1 ? '' : 's'} not listed — no SKILL.md head found, or the listing was cut short. ⟳ refreshes.`));
   }
+  popup.setAttribute('aria-activedescendant', 'skill-ac-opt-0'); // #304
+  appendPickerHint(popup);
   popup.classList.remove('hidden');
 }
 
@@ -3538,6 +3561,9 @@ function renderFilePopup(filterText, keepFilter) {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'picker-item' + (i === 0 ? ' picker-item-active' : '');
+    item.id = `file-ac-opt-${i}`; // #304
+    item.setAttribute('role', 'option');
+    item.setAttribute('aria-selected', i === 0 ? 'true' : 'false');
     const name = document.createElement('span');
     name.className = 'picker-item-name';
     name.textContent = e.kind === 'dir' ? `📂 ${e.name}/` : e.kind === 'up' ? '⬆ ..' : `📄 ${e.name}`;
@@ -3564,6 +3590,8 @@ function renderFilePopup(filterText, keepFilter) {
     item.addEventListener('mousedown', (ev) => { ev.preventDefault(); selectFileRow(i); });
     popup.appendChild(item);
   });
+  popup.setAttribute('aria-activedescendant', 'file-ac-opt-0'); // #304
+  appendPickerHint(popup);
   popup.classList.remove('hidden');
 }
 
@@ -3647,8 +3675,14 @@ function onComposerKeydownForPickers(e) {
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     e.preventDefault();
     ac.index = (ac.index + (e.key === 'ArrowDown' ? 1 : ac.items.length - 1)) % ac.items.length;
-    const buttons = [...popup.querySelectorAll('button.picker-item')];
-    buttons.forEach((el, i) => el.classList.toggle('picker-item-active', i === ac.index));
+    const buttons = [...popup.querySelectorAll('button.picker-item:not(.picker-item-note)')];
+    buttons.forEach((el, i) => {
+      el.classList.toggle('picker-item-active', i === ac.index);
+      el.setAttribute('aria-selected', i === ac.index ? 'true' : 'false');
+    });
+    // #304: keep the listbox's active descendant on the highlighted row.
+    const active = buttons[ac.index];
+    if (active && active.id) popup.setAttribute('aria-activedescendant', active.id);
   } else if (e.key === 'Enter' || e.key === 'Tab') {
     e.preventDefault();
     e.stopPropagation();
