@@ -2672,6 +2672,19 @@ body.options-page {
 .tab-ac-item:hover, .tab-ac-item.tab-ac-active {
   background: var(--amber-glow, rgba(240,168,50,0.15));
 }
+/* #304: the active row gets an accent edge (amber clears 3:1 non-text
+   contrast on every theme's popup surface; tint alone was too faint). */
+.tab-ac-item.tab-ac-active {
+  box-shadow: inset 3px 0 0 0 var(--amber, #f0a832);
+}
+/* #304: keyboard-affordance hint shared by all three composer popups. */
+.picker-hint {
+  padding: 4px 10px 6px;
+  border-top: 1px solid var(--border-soft, #262a4d);
+  color: var(--text-soft, var(--text-muted, #8884a8));
+  font-size: 11px;
+  user-select: none;
+}
 /* #72: title primary + dimmed host secondary inside @ autocomplete rows. */
 .tab-ac-item .tab-ac-host {
   opacity: 0.55;
@@ -2730,6 +2743,7 @@ body.options-page {
 .picker-item:hover, .picker-item.picker-item-active {
   background: var(--amber-glow, rgba(240,168,50,0.15));
 }
+.picker-item.picker-item-active { box-shadow: inset 3px 0 0 0 var(--amber, #f0a832); } /* #304 accent edge */
 .picker-item-name {
   font-size: 13px;
   font-weight: 500;
