@@ -4,9 +4,20 @@ The full, versioned history lives in the repo's
 [CHANGELOG.md](https://github.com/LogicIncZo/zo-cobrowse/blob/dev/CHANGELOG.md).
 This page mirrors everything **unreleased** on `dev`.
 
-## [Unreleased]
+## [0.3.3.0] — 2026-09-20
 
+### Fixed — UX bash (0.3.3 slate: #296–#315, PRs #316–#335)
 
+Twenty atomic UX/a11y tickets from the 2026-09-19 comprehensive audit (static walkthrough + a Playwright probe driving the real extension through ~45 states × themes with a computed CSS audit). Every ticket ran the full zo-loop factory cycle with adversarial review; milestone `0.3.3` drained. Known issues will be addressed in `0.3.3.N` stabilization points.
+
+- **Header & chrome (#296, #297, PRs #316, #317).** At dock width the header brand collapses to the icon so the page title keeps a ≥16-character budget (`e2e/28`); controls-bar labels bumped to 11px over a readable token, gated by a committed CSS-audit walker (`e2e/helpers/css-audit.ts` — computed WCAG contrast per theme, transitions frozen, `color(srgb)` parsing).
+- **Messages & footers (#298–#302, PRs #318–#322).** A `--text-soft` readable floor (≥4.5:1) across all seven theme blocks with `--zo-muted-foreground` repointed — footer time/chips/reasoning/system notes clear WCAG AA in every theme (`e2e/30`); active-chat stream errors now persist as `{role:'error'}` records and re-render as the error card with working Retry after reload (`e2e/31`); handoff/compose continuation turns stamp the capture tier they actually used, so the context-tier chip appears exactly where users cannot watch the capture (`e2e/32`); the recipe run line is ONE live element (started → progress → terminal — inversion structurally impossible) with an inline ≥24px stop control; Skip on parked actions posts a persisted system note (count + action types; boundary wording for handoff parks).
+- **Composer & pickers (#303–#306, PRs #323–#326).** The three set-once toggles render as one wrapping chip row instead of three permanent rows (`e2e/33`); all three picker popups carry a keyboard hint footer, an amber accent edge on the active row (≥3:1 non-text contrast), and `aria-activedescendant` wiring (`e2e/34`); same-title tabs get VSCode-style path disambiguation in the strip, the @ popup, AND the prompt manifest — unique titles byte-identical (`e2e/35`); the prompt inspector gains a Copy button (raw prompt to clipboard) with letter-spacing pinned normal (`e2e/36`).
+- **Accessibility (#307–#310, PRs #327–#330).** Every icon-only control carries an accessible name, swept in e2e across panel + options (`e2e/37`); connection status mirrors into an sr-only text twin (WCAG 1.4.1, `e2e/38`); one 24px hit-target floor over 23 sub-24 controls — the sweep also caught the header theme button rendering the options switch's knob (`e2e/39`); one global `:focus-visible` ring, all `outline: none` strips removed (`e2e/40`).
+- **Settings & onboarding (#311–#313, PRs #331–#333).** The prompts editor LIVE PREVIEW is pinned populated-on-load + Mode-switch (`e2e/41`); the Theme card moved to the About pane as "Appearance" with live-sync intact (`e2e/42`); the first-run tour now carries an in-card **Open settings** button and references no nonexistent gear icon or Test Connection control.
+- **Recipes surface & i18n readiness (#314, #315, PRs #334, #335).** Recipe-library rows keep ▶ Run inline and move Save/Export/Rename/Delete into a per-row ⋯ overflow (Delete's two-click confirm with red styling lives in the menu); i18n surface (a) — onboarding, error cards, empty state — extracted via `tOr(key, englishLiteral)` (`_locales/en`: 14 → 35 keys) with a census gate pinned in `bun run lint` (the prompt-budget-gate pattern); surfaces (b)–(e) follow as `0.3.3.N` points.
+
+Adversarial review rounds per ticket; the CI e2e job caught and fixed one wrong fixture assertion in review. Tests: 1482 unit/integration across 63 files (~4834 expects); 106 Playwright e2e across 42 numbered specs + 4 demo-gated.
 
 ## [0.3.2.0] — 2026-09-19
 
