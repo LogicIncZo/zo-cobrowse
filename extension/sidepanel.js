@@ -711,7 +711,11 @@ function updateStatus(connected) {
   statusDot.className = `dot ${connected ? 'dot-connected' : 'dot-disconnected'}`;
   statusDot.title = connected ? 'Zo connected' : 'Not configured — open settings';
   // #307: the dot is color-only visually — keep its accessible name on state.
-  statusDot.setAttribute('aria-label', `Connection status: ${statusDot.title}`);
+  const label = `Connection status: ${statusDot.title}`;
+  statusDot.setAttribute('aria-label', label);
+  // #308: mirror the same text for magnifier/BR users (WCAG 1.4.1).
+  const statusText = document.getElementById('status-text');
+  if (statusText) statusText.textContent = label;
 }
 
 function bindEvents() {
