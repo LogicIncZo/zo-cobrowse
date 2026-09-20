@@ -2473,10 +2473,24 @@ body.options-page {
   font-family: var(--font-code);
   font-size: 11px;
   line-height: 1.45;
+  letter-spacing: normal; /* #306: pinned — the mono face carries the code distinction */
   color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
 }
+/* #306: copy affordance on the inspector meta row (footer-copy language). */
+.prompt-copy-btn {
+  border: 1px solid var(--border-soft);
+  background: transparent;
+  color: var(--text-soft, var(--text-muted));
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-family: inherit;
+  padding: 2px 8px;
+  min-height: 24px;
+  cursor: pointer;
+}
+.prompt-copy-btn:hover { color: var(--text); border-color: var(--border-focus, var(--amber, #f0a832)); }
 
 /* ── Tab contexts (referenced tabs as VSCode-style context) ── */
 .tab-contexts {

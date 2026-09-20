@@ -1991,6 +1991,23 @@ async function renderPromptInspector() {
   const reasonSpan = document.createElement('span');
   reasonSpan.textContent = effReason;
   meta.appendChild(reasonSpan);
+  // #306: one-click copy of the assembled prompt (bug reports / trust) —
+  // copies the RAW string, not the rendered <pre> HTML.
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.className = 'prompt-copy-btn';
+  copyBtn.textContent = '⧉ Copy';
+  copyBtn.title = 'Copy the full assembled prompt';
+  copyBtn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(described.prompt);
+      copyBtn.textContent = 'Copied ✓';
+    } catch {
+      copyBtn.textContent = 'Copy failed';
+    }
+    setTimeout(() => { copyBtn.textContent = '⧉ Copy'; }, 1500);
+  });
+  meta.appendChild(copyBtn);
   pre.textContent = described.prompt;
 }
 
