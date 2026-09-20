@@ -710,6 +710,8 @@ async function completeOnboarding() {
 function updateStatus(connected) {
   statusDot.className = `dot ${connected ? 'dot-connected' : 'dot-disconnected'}`;
   statusDot.title = connected ? 'Zo connected' : 'Not configured — open settings';
+  // #307: the dot is color-only visually — keep its accessible name on state.
+  statusDot.setAttribute('aria-label', `Connection status: ${statusDot.title}`);
 }
 
 function bindEvents() {
