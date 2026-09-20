@@ -31,9 +31,23 @@ export async function auditContrast(
   return panel.evaluate((sel): AuditRow[] => {
     const parse = (s: string): [number, number, number, number] => {
       const m = s.match(/rgba?\(([^)]+)\)/);
-      if (!m) return [0, 0, 0, 1];
-      const parts = m[1].split(",").map((x) => parseFloat(x));
-      return [parts[0], parts[1], parts[2], parts.length > 3 ? parts[3] : 1];
+      if (m) {
+        const parts = m[1].split(",").map((x) => parseFloat(x));
+        return [parts[0], parts[1], parts[2], parts.length > 3 ? parts[3] : 1];
+      }
+      // color(srgb r g b / a) — what color-mix() computes down to.
+      const c = s.match(/color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+))?\)/);
+      if (c) {
+        return [
+          parseFloat(c[1]) * 255,
+          parseFloat(c[2]) * 255,
+          parseFloat(c[3]) * 255,
+          c[4] !== undefined ? parseFloat(c[4]) : 1,
+        ];
+      }
+      // Unparseable (transparent, oklch, …): treat as TRANSPARENT so the
+      // background climber keeps going — never fake an opaque black surface.
+      return [0, 0, 0, 0];
     };
     const chan = (c: number) => {
       const v = c / 255;
@@ -72,6 +86,11 @@ export async function auditContrast(
       const el = walker.currentNode.parentElement;
       if (!raw || !el) continue;
       if (el.closest("select")) continue; // closed-select internals render in the popup
+      // Emoji/symbol-only glyphs (🔊 👆 ▸ ✦) are decorative bitmaps — their
+      // computed text color doesn't paint the glyph, so a "ratio" for them is
+      // meaningless (WCAG exempts them; #298). Text WITH letters/digits
+      // ("💭 Thought", "🔗 URL only") stays audited.
+      if (!/[\p{L}\p{N}]/u.test(raw)) continue; // any letter/digit, any script
       const st = getComputedStyle(el);
       if (st.display === "none" || st.visibility === "hidden" || parseFloat(st.opacity) === 0) continue;
       out.push({
