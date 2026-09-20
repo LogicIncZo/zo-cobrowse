@@ -330,21 +330,6 @@
       </div>
     </div>
 
-    <!-- ── Theme ── -->
-    <div class="card">
-      <h2>🎨 Theme</h2>
-      <div class="field-group">
-        <label for="options-theme">Interface Theme</label>
-        <select id="options-theme">
-          <option value="">◐ System — follow device</option>
-          <option value="dark">☾ Dark — Midnight Observatory</option>
-          <option value="light">☀ Light — Sunlit Observatory</option>
-          <option value="sepia">♨ Sepia — Warm Paper</option>
-          <option value="forest">♣ Forest — Deep Grove</option>
-          <option value="ocean">⊡ Ocean — Deep Water</option>
-        </select>
-      </div>
-    </div>
     </div><!-- /pane-connection -->
 
     <div class="tab-pane" id="pane-model" hidden>
@@ -583,6 +568,24 @@
         <a href="https://github.com/LogicIncZo/zo-cobrowse/issues" target="_blank" class="btn">🐛 Report Issue</a>
         <a href="https://zocomputer.com" target="_blank" class="btn btn-ghost">Powered by Zo Computer</a>
         <button type="button" id="reset-defaults" class="btn btn-danger" style="margin-left:auto;">Reset to Defaults</button>
+      </div>
+    </div>
+
+    <!-- ── Appearance (#312: moved out of the Connection pane — an
+         interface-appearance setting is global chrome, not account config;
+         the panel theme popover stays the primary path). ── -->
+    <div class="card" id="card-appearance">
+      <h2>🎨 Appearance</h2>
+      <div class="field-group">
+        <label for="options-theme">Interface Theme</label>
+        <select id="options-theme">
+          <option value="">◐ System — follow device</option>
+          <option value="dark">☾ Dark — Midnight Observatory</option>
+          <option value="light">☀ Light — Sunlit Observatory</option>
+          <option value="sepia">♨ Sepia — Warm Paper</option>
+          <option value="forest">♣ Forest — Deep Grove</option>
+          <option value="ocean">⊡ Ocean — Deep Water</option>
+        </select>
       </div>
     </div>
     </div><!-- /pane-about -->
