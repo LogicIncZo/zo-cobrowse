@@ -177,3 +177,25 @@ Evaluated 2026-08-28 (repo audit of both). **Decision: neither becomes a runtime
 - *Pros:* **`openapi/mcp-tools.json` is the standout asset** — a nightly-refreshed snapshot of all 93 Zo MCP tool `inputSchema`s (`bash`, `read_file`, `list_directory`, …), consumable as pure data (test fixtures, argument validation, prompt/tool-docs generation). Its nightly-sync commits double as a **free Zo-API drift canary** for our `lib/mcp.js` (live-verified 2026-08-18, but blind to server-side change). Real quality: 14 offline tests + golden files, CI, TypeDoc; useful idioms to crib (`listTools` cursor pagination, isError-as-result, OAuth 2.1+PKCE provider if we ever outgrow static tokens).
 - *Cons:* as a dependency it's a poor MV3 fit — Node ≥22 engines, GitHub-only install (git on PATH + `prepare`-hook TS compile), full MCP SDK dependency vs our 98-line zero-dep `lib/mcp.js`. Client-only (no new runtime capability — we already initialize + callTool); no output schemas so types cover request args only; `LICENSE` file is just the SPDX line.
 - *Verdict:* **drift reference** — pinned baseline `scripts/zo-drift/baseline/mcp-tools.json` (93 tool schemas) is diffed live by the `drift` CI job on every release merge; its nightly-sync commits double as a free Zo-API drift canary for our `lib/mcp.js` (live-verified 2026-08-18, but blind to server-side change). Vendor nothing else: runtime dep rejected (Node ≥22, MCP SDK, GitHub-only install). Vendoring richer checks (per-tool argument validation) only if a feature needs it.
+
+## 🧪 Proposed 2026-09-20 — 0.3.4 slate (Jev support + settings rationalization) — TICKETED to milestone `0.3.4`
+
+Owner intake 2026-09-20: add Jev (TypeSafe AI's "System One model" — typed decisions in
+70–500 ms, no text generation) as an opt-in fast path for agentic browsing with full Zo
+fallback; rationalize the settings Connection pane to ask just **Zo username + token**
+(three of the four current fields derive from the username slug — space endpoint =
+`https://<slug>.zo.space`, web origin = `https://<slug>.zo.computer`; the current default
+space endpoint is hard-coded to the owner's own space); and collapse the two duplicate
+Save Settings buttons + the Prompts editor's scoped save into one sticky dirty-aware save.
+Research + design: `docs/superpowers/specs/2026-09-20-0.3.4-slate-design.md` (Jev API
+contract captured from docs.typesafe.ai). Lanes, in build order:
+
+| Lane | Scope | Ticket |
+|------|-------|--------|
+| S1 | Connection pane → username + token (derived hosts, Advanced collapse, migration) | milestone 0.3.4 |
+| S2 | One save button (sticky, dirty-aware; Prompts editor folded in) | milestone 0.3.4 |
+| J1 | Jev foundation: `lib/jev.js` + config keys + options card + schema/tests | milestone 0.3.4 (after S1 — same pane) |
+| J2 | Jev fast-path: done-gate + click-choice hooks, Zo fallback, redacted state, provenance | milestone 0.3.4 (after J1) |
+
+Feature ships dark (default off) until a TypeSafe API key is available (early access).
+Release model: one `v0.3.4.0` after all lanes merge; stabilization rides `0.3.4.N`.
