@@ -28,6 +28,14 @@
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
+/* ── #310: one focus ring, keyboard-only (:focus-visible) — mouse clicks
+   stay clean; Tab stops always show the 2px amber outline. Components may
+   add glow on top (border/shadow), never strip the outline. ── */
+:focus-visible {
+  outline: 2px solid var(--amber, #f0a832);
+  outline-offset: 2px;
+}
+
 /* JetBrains Mono for code. The @import is an enhancement: under MV3's
    default style-src 'self' it is blocked and the chain falls back to
    ui-monospace/monospace, so code stays readable either way. */
@@ -767,7 +775,6 @@ input, textarea, select {
   padding: 3px 6px;
   font-size: 11px;
   color: var(--text);
-  outline: none;
   cursor: pointer;
   transition: border-color 0.15s;
 }
@@ -812,7 +819,6 @@ input, textarea, select {
 .select-shim-btn:focus-visible {
   border-color: var(--amber);
   box-shadow: 0 0 0 2px var(--amber-glow);
-  outline: none;
 }
 .select-shim-pop {
   position: fixed;
@@ -1492,7 +1498,6 @@ input, textarea, select {
   color: var(--text);
   font-size: 13px;
   line-height: 1.4;
-  outline: none;
   resize: none;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
@@ -1720,7 +1725,6 @@ input, textarea, select {
   background: var(--bg-surface);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
-  outline: none;
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 .history-search:focus {
@@ -1761,7 +1765,6 @@ input, textarea, select {
   background: var(--bg-deep);
   border: 1px solid var(--amber-muted);
   border-radius: var(--radius-sm);
-  outline: none;
 }
 
 /* ── Layout shell ── */
@@ -1942,7 +1945,6 @@ body.options-page {
   color: var(--text);
   font-size: 13px;
   font-family: var(--font-ui);
-  outline: none;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .form-group input:focus,
@@ -3071,7 +3073,6 @@ body.options-page {
   color: var(--text);
 }
 .form-review-row input:focus {
-  outline: none;
   border-color: var(--amber);
   box-shadow: 0 0 0 2px var(--amber-glow);
 }
@@ -3102,7 +3103,6 @@ body.options-page {
   font-family: inherit;
 }
 .recipe-review-text:focus {
-  outline: none;
   border-color: var(--accent, #5b8def);
   box-shadow: 0 0 0 2px var(--amber-glow);
 }
