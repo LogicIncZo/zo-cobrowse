@@ -1382,6 +1382,37 @@ function closeTabContextMenu() {
   }
 }
 
+/** #314: per-row overflow menu for library rows — the tab-strip context-menu
+ * machinery (same .chat-tab-menu class + tabContextMenuEl dismissal:
+ * outside click + Escape). `keepOpen` items keep the menu for a second
+ * click (the Delete confirm). */
+function openRowMenu(anchorBtn, items) {
+  closeTabContextMenu();
+  const menu = document.createElement('div');
+  menu.className = 'chat-tab-menu';
+  menu.setAttribute('role', 'menu');
+  for (const it of items) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.setAttribute('role', 'menuitem');
+    b.textContent = it.label;
+    b.title = it.title || '';
+    if (it.cls) b.className = it.cls;
+    b.addEventListener('click', () => {
+      if (!it.keepOpen) closeTabContextMenu();
+      it.fn(b);
+    });
+    menu.appendChild(b);
+  }
+  document.body.appendChild(menu);
+  const r = anchorBtn.getBoundingClientRect();
+  const px = Math.min(r.left, window.innerWidth - menu.offsetWidth - 8);
+  const py = Math.min(r.bottom + 4, window.innerHeight - menu.offsetHeight - 8);
+  menu.style.left = Math.max(4, px) + 'px';
+  menu.style.top = Math.max(4, py) + 'px';
+  tabContextMenuEl = menu;
+}
+
 function openTabContextMenu(e, chatId) {
   e.preventDefault();
   closeTabContextMenu();
@@ -5634,37 +5665,24 @@ function recipeLibraryRow(r, liveRun) {
   }
   const actions = document.createElement('div');
   actions.className = 'recipe-lib-actions';
-  const act = (label, title, fn, cls = '') => {
-    const b = document.createElement('button');
-    b.textContent = label;
-    b.title = title;
-    if (cls) b.className = cls;
-    b.addEventListener('click', () => fn(b));
-    actions.appendChild(b);
-    return b;
-  };
-  act('▶ Run', 'Run this recipe (pauses at human checkpoints)', async (b) => {
+  const runBtn = document.createElement('button');
+  runBtn.textContent = '▶ Run';
+  runBtn.title = 'Run this recipe (pauses at human checkpoints)';
+  runBtn.addEventListener('click', async () => {
     // One live run at a time — the second click is the confirmation.
-    if (liveRun && liveRun.name !== r.name && !b.dataset.confirmed) {
-      b.dataset.confirmed = '1';
-      b.textContent = `▶ Run anyway? (${safeText(liveRun.name)} is live)`;
+    if (liveRun && liveRun.name !== r.name && !runBtn.dataset.confirmed) {
+      runBtn.dataset.confirmed = '1';
+      runBtn.textContent = `▶ Run anyway? (${safeText(liveRun.name)} is live)`;
       return;
     }
     closeRecipeLibrary();
     await startRecipeRun({ localName: r.name });
   });
-  act('↥ Save', 'Write this recipe to the workspace (R2 #256)', async () => {
-    closeRecipeLibrary();
-    await saveRecipeToWorkspace(r.name);
-  });
-  act('⤓ Export', 'Export as a Zo skill (SKILL.md — documentation only)', async (b) => {
-    b.disabled = true;
-    const resp = await chrome.runtime.sendMessage({ type: 'RECIPE_EXPORT', names: [r.name], skillName: r.name }).catch(() => null);
-    b.disabled = false;
-    if (resp?.ok) addMessage('system', `⤓ Exported **${safeText(r.name)}** as skill \`${safeText(resp.skillName)}\` → ${resp.paths.map((p) => `\`${safeText(p)}\``).join(', ')}`);
-    else addMessage('error', resp?.error || 'Export failed.');
-  });
-  act('✎ Rename', 'Rename the local library entry', () => {
+  actions.appendChild(runBtn);
+  // #314: Save/Export/Rename/Delete live in a per-row ⋯ overflow — five
+  // inline buttons cramped the rows at dock width and parked Delete next to
+  // Export. Run stays inline (the popup's entry point).
+  const renameAct = () => {
     const input = document.createElement('input');
     input.value = safeText(r.name);
     input.className = 'recipe-lib-rename';
@@ -5690,19 +5708,44 @@ function recipeLibraryRow(r, liveRun) {
     let committed = false;
     const commitOnce = () => { if (!committed) { committed = true; commit(); } };
     input.addEventListener('blur', commitOnce);
-  });
-  act('🗑 Delete', 'Remove from the LOCAL library (workspace files are never touched)', (b) => {
+  };
+  const exportAct = async (b) => {
+    b.disabled = true;
+    const resp = await chrome.runtime.sendMessage({ type: 'RECIPE_EXPORT', names: [r.name], skillName: r.name }).catch(() => null);
+    b.disabled = false;
+    if (resp?.ok) addMessage('system', `⤓ Exported **${safeText(r.name)}** as skill \`${safeText(resp.skillName)}\` → ${resp.paths.map((p) => `\`${safeText(p)}\``).join(', ')}`);
+    else addMessage('error', resp?.error || 'Export failed.');
+  };
+  const deleteAct = (b) => {
+    // Two-click confirm lives INSIDE the menu (keepOpen) — destructive and
+    // no longer adjacent to Export on the row.
     if (!b.dataset.confirmed) {
       b.dataset.confirmed = '1';
       b.textContent = '🗑 Sure? click again';
       return;
     }
+    closeTabContextMenu();
     chrome.runtime.sendMessage({ type: 'RECIPE_DELETE', name: r.name }).then(async (resp) => {
       if (resp?.ok) addMessage('system', `🗑 Removed **${safeText(r.name)}** from the local library.`);
       else addMessage('error', resp?.error || 'Delete failed.');
       await renderRecipeLibrary();
     }).catch(() => {});
-  }, 'danger');
+  };
+  const moreBtn = document.createElement('button');
+  moreBtn.textContent = '⋯';
+  moreBtn.className = 'recipe-lib-more';
+  moreBtn.setAttribute('aria-label', `More actions for ${safeText(r.name)}`);
+  moreBtn.title = 'Save / Export / Rename / Delete';
+  moreBtn.addEventListener('click', (e) => {
+    e.stopPropagation(); // the document outside-click closer must not eat the opening click
+    openRowMenu(moreBtn, [
+      { label: '↥ Save', title: 'Write this recipe to the workspace (R2 #256)', fn: async () => { closeRecipeLibrary(); await saveRecipeToWorkspace(r.name); } },
+      { label: '⤓ Export', title: 'Export as a Zo skill (SKILL.md — documentation only)', fn: exportAct },
+      { label: '✎ Rename', title: 'Rename the local library entry', fn: renameAct },
+      { label: '🗑 Delete', title: 'Remove from the LOCAL library (workspace files are never touched)', cls: 'danger', keepOpen: true, fn: deleteAct },
+    ]);
+  });
+  actions.appendChild(moreBtn);
   row.appendChild(actions);
   return row;
 }

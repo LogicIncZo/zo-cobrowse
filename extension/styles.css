@@ -3180,3 +3180,15 @@ body.options-page {
 .icon-btn.theme-toggle::after {
   display: none; /* the switch knob is options-only chrome */
 }
+
+/* ── #314: library row overflow — the ⋯ button and the menu items inherit
+   the tab-menu styling; hit targets meet the A3 24px floor. ── */
+.recipe-lib-actions button {
+  min-height: 24px;
+}
+.chat-tab-menu .danger {
+  color: #ff6369;
+}
+.chat-tab-menu button {
+  min-height: 24px;
+}
