@@ -18,6 +18,9 @@ open the side panel on a normal website.
 - [ ] **Toggles render + persist** — 📷 Image and 🧩 DOM toggles visible even with no referenced
       tabs; 🧩 DOM off → 🚫 DOM label sticks across panel reopen; tier chip shows the cap reason
       after a send.
+- [ ] **Screen-reader spot check (#307)** — with an SR running, Tab through the header + composer:
+      "Toggle theme", "Help", "Conversation history", "New chat", "Create a custom Mode", "Voice input",
+      "Send" announce meaningfully; the connection dot announces its state.
 - [ ] **Page title in header** — title truncates without pushing the action buttons out; tooltip
       shows the full URL; blank/new-tab pages show "— no page —". At dock width (~400px) the
       brand collapses to the icon and a long page title still shows ≥16 characters (#296).

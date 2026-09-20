@@ -23,13 +23,13 @@
         <span id="page-url">— no page —</span>
       </div>
       <div class="header-actions">
-        <button id="theme-toggle" class="icon-btn theme-toggle" data-i18n-title="sidepanelThemeToggle">☀</button>
+        <button id="theme-toggle" class="icon-btn theme-toggle" aria-label="Toggle theme" data-i18n-title="sidepanelThemeToggle">☀</button>
         <div class="status-dot-wrap">
-          <span id="status-dot" class="dot dot-disconnected" title="Not configured"></span>
+          <span id="status-dot" class="dot dot-disconnected" role="img" aria-label="Connection status: not configured" title="Not configured"></span>
         </div>
-        <button id="help-btn" class="icon-btn" data-i18n-title="sidepanelHelp">?</button>
-        <button id="history-btn" class="icon-btn" data-i18n-title="sidepanelHistory">☰</button>
-        <button id="new-chat-btn" class="icon-btn" data-i18n-title="sidepanelNewChat">✚</button>
+        <button id="help-btn" class="icon-btn" aria-label="Help" data-i18n-title="sidepanelHelp">?</button>
+        <button id="history-btn" class="icon-btn" aria-label="Conversation history" data-i18n-title="sidepanelHistory">☰</button>
+        <button id="new-chat-btn" class="icon-btn" aria-label="New chat" data-i18n-title="sidepanelNewChat">✚</button>
       </div>
     </header>
 
@@ -65,7 +65,7 @@
           <option value="visual">🖼️ Visual</option>
         </select>
       </div>
-      <button id="create-mode-btn" class="btn btn-ghost btn-sm create-mode-btn" data-i18n-title="sidepanelCreateMode">✦</button>
+      <button id="create-mode-btn" class="btn btn-ghost btn-sm create-mode-btn" aria-label="Create a custom Mode" data-i18n-title="sidepanelCreateMode">✦</button>
     </div>
 
     <!-- ── Quick action chips ── -->
@@ -142,11 +142,11 @@
 
       <!-- Input area -->
       <div class="input-area">
-        <button id="mic-btn" class="btn btn-ghost btn-icon mic-btn" title="Voice input">🎤</button>
+        <button id="mic-btn" class="btn btn-ghost btn-icon mic-btn" aria-label="Voice input" title="Voice input">🎤</button>
         <div class="input-wrap">
           <textarea id="query-input" rows="1" data-i18n-placeholder="sidepanelComposerPlaceholder" autofocus></textarea>
         </div>
-        <button id="send-btn" class="btn btn-primary btn-icon" title="Send">→</button>
+        <button id="send-btn" class="btn btn-primary btn-icon" aria-label="Send" aria-keyshortcuts="Enter" title="Send">→</button>
       </div>
     </div>
 
