@@ -18,6 +18,8 @@ open the side panel on a normal website.
 - [ ] **Toggles render + persist** — 📷 Image and 🧩 DOM toggles visible even with no referenced
       tabs; 🧩 DOM off → 🚫 DOM label sticks across panel reopen; tier chip shows the cap reason
       after a send.
+- [ ] **Keyboard focus visible (#310)** — Tab through header → controls → composer: every stop
+      shows the 2px amber ring; mouse clicks show no ring (text fields excepted — UA behavior).
 - [ ] **Screen-reader spot check (#307)** — with an SR running, Tab through the header + composer:
       "Toggle theme", "Help", "Conversation history", "New chat", "Create a custom Mode", "Voice input",
       "Send" announce meaningfully; the connection dot announces its state.
