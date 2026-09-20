@@ -196,6 +196,13 @@ contract captured from docs.typesafe.ai). Lanes, in build order:
 | S2 | One save button (sticky, dirty-aware; Prompts editor folded in) | milestone 0.3.4 |
 | J1 | Jev foundation: `lib/jev.js` + config keys + options card + schema/tests | milestone 0.3.4 (after S1 — same pane) |
 | J2 | Jev fast-path: done-gate + click-choice hooks, Zo fallback, redacted state, provenance | milestone 0.3.4 (after J1) |
+| J3 | The marriage — Zo drives Jev: `click.pick {question}` protocol, in-page pick resolution with fallback ladder, code rails preserved, evals refresh | milestone 0.3.4 (after J1+J2) |
 
-Feature ships dark (default off) until a TypeSafe API key is available (early access).
-Release model: one `v0.3.4.0` after all lanes merge; stabilization rides `0.3.4.N`.
+J3 is owner-set scope (2026-09-20, after the live probe): when a TypeSafe key exists,
+Zo plans once and Jev carries the page-level decisions — probe-measured 40–74× per
+decision (Jev 340–512 ms vs Zo 15–36 s), 4/4 agreement, key verified live. Per-hook
+confidence thresholds are mandatory (noul vs choice confidences are not comparable per
+the vendor's model notes).
+
+Feature ships dark (default off) even though the key works; release model: one
+`v0.3.4.0` after all lanes merge; stabilization rides `0.3.4.N`.
