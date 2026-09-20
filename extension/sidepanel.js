@@ -18,7 +18,7 @@ import { visionModelSuggestion, modelVisionSupport, findModelEntry } from './lib
 import { extractUrls, MAX_LINK_CHIPS } from './lib/links.js';
 import { zoChatUrl, truncateId } from './lib/zo-links.js';
 import { WORKSPACE_ROOT, filterPickerEntries } from './lib/pickers.js';
-import { applyI18nDom } from './lib/i18n.js';
+import { applyI18nDom, tOr } from './lib/i18n.js';
 import { handoffInstructions, runProgress } from './lib/handoff.js';
 import { recipeProgress, composeInstructions } from './lib/recipes.js';
 import { conversationToMarkdown, exportFileName, pageContextToMarkdown, pageExportFileName, slugifyTitle } from './lib/export.js';
@@ -626,27 +626,29 @@ function createSelectShim(select) {
 const OB_KEY = 'cobrowse_onboarding_done';
 const OB_STEP_KEY = 'cobrowse_onboarding_step';
 
+// #315: tour copy extracted (surface a) — tOr falls back to the English
+// literal, so behavior is identical in en and in tests.
 const OB_STEPS = [
   {
-    title: 'Welcome to Zo Co-browse',
-    desc: 'Your browser, supercharged with AI.',
-    body: '<p>Zo Co-browse connects your browser to Zo Computer — your personal AI server. Zo can see what\'s on the page, answer questions, fill forms, extract data, run DuckDB queries, and even create automations — all from this side panel.</p><p>Let\'s get you set up in 30 seconds.</p>',
+    title: tOr('ob1Title', 'Welcome to Zo Co-browse'),
+    desc: tOr('ob1Desc', 'Your browser, supercharged with AI.'),
+    body: tOr('ob1Body', '<p>Zo Co-browse connects your browser to Zo Computer — your personal AI server. Zo can see what\'s on the page, answer questions, fill forms, extract data, run DuckDB queries, and even create automations — all from this side panel.</p><p>Let\'s get you set up in 30 seconds.</p>'),
   },
   {
-    title: 'Connect Your Zo',
-    desc: 'You need a Zo Computer account to use Co-browse.',
-    body: '<p>If you haven\'t already, sign up at <a href="https://zocomputer.com" target="_blank">zocomputer.com</a> — it\'s free.</p><p>Already have an account? Great — the next step is to add your API token.</p>',
+    title: tOr('ob2Title', 'Connect Your Zo'),
+    desc: tOr('ob2Desc', 'You need a Zo Computer account to use Co-browse.'),
+    body: tOr('ob2Body', '<p>If you haven\'t already, sign up at <a href="https://zocomputer.com" target="_blank">zocomputer.com</a> — it\'s free.</p><p>Already have an account? Great — the next step is to add your API token.</p>'),
   },
   {
-    title: 'Add Your API Token',
-    desc: 'This connects the extension to your Zo.',
-    body: '<ol style="text-align:left;margin:0 auto;max-width:340px;line-height:1.8"><li>Open your Zo <strong>Settings → Advanced → Access Tokens</strong></li><li>Create a new token (or copy an existing one)</li><li>Paste it in the <strong>extension settings</strong> — the button below opens them</li></ol><p style="margin-top:12px">💡 Your token is stored locally and never shared.</p>',
+    title: tOr('ob3Title', 'Add Your API Token'),
+    desc: tOr('ob3Desc', 'This connects the extension to your Zo.'),
+    body: tOr('ob3Body', '<ol style="text-align:left;margin:0 auto;max-width:340px;line-height:1.8"><li>Open your Zo <strong>Settings → Advanced → Access Tokens</strong></li><li>Create a new token (or copy an existing one)</li><li>Paste it in the <strong>extension settings</strong> — the button below opens them</li></ol><p style="margin-top:12px">💡 Your token is stored locally and never shared.</p>'),
     openSettings: true,
   },
   {
-    title: 'Test Your Connection',
-    desc: 'Let\'s make sure everything works.',
-    body: '<p>Open the <strong>extension settings</strong> (button below) and hit <strong>Test Connection</strong> there.</p><p>If it works, you\'re all set! You can ask Zo anything about the page you\'re on.</p>',
+    title: tOr('ob4Title', 'Test Your Connection'),
+    desc: tOr('ob4Desc', 'Let\'s make sure everything works.'),
+    body: tOr('ob4Body', '<p>Open the <strong>extension settings</strong> (button below) and hit <strong>Test Connection</strong> there.</p><p>If it works, you\'re all set! You can ask Zo anything about the page you\'re on.</p>'),
     openSettings: true,
     final: true,
   },
@@ -681,7 +683,7 @@ function renderOnboardingStep(step) {
     b.type = 'button';
     b.id = 'ob-open-settings';
     b.className = 'btn btn-sm btn-primary';
-    b.textContent = '⚙ Open settings';
+    b.textContent = tOr('obOpenSettings', '⚙ Open settings');
     b.title = 'Open the extension settings (token + Test Connection live there)';
     b.addEventListener('click', () => chrome.runtime.openOptionsPage());
     actionsEl.appendChild(b);
@@ -1007,10 +1009,10 @@ async function ensureActiveConversation() {
 // prefill the composer — the panel answers "what can I even ask?" at a glance.
 // The card removes itself the moment a real message lands.
 const EMPTY_STATE_CHIPS = [
-  { label: '📝 Summarize this page', value: 'Summarize this page' },
-  { label: '❓ What is on this page?', value: '!context What are the main points on this page?' },
-  { label: '📥 Extract the links', value: 'Extract all links on this page as a list' },
-  { label: '🔬 Research this topic', value: 'Do deep research on this page\'s topic: give me the key facts, data, and sources' },
+  { key: 'emptyStateChipSummarize', label: '📝 Summarize this page', value: 'Summarize this page' },
+  { key: 'emptyStateChipWhat', label: '❓ What is on this page?', value: '!context What are the main points on this page?' },
+  { key: 'emptyStateChipExtract', label: '📥 Extract the links', value: 'Extract all links on this page as a list' },
+  { key: 'emptyStateChipResearch', label: '🔬 Research this topic', value: 'Do deep research on this page\'s topic: give me the key facts, data, and sources' },
 ];
 function renderEmptyState() {
   let card = document.getElementById('empty-state');
@@ -1020,7 +1022,7 @@ function renderEmptyState() {
   card.className = 'empty-state';
   const hint = document.createElement('div');
   hint.className = 'empty-state-hint';
-  hint.textContent = 'Try asking:';
+  hint.textContent = tOr('emptyStateHint', 'Try asking:');
   card.appendChild(hint);
   const chipRow = document.createElement('div');
   chipRow.className = 'empty-state-chips';
@@ -1028,7 +1030,7 @@ function renderEmptyState() {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'empty-state-chip';
-    btn.textContent = chip.label;
+    btn.textContent = tOr(chip.key, chip.label);
     btn.title = chip.value;
     btn.addEventListener('click', () => {
       input.value = chip.value;
@@ -2364,18 +2366,18 @@ function addErrorCard(errorText, onRetry) {
 
   const title = document.createElement('div');
   title.className = 'error-card-title';
-  title.textContent = 'Response interrupted';
+  title.textContent = tOr('errorCardTitle', 'Response interrupted');
 
   const detail = document.createElement('div');
   detail.className = 'error-card-detail';
-  detail.textContent = safeText(errorText) || 'An unexpected error occurred.';
+  detail.textContent = safeText(errorText) || tOr('errorCardFallback', 'An unexpected error occurred.');
 
   const actionsEl = document.createElement('div');
   actionsEl.className = 'error-card-actions';
   const retry = document.createElement('button');
   retry.type = 'button';
   retry.className = 'btn btn-sm btn-primary error-card-retry';
-  retry.textContent = '↻ Retry';
+  retry.textContent = tOr('errorCardRetry', '↻ Retry');
   retry.addEventListener('click', () => { if (onRetry) onRetry(); });
   actionsEl.appendChild(retry);
 

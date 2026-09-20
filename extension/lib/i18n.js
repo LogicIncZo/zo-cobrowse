@@ -39,6 +39,15 @@ export const i18n = createT((key, subs) => {
   }
 });
 
+/** #315: translate-or-fallback — chrome.i18n.getMessage with the ENGLISH
+ * LITERAL as the documented fallback. In the en locale (and in tests, where
+ * chrome.i18n is absent) this returns the literal, so string behavior is
+ * unchanged; a second locale overrides via the key. */
+export function tOr(key, fallback) {
+  const v = i18n(key);
+  return v || fallback;
+}
+
 export function applyI18nDom(doc = (typeof document !== 'undefined' ? document : undefined), t = i18n) {
   if (!doc || !doc.querySelectorAll) return 0;
   let applied = 0;
