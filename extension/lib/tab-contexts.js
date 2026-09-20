@@ -96,27 +96,59 @@ export function assignRefs(tabContexts) {
  * @param {{ activeTabAttached?: boolean }} [opts]
  * @returns {{ rendered: string, entries: Array<{ref,tabId,line,excerptLine?}> }}
  */
+/** #305: VSCode-style disambiguation — when two tabs share a title (+ host),
+ * append the distinguishing path segment so strip chips, @ rows, and the
+ * manifest all agree on WHICH tab a reference targets. Pure display: unique
+ * titles render exactly as before. */
+export function disambiguatedLabel(t, all) {
+  const label = String((t && (t.title || t.host || t.url)) || '');
+  const same = (all || []).filter((o) => o !== t
+    && String(o.title || '') === String(t.title || '')
+    && String(o.host || '') === String(t.host || ''));
+  if (!same.length) return label;
+  let path = '';
+  try { path = new URL(t.url || '').pathname; } catch { /* keep label */ }
+  return path && path !== '/' ? `${label} — ${path}` : label;
+}
+
 export function buildTabManifest(tabContexts, opts) {
   const activeAttached = !!(opts && opts.activeTabAttached);
   let budget = TAB_EXCERPT_BUDGET;
   const entries = [];
 
+  // #305: colliding title(+host) pairs get their path appended after the
+  // host segment; unique titles keep the exact same lines (evals cache safe).
+  const colliding = new Set();
+  for (const t of tabContexts || []) {
+    const key = `${t.title || ''}|${t.host || hostOf(t.url) || ''}`;
+    const twins = (tabContexts || []).filter((o) => o !== t
+      && `${o.title || ''}|${o.host || hostOf(o.url) || ''}` === key);
+    if (twins.length) colliding.add(t.tabId);
+  }
+  const pathTag = (t) => {
+    if (!colliding.has(t.tabId)) return '';
+    let p = '';
+    try { p = new URL(t.url || '').pathname; } catch { /* no tag */ }
+    return p && p !== '/' ? ` — ${p}` : '';
+  };
+
   for (const t of tabContexts || []) {
     const host = t.host || hostOf(t.url);
     const quoted = t.title ? `"${t.title}"` : host || t.url;
+    const tag = pathTag(t);
     let line;
     let excerptLine;
 
     if (t.isActive && activeAttached) {
-      line = `- [${t.ref}] ${quoted} — ${host} — (this tab, attached above)`;
+      line = `- [${t.ref}] ${quoted} — ${host}${tag} — (this tab, attached above)`;
     } else if (t.pointerOnly) {
-      line = `- [${t.ref}] ${quoted} — ${host} — already provided above`;
+      line = `- [${t.ref}] ${quoted} — ${host}${tag} — already provided above`;
     } else if (!t.available) {
-      line = `- [${t.ref}] ${quoted} — ${host} — unavailable, URL only`;
+      line = `- [${t.ref}] ${quoted} — ${host}${tag} — unavailable, URL only`;
       line += t.url ? ` — ${t.url}` : '';
     } else {
       const els = Number.isFinite(t.elementCount) ? Math.round(t.elementCount) : 0;
-      line = `- [${t.ref}] ${quoted} — ${host} — ${formatChars(t.textLength)} text, ${els} links — not attached`;
+      line = `- [${t.ref}] ${quoted} — ${host}${tag} — ${formatChars(t.textLength)} text, ${els} links — not attached`;
       const take = Math.min(TAB_EXCERPT_CHARS, budget);
       if (take >= TAB_EXCERPT_FLOOR) {
         budget -= take;

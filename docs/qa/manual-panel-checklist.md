@@ -25,6 +25,7 @@ open the side panel on a normal website.
       a warm session); "+N more skill folders" note appears when folders were skipped.
 - [ ] **`%` picker folder arming** — ＋ on a folder arms a 📁 chip; row click still navigates.
 - [ ] **`@` autocomplete** — rows show page title + dimmed host; two same-host tabs are
+      distinguishable, and same-TITLE tabs get a path suffix in the strip + @ rows (#305).
       distinguishable; chips match.
 - [ ] **TTS** — if voices are installed: Settings → Speech shows the voice dropdown filtered by
       language; picking one + Read aloud uses it (ear check); zero-voice systems show the disabled

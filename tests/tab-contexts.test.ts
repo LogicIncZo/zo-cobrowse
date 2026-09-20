@@ -2,6 +2,7 @@ import { describe, it, expect } from "bun:test";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 import {
+  disambiguatedLabel,
   STRIP_MAX_TABS,
   TAB_EXCERPT_CHARS,
   TAB_EXCERPT_BUDGET,
@@ -544,5 +545,45 @@ describe("thinTabExcerpts — send-once excerpt dedup for follow-up turns", () =
   it("wires the dedup into the sidepanel send path", () => {
     expect(spCode).toContain("thinTabExcerpts(");
     expect(spCode).toContain("tabManifestSent");
+  });
+});
+
+describe("same-title tab disambiguation (#305)", () => {
+  const t = (tabId: number, title: string, url: string, host = "x.example") => ({ tabId, title, url, host });
+
+  it("unique titles render exactly as before (no suffix, no regression)", () => {
+    const tabs = [t(1, "Form", "https://x.example/form.html"), t(2, "Checkout", "https://x.example/checkout.html")];
+    expect(disambiguatedLabel(tabs[0], tabs)).toBe("Form");
+    expect(disambiguatedLabel(tabs[1], tabs)).toBe("Checkout");
+  });
+
+  it("title(+host) twins get the distinguishing path segment", () => {
+    const tabs = [t(1, "Form", "https://x.example/form.html"), t(2, "Form", "https://x.example/form-copy.html")];
+    expect(disambiguatedLabel(tabs[0], tabs)).toBe("Form — /form.html");
+    expect(disambiguatedLabel(tabs[1], tabs)).toBe("Form — /form-copy.html");
+  });
+
+  it("same title on a DIFFERENT host is not a collision (host is the differentiator)", () => {
+    const tabs = [t(1, "Form", "https://a.example/form.html", "a.example"), t(2, "Form", "https://b.example/form.html", "b.example")];
+    expect(disambiguatedLabel(tabs[0], tabs)).toBe("Form");
+  });
+
+  it("the manifest carries the same disambiguation; unique-title lines stay byte-identical", () => {
+    const twins = [
+      { ref: "T1", tabId: 1, title: "Form", host: "x.example", url: "https://x.example/form.html", available: true, textLength: 500, elementCount: 10, excerpt: "a" },
+      { ref: "T2", tabId: 2, title: "Form", host: "x.example", url: "https://x.example/form-copy.html", available: true, textLength: 500, elementCount: 10, excerpt: "b" },
+    ];
+    const m = buildTabManifest(twins as any, {});
+    const lines = m.entries.map((e: any) => e.line);
+    expect(lines[0]).toContain("/form.html");
+    expect(lines[1]).toContain("/form-copy.html");
+    expect(lines[0]).not.toBe(lines[1]);
+
+    const unique = [
+      { ref: "T1", tabId: 1, title: "Form", host: "x.example", url: "https://x.example/form.html", available: true, textLength: 500, elementCount: 10, excerpt: "a" },
+      { ref: "T2", tabId: 2, title: "Checkout", host: "x.example", url: "https://x.example/checkout.html", available: true, textLength: 500, elementCount: 10, excerpt: "b" },
+    ];
+    const m2 = buildTabManifest(unique as any, {});
+    for (const e of m2.entries) expect(e.line).not.toMatch(/ — \//);
   });
 });

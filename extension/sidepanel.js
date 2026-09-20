@@ -13,7 +13,7 @@ import {
 } from './lib/context-policy.js';
 import { describePrompt } from './lib/prompt.js';
 import { SKILL_STATE_KEY } from './lib/protocol-skill.js';
-import { assignRefs, ensureActiveTabRef, isBlankPage, thinTabExcerpts } from './lib/tab-contexts.js';
+import { assignRefs, disambiguatedLabel, ensureActiveTabRef, isBlankPage, thinTabExcerpts } from './lib/tab-contexts.js';
 import { visionModelSuggestion, modelVisionSupport, findModelEntry } from './lib/vision.js';
 import { extractUrls, MAX_LINK_CHIPS } from './lib/links.js';
 import { zoChatUrl, truncateId } from './lib/zo-links.js';
@@ -3167,7 +3167,13 @@ function renderTabStrip() {
     chip.className = 'tab-chip' + (tabRefsEnabled.has(t.tabId) ? ' tab-chip-on' : '');
     // #72: title preferred over bare host — two github.com tabs must be
     // distinguishable at a glance; host + full url live in the tooltip.
-    const label = safeText(t.title || t.host || t.url).slice(0, 24);
+    // #305: same-title(+host) twins get a path suffix so chips differ — the
+    // suffix goes at the END, so colliding labels get a longer cap (the CSS
+    // max-width + tooltip still carry the overflow); unique titles keep the
+    // exact 24-char rendering they always had.
+    const full = disambiguatedLabel(t, openTabs);
+    const collides = full !== safeText(t.title || t.host || t.url);
+    const label = full.length <= (collides ? 40 : 24) ? full : safeText(t.title || t.host || t.url).slice(0, 24);
     chip.textContent = (t.active ? '◈ ' : '') + label;
     chip.title = safeText(t.title || t.url) + (t.url ? `\n${safeText(t.url)}` : '') +
       (t.active ? ' — this tab' : '') +
@@ -3324,10 +3330,11 @@ function renderTabAutocomplete(filterText) {
     item.setAttribute('role', 'option');
     item.setAttribute('aria-selected', i === tabAcIndex ? 'true' : 'false');
     // #72: page title primary, dimmed host secondary — bare hostnames made
-    // same-site tabs indistinguishable.
+    // same-site tabs indistinguishable. #305: title(+host) twins get a path
+    // suffix so rows differ.
     const name = document.createElement('span');
     name.className = 'tab-ac-name';
-    name.textContent = (t.active ? '◈ ' : '') + safeText(t.title || t.host || t.url).slice(0, 40);
+    name.textContent = (t.active ? '◈ ' : '') + disambiguatedLabel(t, tabAcItems).slice(0, 56);
     item.appendChild(name);
     if (t.host && (t.title || '') !== t.host) {
       const host = document.createElement('span');
