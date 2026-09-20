@@ -2481,9 +2481,14 @@ body.options-page {
 /* ── Tab contexts (referenced tabs as VSCode-style context) ── */
 .tab-contexts {
   margin: 0 12px 4px;
+  /* #303: one wrapping row — the collapse button, the tab strip, and the
+     three set-once toggles share lines and wrap together. The old column
+     stacked the toggles as three permanent right-aligned rows (~78px of
+     dead vertical chrome at dock width). */
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  flex-flow: row wrap;
+  align-items: center;
+  gap: 4px 6px;
 }
 .tab-strip-collapse {
   align-self: flex-start;
@@ -2528,7 +2533,6 @@ body.options-page {
    strip row — same chip language, amber when armed. */
 .shot-toggle {
   flex: 0 0 auto;
-  margin-left: auto;
   padding: 3px 10px;
   font-size: 11px;
   font-family: inherit;
