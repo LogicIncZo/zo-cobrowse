@@ -1855,6 +1855,97 @@ describe("parked handoff actions reach the review card (#163)", () => {
     const card = panelWin.document.querySelector("#actions-reasoning") as any;
     expect(String(card?.textContent || "")).toContain("run these yourself");
   }, 30000);
+
+  it("#302: Skip on a handoff park posts a persisted note saying the boundary action was NOT performed", async () => {
+    const RUN_TAB = 47;
+    bus.tabs.registerTab({ id: RUN_TAB, url: "https://pinned302.example/checkout", title: "Checkout 302", active: false });
+    const chatId = (bus.storage.local._store.cobrowse_open_tabs || {}).activeId
+      || Object.keys(bus.storage.local._store.cobrowse_convos || {})[0];
+    expect(chatId).toBeTruthy();
+
+    bus.storage.session._store["cobrowse_handoff_runs"] = {
+      "run-302-skip": {
+        runId: "run-302-skip", chatId, goal: "buy the thing",
+        status: "paused", boundaryMode: "readonly",
+        budget: { maxTurns: 6, maxNavigations: 12, maxMinutes: 15 },
+        usage: { turns: 1, navigations: 0, startedAt: Date.now() - 30_000 },
+        pagesVisited: [], parkLog: [], tabId: RUN_TAB,
+        createdAt: Date.now() - 60_000, updatedAt: Date.now() - 20_000,
+      },
+    };
+    await bus.runtime.sendMessage({
+      type: "HANDOFF_UPDATE",
+      run: bus.storage.session._store["cobrowse_handoff_runs"]["run-302-skip"],
+    });
+    await waitUntil(() => {
+      const btns = [...panelWin.document.querySelectorAll("#messages .msg-system button")];
+      return btns.some((b: any) => (b.textContent || "").includes("Resume"));
+    }, 5000);
+
+    let asks = 0;
+    fm.handle((url, _init, req) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      const input = String((req as any)?.body?.input || "");
+      if (!input.includes("[handoff-run continuation]")) return sseResponse(zoSseText({ text: "ok" }));
+      asks++;
+      if (asks === 1) return envelope163({ actions: [{ type: "click", selector: "#buy" }] });
+      return envelope163({ actions: [{ type: "done", response: "Cart ready" }] });
+    });
+
+    ([...panelWin.document.querySelectorAll("#messages .msg-system button")] as any[])
+      .find((b: any) => (b.textContent || "").includes("Resume")).click();
+    const bar = () => panelWin.document.querySelector("#actions-bar") as any;
+    await waitUntil(() => bar() && !String(bar().className).includes("hidden"), 10_000);
+
+    // SKIP: one click, no modal — the note is the record.
+    (panelWin.document.querySelector("#skip-btn") as HTMLElement).click();
+    await waitUntil(() => {
+      const notes = [...panelWin.document.querySelectorAll("#messages .msg-system")];
+      return notes.some((n: any) => String(n.textContent).includes("Skipped 1 parked action"));
+    }, 5000);
+    const note = [...panelWin.document.querySelectorAll("#messages .msg-system")]
+      .find((n: any) => String(n.textContent).includes("Skipped 1 parked action"));
+    expect(String(note.textContent)).toContain("click");
+    expect(String(note.textContent)).toContain("NOT performed"); // boundary closure
+
+    // Persisted: the note survives in the conversation record + bar cleared.
+    await waitUntil(() => {
+      const c = (bus.storage.local._store.cobrowse_convos || {})[chatId];
+      return (c?.messages || []).some((m: any) => m.role === "system" && String(m.text).includes("NOT performed"));
+    }, 5000);
+    expect(String(bar().className)).toContain("hidden");
+  }, 30000);
+
+  it("#302: Skip on an ordinary park lists the dropped action types (no boundary wording)", async () => {
+    const chatId = (bus.storage.local._store.cobrowse_open_tabs || {}).activeId
+      || Object.keys(bus.storage.local._store.cobrowse_convos || {})[0];
+    const conv = (bus.storage.local._store.cobrowse_convos || {})[chatId];
+    conv.pendingActions = {
+      actions: [{ type: "click", selector: "#a" }, { type: "fill", selector: "#b" }, { type: "fill", selector: "#c" }],
+      reasoning: "streamed while backgrounded",
+    };
+    await bus.storage.local.set({ cobrowse_convos: bus.storage.local._store.cobrowse_convos });
+
+    // Switch away and back: the parked bar re-arms from the stored set.
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await new Promise((r) => setTimeout(r, 300));
+    const openOrder: string[] = bus.storage.local._store.cobrowse_open_tabs;
+    const tab = panelWin.document.querySelectorAll(".chat-tab")[Math.max(0, openOrder.indexOf(chatId))] as HTMLElement;
+    tab.click();
+    const bar = () => panelWin.document.querySelector("#actions-bar") as any;
+    await waitUntil(() => bar() && !String(bar().className).includes("hidden"), 5000);
+
+    (panelWin.document.querySelector("#skip-btn") as HTMLElement).click();
+    await waitUntil(() => {
+      const notes = [...panelWin.document.querySelectorAll("#messages .msg-system")];
+      return notes.some((n: any) => String(n.textContent).includes("Skipped 3 parked actions"));
+    }, 5000);
+    const note = [...panelWin.document.querySelectorAll("#messages .msg-system")]
+      .find((n: any) => String(n.textContent).includes("Skipped 3 parked actions"));
+    expect(String(note.textContent)).toContain("click, 2× fill"); // count + types
+    expect(String(note.textContent)).not.toContain("NOT performed"); // no boundary claim
+  }, 30000);
 });
 
 describe("run-tab marker (#166)", () => {

@@ -780,10 +780,7 @@ function bindEvents() {
 
   // Pending actions
   runAllBtn.addEventListener('click', runPendingActions);
-  skipBtn.addEventListener('click', () => {
-    hidePendingActionsBar();
-    clearStoredPendingActions(activeId);
-  });
+  skipBtn.addEventListener('click', () => skipParkedActions(activeId));
 
   // New conversation
   newChatBtn.addEventListener('click', startNewConversation);
@@ -2660,6 +2657,39 @@ function hidePendingActionsBar() {
   pendingActions = null;
   pendingActionsReasoning = '';
   actionsBar.classList.add('hidden');
+}
+
+/** #302: Skip discards the parked plan — record it in the chat (persisted, so
+ * reload keeps the note) with the dropped action types, and for handoff parks
+ * state that the boundary action was NOT performed. One click, no modal — the
+ * note is the recovery story. */
+function skipParkedActions(chatId) {
+  const dropped = Array.isArray(pendingActions)
+    ? pendingActions
+    : (pendingActions && Array.isArray(pendingActions.actions) ? pendingActions.actions : []);
+  const handoffPark = pendingActionsReasoning === PARKED_REASONING
+    || (conversations[chatId]?.pendingActions?.reasoning === PARKED_REASONING);
+  hidePendingActionsBar();
+  clearStoredPendingActions(chatId);
+  if (!dropped.length) return;
+  const counts = {};
+  for (const a of dropped) {
+    const t = safeText(a && a.type) || 'action';
+    counts[t] = (counts[t] || 0) + 1;
+  }
+  const list = Object.entries(counts).map(([t, n]) => (n > 1 ? `${n}× ${t}` : t)).join(', ');
+  const plural = dropped.length === 1 ? 'action' : 'actions';
+  const note = handoffPark
+    ? `⏭️ Skipped ${dropped.length} parked ${plural}${list ? ` — ${list}` : ''}. The boundary action was NOT performed — do it yourself or ask again.`
+    : `⏭️ Skipped ${dropped.length} parked ${plural}${list ? ` — ${list}` : ''}. Ask again if you want them re-planned.`;
+  addMessage('system', note);
+  // addMessage renders but skips system roles in history — persist explicitly.
+  const conv = conversations[chatId];
+  if (conv) {
+    conv.messages.push({ role: 'system', text: note, timestamp: Date.now() });
+    if (conv.messages.length > MAX_HISTORY) conv.messages = conv.messages.slice(-MAX_HISTORY);
+    saveConversations();
+  }
 }
 
 /** Clear a chat's stored pending actions (Run All finished or Skipped). */
