@@ -90,7 +90,7 @@ export async function auditContrast(
       // computed text color doesn't paint the glyph, so a "ratio" for them is
       // meaningless (WCAG exempts them; #298). Text WITH letters/digits
       // ("💭 Thought", "🔗 URL only") stays audited.
-      if (!/[0-9A-Za-z\u00C0-\u024F]/.test(raw)) continue;
+      if (!/[\p{L}\p{N}]/u.test(raw)) continue; // any letter/digit, any script
       const st = getComputedStyle(el);
       if (st.display === "none" || st.visibility === "hidden" || parseFloat(st.opacity) === 0) continue;
       out.push({
