@@ -5044,8 +5044,11 @@ function removeHandoffLine() {
 
 /** Slim run-status line above the messages (progress + stop) — the recipe
  * twin of renderHandoffLine. */
-function renderRecipeLine(run) {
+function renderRecipeLine(run, phase) {
   if (!msgsEl) return;
+  // #301: ONE live run element — RECIPE_START creates it in the "started"
+  // state and every RECIPE_UPDATE flips it in place, so the run never
+  // announces progress above (before) its own start announcement.
   let line = msgsEl.querySelector('.msg-recipe-line');
   if (!line) {
     line = document.createElement('div');
@@ -5060,8 +5063,11 @@ function renderRecipeLine(run) {
     stopBtn.disabled = true;
     await chrome.runtime.sendMessage({ type: 'RECIPE_STOP', runId: run.runId, reason: 'stopped by user' }).catch(() => {});
   });
+  const label = phase === 'started'
+    ? `🧾 Recipe started — ${safeText(run.name)} (v${safeText(run.version)})`
+    : `🧾 Recipe — ${recipeProgress(run)} · ${safeText(run.name).slice(0, 60)}`;
   line.replaceChildren(
-    Object.assign(document.createElement('span'), { textContent: `🧾 Recipe — ${recipeProgress(run)} · ${safeText(run.name).slice(0, 60)}` }),
+    Object.assign(document.createElement('span'), { textContent: label }),
     stopBtn,
   );
   line.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -5379,7 +5385,9 @@ async function startRecipeRun(source) {
   }
   activeRecipeRun = start.run;
   renderChatTabs(); // the run's chat tab carries the run marker
-  addMessage('system', `🧾 Recipe started — ${safeText(start.run.name)} (v${safeText(start.run.version)})`);
+  // #301: the started announcement IS the live run line — updates flip it in
+  // place instead of racing it with a separate progress element.
+  renderRecipeLine(start.run, 'started');
   return start.run;
 }
 
