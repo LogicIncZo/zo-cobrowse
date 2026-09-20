@@ -338,6 +338,86 @@ describe("sidepanel render contract (real background pipeline)", () => {
     expect(panelWin.document.querySelectorAll("#messages .msg-error").length).toBe(errCardsBefore);
     expect(panelWin.document.querySelector("#query-input").disabled).toBe(false);
   }, 20000);
+
+  it("#299: active-chat stream errors persist as role:'error' records; re-render draws the card and Retry re-sends", async () => {
+    let failed = false;
+    fm.handle((url) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      if (!failed) {
+        failed = true;
+        return sseResponse(`event: Error\ndata: ${JSON.stringify({ message: "Zo API error: 500 — gone" })}\n`);
+      }
+      return sseResponse(
+        `event: PartStartEvent\ndata: ${JSON.stringify({ index: 1, part: { part_kind: "text", content: "recovered." } })}\n` +
+        `event: completed\ndata: {}\n`
+      );
+    });
+    await typeAndSend("Persist my failure");
+    await waitUntil(() => panelWin.document.querySelector("#messages .msg-error .error-card-title"), 8000);
+
+    // Persisted: the conversation carrying this turn has the error record last.
+    const targetId = bus.storage.local._store.cobrowse_active_id;
+    await waitUntil(() => {
+      const c = (bus.storage.local._store.cobrowse_convos || {})[targetId];
+      return !!c && c.messages[c.messages.length - 1].role === "error";
+    }, 8000);
+    // Re-render from records (switch away and back): the card redraws.
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await waitUntil(() => !panelWin.document.querySelector("#messages .msg-error"), 8000);
+    // Tab buttons carry no conversation id — click by stored open-tabs order.
+    const openOrder: string[] = bus.storage.local._store.cobrowse_open_tabs;
+    const tab = panelWin.document.querySelectorAll(".chat-tab")[openOrder.indexOf(targetId)] as HTMLElement;
+    expect(tab).toBeTruthy();
+    tab.click();
+    await waitUntil(() => !!panelWin.document.querySelector("#messages .msg-error .error-card-title"), 8000);
+    const conv = (bus.storage.local._store.cobrowse_convos || {})[targetId];
+    const errCount = conv.messages.filter((m: any) => m.role === "error").length;
+    expect(panelWin.document.querySelectorAll("#messages .msg-error").length).toBe(errCount); // no double-render
+    const details = [...panelWin.document.querySelectorAll("#messages .error-card-detail")];
+    expect(details[details.length - 1].textContent).toContain("gone");
+
+    // Retry from the re-rendered card re-sends the failed turn.
+    const box = armAskCapture();
+    (panelWin.document.querySelector(".error-card-retry") as HTMLElement).click();
+    await waitUntil(() => box.msg != null, 8000);
+    expect(box.msg.userQuery).toContain("Persist my failure");
+    await waitUntil(() => {
+      const bodies = [...panelWin.document.querySelectorAll("#messages .msg-assistant .msg-body")];
+      return bodies.some((el: any) => el.textContent.includes("recovered."));
+    }, 8000);
+  }, 20000);
+
+  it("#299: error arriving while the chat is backgrounded renders exactly one card on return", async () => {
+    const d = deferredSse();
+    fm.handle((url) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      return d.response;
+    });
+    await typeAndSend("Fail in the background");
+    await waitUntil(() => askLog.length > 0, 8000);
+    const targetId = bus.storage.local._store.cobrowse_active_id;
+    // Switch away while the stream is in flight…
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await waitUntil(() => panelWin.document.querySelectorAll(".chat-tab").length >= 2, 8000);
+    // …release the error: the backgrounded-chat branch persists, no DOM.
+    d.push(sseEvent("Error", { message: "Zo API error: 500 — backgrounded" }));
+    await waitUntil(() => {
+      const convs: any[] = Object.values(bus.storage.local._store.cobrowse_convos || {});
+      return convs.some((c: any) => (c.messages || []).some((m: any) => m.role === "error" && String(m.text).includes("backgrounded")));
+    }, 8000);
+    // …switch back: the new record renders as a card, EXACTLY once.
+    const openOrder: string[] = bus.storage.local._store.cobrowse_open_tabs;
+    const idx = Math.max(0, openOrder.indexOf(targetId));
+    const tab = panelWin.document.querySelectorAll(".chat-tab")[idx] as HTMLElement;
+    expect(tab).toBeTruthy();
+    tab.click();
+    await waitUntil(() => [...panelWin.document.querySelectorAll("#messages .error-card-detail")]
+      .some((el: any) => el.textContent.includes("backgrounded")), 8000);
+    expect([...panelWin.document.querySelectorAll("#messages .error-card-detail")]
+      .filter((el: any) => el.textContent.includes("backgrounded")).length).toBe(1);
+  }, 20000);
 });
 
 describe("sidepanel ↔ background ↔ content — action turn end-to-end", () => {

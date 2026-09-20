@@ -1044,7 +1044,17 @@ function renderCurrentConversation() {
     renderEmptyState();
     return;
   }
+  let lastUserText = '';
   for (const msg of conv.messages) {
+    // #299: persisted failures redraw as the Zo error card, with Retry
+    // re-sending the failed turn (the nearest preceding user message) —
+    // same semantics as the live card, available after reload.
+    if (msg.role === 'error') {
+      const detail = String(msg.text || '').replace(/^Response interrupted:\s*/, '');
+      addErrorCard(detail, () => { if (lastUserText) sendQueryFromLabel(lastUserText); });
+      continue;
+    }
+    if (msg.role === 'user') lastUserText = String(msg.text || '');
     const m = msg.role === 'assistant' ? healAssistantMessage(msg) : msg;
     const opts = m.role === 'assistant'
       ? { timestamp: m.timestamp, durationMs: m.durationMs, contextTier: m.contextTier, contextReason: m.contextReason, screenshot: m.screenshot, conversationId: conv.zoThreadId || undefined }
@@ -4897,6 +4907,17 @@ function handleStreamMessage(msg) {
       if (streamSession.msgEl) {
         const timerLine = streamSession.msgEl.querySelector('.msg-processing-timer');
         if (timerLine) timerLine.remove();
+      }
+      // #299: persist the failure like background chats do — a card that only
+      // lives in the DOM leaves an orphaned user bubble after reload. One
+      // record per failed turn: a duplicate delivery replaces, never stacks.
+      const errConv = getActiveConversation();
+      if (errConv) {
+        const record = { role: 'error', text: `Response interrupted: ${safeText(msg.error)}`, timestamp: Date.now() };
+        const last = errConv.messages[errConv.messages.length - 1];
+        if (last && last.role === 'error') errConv.messages[errConv.messages.length - 1] = record;
+        else errConv.messages.push(record);
+        saveConversationById(activeId);
       }
       // Zo error card: "Response interrupted" + technical detail + Retry.
       addErrorCard(msg.error, () => {
