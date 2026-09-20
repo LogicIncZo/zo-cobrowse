@@ -3,6 +3,30 @@
 New features in Zo Co-browse, newest first. Each entry explains what shipped;
 open **How to use it** for the hands-on steps.
 
+## A more legible, more reachable panel <span class="badge-new">NEW</span> {#ux-bash}
+
+_2026-09-20 · [#296](https://github.com/LogicIncZo/zo-cobrowse/issues/296)–[#315](https://github.com/LogicIncZo/zo-cobrowse/issues/315) · v0.3.3.0_
+
+Twenty fixes from a full UX audit of the panel, options, and onboarding — the
+theme is legibility and reachability:
+
+- **Everything is readable in every theme.** Footer text, chips, labels, and
+  reasoning prose now clear WCAG AA contrast in all six themes — including
+  sepia and the light default that had been failing quietly.
+- **Keyboard and screen-reader users get real affordances.** Every icon button
+  announces what it does; the connection status has a text form; a consistent
+  focus ring shows keyboard users where they are; all 24-pixel hit targets.
+- **Nothing vanishes.** A failed turn keeps its error card (with working
+  Retry) across reloads; skipping parked actions leaves a note in the chat
+  saying exactly what was skipped.
+- **Unattended turns are transparent.** Handoff continuation turns show the
+  context-tier chip — what Zo could see — right on the turn.
+- **Details that were almost right.** Same-titled tabs are now distinguishable
+  everywhere (including in the prompt Zo receives); the first-run tour points
+  at a real Open-settings button instead of a gear icon that never existed;
+  the prompt inspector has a Copy button; the theme setting lives under
+  About → Appearance.
+
 ## Teach by stating: Zo composes your recipes <span class="badge-new">NEW</span> {#recipe-compose}
 
 _2026-09-19 · [#289](https://github.com/LogicIncZo/zo-cobrowse/issues/289) + [#290](https://github.com/LogicIncZo/zo-cobrowse/issues/290) · v0.3.2.0_

@@ -54,5 +54,89 @@
   "domToggleTitleOff": {
     "message": "DOM OFF — no page DOM is sent (URL/title pointer only). Click to re-enable.",
     "description": "🧩 DOM toggle tooltip (off)."
+  },
+  "emptyStateHint": {
+    "message": "Try asking:",
+    "description": "Empty-state prompt above the starter chips."
+  },
+  "emptyStateChipSummarize": {
+    "message": "📝 Summarize this page",
+    "description": "Starter chip label (value stays English — it is a prompt)."
+  },
+  "emptyStateChipWhat": {
+    "message": "❓ What is on this page?",
+    "description": "Starter chip label."
+  },
+  "emptyStateChipExtract": {
+    "message": "📥 Extract the links",
+    "description": "Starter chip label."
+  },
+  "emptyStateChipResearch": {
+    "message": "🔬 Research this topic",
+    "description": "Starter chip label."
+  },
+  "errorCardTitle": {
+    "message": "Response interrupted",
+    "description": "Zo error card headline."
+  },
+  "errorCardFallback": {
+    "message": "An unexpected error occurred.",
+    "description": "Error card detail when Zo returned nothing usable."
+  },
+  "errorCardRetry": {
+    "message": "↻ Retry",
+    "description": "Error card retry button."
+  },
+  "ob1Title": {
+    "message": "Welcome to Zo Co-browse",
+    "description": "Tour step 1 title."
+  },
+  "ob1Desc": {
+    "message": "Your browser, supercharged with AI.",
+    "description": "Tour step 1 tagline."
+  },
+  "ob1Body": {
+    "message": "<p>Zo Co-browse connects your browser to Zo Computer — your personal AI server. Zo can see what's on the page, answer questions, fill forms, extract data, run DuckDB queries, and even create automations — all from this side panel.</p><p>Let's get you set up in 30 seconds.</p>",
+    "description": "Tour step 1 body (HTML)."
+  },
+  "ob2Title": {
+    "message": "Connect Your Zo",
+    "description": "Tour step 2 title."
+  },
+  "ob2Desc": {
+    "message": "You need a Zo Computer account to use Co-browse.",
+    "description": "Tour step 2 tagline."
+  },
+  "ob2Body": {
+    "message": "<p>If you haven't already, sign up at <a href=\"https://zocomputer.com\" target=\"_blank\">zocomputer.com</a> — it's free.</p><p>Already have an account? Great — the next step is to add your API token.</p>",
+    "description": "Tour step 2 body (HTML)."
+  },
+  "ob3Title": {
+    "message": "Add Your API Token",
+    "description": "Tour step 3 title."
+  },
+  "ob3Desc": {
+    "message": "This connects the extension to your Zo.",
+    "description": "Tour step 3 tagline."
+  },
+  "ob3Body": {
+    "message": "<ol style=\"text-align:left;margin:0 auto;max-width:340px;line-height:1.8\"><li>Open your Zo <strong>Settings → Advanced → Access Tokens</strong></li><li>Create a new token (or copy an existing one)</li><li>Paste it in the <strong>extension settings</strong> — the button below opens them</li></ol><p style=\"margin-top:12px\">💡 Your token is stored locally and never shared.</p>",
+    "description": "Tour step 3 body (HTML)."
+  },
+  "ob4Title": {
+    "message": "Test Your Connection",
+    "description": "Tour step 4 title."
+  },
+  "ob4Desc": {
+    "message": "Let's make sure everything works.",
+    "description": "Tour step 4 tagline."
+  },
+  "ob4Body": {
+    "message": "<p>Open the <strong>extension settings</strong> (button below) and hit <strong>Test Connection</strong> there.</p><p>If it works, you're all set! You can ask Zo anything about the page you're on.</p>",
+    "description": "Tour step 4 body (HTML)."
+  },
+  "obOpenSettings": {
+    "message": "⚙ Open settings",
+    "description": "In-card button that opens the extension settings."
   }
 }

@@ -9,11 +9,11 @@
 <body>
   <div class="shell" id="shell" data-theme="">
     <!-- ── Header ── -->
-    <header class="header">
+    <header class="header" aria-label="Zo co-browse">
       <div class="header-brand">
         <img src="icons/icon48.png" class="brand-icon-img" alt="" />
         <span class="brand-zo">Zo</span>
-        <span>co-browse</span>
+        <span class="brand-sub">co-browse</span>
       </div>
       <!-- ── Page title (#63): folded into the header — the standalone
            page-bar row cost a full line. Icon + truncating title; the full
@@ -23,13 +23,15 @@
         <span id="page-url">— no page —</span>
       </div>
       <div class="header-actions">
-        <button id="theme-toggle" class="icon-btn theme-toggle" data-i18n-title="sidepanelThemeToggle">☀</button>
+        <button id="theme-toggle" class="icon-btn theme-toggle" aria-label="Toggle theme" data-i18n-title="sidepanelThemeToggle">☀</button>
         <div class="status-dot-wrap">
-          <span id="status-dot" class="dot dot-disconnected" title="Not configured"></span>
+          <span id="status-dot" class="dot dot-disconnected" role="img" aria-label="Connection status: not configured" title="Not configured"></span>
+          <!-- #308: visually-hidden text twin — magnifier/BR users get the status too -->
+          <span id="status-text" class="sr-only" aria-live="polite">Connection status: not configured</span>
         </div>
-        <button id="help-btn" class="icon-btn" data-i18n-title="sidepanelHelp">?</button>
-        <button id="history-btn" class="icon-btn" data-i18n-title="sidepanelHistory">☰</button>
-        <button id="new-chat-btn" class="icon-btn" data-i18n-title="sidepanelNewChat">✚</button>
+        <button id="help-btn" class="icon-btn" aria-label="Help" data-i18n-title="sidepanelHelp">?</button>
+        <button id="history-btn" class="icon-btn" aria-label="Conversation history" data-i18n-title="sidepanelHistory">☰</button>
+        <button id="new-chat-btn" class="icon-btn" aria-label="New chat" data-i18n-title="sidepanelNewChat">✚</button>
       </div>
     </header>
 
@@ -65,7 +67,7 @@
           <option value="visual">🖼️ Visual</option>
         </select>
       </div>
-      <button id="create-mode-btn" class="btn btn-ghost btn-sm create-mode-btn" data-i18n-title="sidepanelCreateMode">✦</button>
+      <button id="create-mode-btn" class="btn btn-ghost btn-sm create-mode-btn" aria-label="Create a custom Mode" data-i18n-title="sidepanelCreateMode">✦</button>
     </div>
 
     <!-- ── Quick action chips ── -->
@@ -78,6 +80,7 @@
         <h2 id="ob-title">Welcome to Zo Co-browse</h2>
         <p id="ob-desc" class="desc"></p>
         <div id="ob-body"></div>
+        <div id="ob-actions" class="hidden" style="margin-top:14px;"></div>
         <div class="onboarding-buttons">
           <button id="ob-skip" class="btn btn-ghost btn-sm ob-skip-btn">Skip tour</button>
           <button id="ob-back" class="btn btn-ghost btn-sm">Back</button>
@@ -131,7 +134,7 @@
         <button id="recipe-lib-btn" class="shot-toggle" type="button"
                 title="Recipe library — saved flows (run, rename, delete, import, export)">🧾 Recipes</button>
       </div>
-      <div id="tab-autocomplete" class="tab-autocomplete hidden"></div>
+      <div id="tab-autocomplete" class="tab-autocomplete hidden" role="listbox" aria-label="Open tabs — reference as context"></div>
 
       <!-- Composer reference pickers (#28): `/` skills + `%` workspace files.
            Selected entries arm chips (below) that ride the NEXT turn only. -->
@@ -142,11 +145,11 @@
 
       <!-- Input area -->
       <div class="input-area">
-        <button id="mic-btn" class="btn btn-ghost btn-icon mic-btn" title="Voice input">🎤</button>
+        <button id="mic-btn" class="btn btn-ghost btn-icon mic-btn" aria-label="Voice input" title="Voice input">🎤</button>
         <div class="input-wrap">
           <textarea id="query-input" rows="1" data-i18n-placeholder="sidepanelComposerPlaceholder" autofocus></textarea>
         </div>
-        <button id="send-btn" class="btn btn-primary btn-icon" title="Send">→</button>
+        <button id="send-btn" class="btn btn-primary btn-icon" aria-label="Send" aria-keyshortcuts="Enter" title="Send">→</button>
       </div>
     </div>
 

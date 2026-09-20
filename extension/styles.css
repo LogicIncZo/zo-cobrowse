@@ -28,6 +28,14 @@
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
+/* ── #310: one focus ring, keyboard-only (:focus-visible) — mouse clicks
+   stay clean; Tab stops always show the 2px amber outline. Components may
+   add glow on top (border/shadow), never strip the outline. ── */
+:focus-visible {
+  outline: 2px solid var(--amber, #f0a832);
+  outline-offset: 2px;
+}
+
 /* JetBrains Mono for code. The @import is an enhancement: under MV3's
    default style-src 'self' it is blocked and the chain falls back to
    ui-monospace/monospace, so code stays readable either way. */
@@ -54,6 +62,7 @@
   --text: #e8e6f0;
   --text-muted: #8884a8;
   --text-faint: #5a5680;
+  --text-soft: #a29ebc; /* #298 readable floor */
   --text-inverse: #070914;
 
   /* Zo-neutral surface tokens (oklch-derived). Used by the chat surface
@@ -66,7 +75,7 @@
   --zo-primary-foreground: #070914;
   --zo-accent: var(--bg-elevated);
   --zo-accent-foreground: var(--text);
-  --zo-muted-foreground: var(--text-muted);
+  --zo-muted-foreground: var(--text-soft); /* #298: >=4.5 on message surfaces */
   --zo-border: #2a2d52;
   --zo-border-primary: rgba(196, 181, 253, 0.40);
 
@@ -111,8 +120,9 @@
     --bg-glass: rgba(255, 255, 255, 0.85);
 
     --text: #1a1814;
-    --text-muted: #7a756c;
+    --text-muted: #706b62; /* #298: 4.69:1 on --bg-deep (was 4.06, sub-AA) */
     --text-faint: #a8a298;
+  --text-soft: #5f5a52; /* #298 readable floor */
     --text-inverse: #f4f1ea;
 
     --amber: #c47f20;
@@ -133,7 +143,7 @@
     --zo-primary-foreground: #ffffff;
     --zo-accent: var(--bg-elevated);
     --zo-accent-foreground: var(--text);
-    --zo-muted-foreground: var(--text-muted);
+    --zo-muted-foreground: var(--text-soft); /* #298: >=4.5 on message surfaces */
     --zo-border: #e2ddd3;
     --zo-border-primary: rgba(109, 40, 217, 0.30);
 
@@ -156,6 +166,7 @@
   --text: #e8e6f0;
   --text-muted: #8884a8;
   --text-faint: #5a5680;
+  --text-soft: #a29ebc; /* #298 readable floor */
   --text-inverse: #070914;
   --amber: #f0a832;
   --amber-muted: #b07a2a;
@@ -174,7 +185,7 @@
   --zo-primary-foreground: #070914;
   --zo-accent: var(--bg-elevated);
   --zo-accent-foreground: var(--text);
-  --zo-muted-foreground: var(--text-muted);
+  --zo-muted-foreground: var(--text-soft); /* #298: >=4.5 on message surfaces */
   --zo-border: #2a2d52;
   --zo-border-primary: rgba(196, 181, 253, 0.40);
   --shadow-sm: 0 1px 3px rgba(0,0,0,0.4);
@@ -197,8 +208,9 @@
   --bg-input: #ffffff;
   --bg-glass: rgba(255, 255, 255, 0.85);
   --text: #1a1814;
-  --text-muted: #7a756c;
+  --text-muted: #706b62; /* #298: 4.69:1 on --bg-deep (was 4.06, sub-AA) */
   --text-faint: #a8a298;
+  --text-soft: #5f5a52; /* #298 readable floor */
   --text-inverse: #f4f1ea;
   --amber: #c47f20;
   --amber-muted: #dba14a;
@@ -217,7 +229,7 @@
   --zo-primary-foreground: #ffffff;
   --zo-accent: var(--bg-elevated);
   --zo-accent-foreground: var(--text);
-  --zo-muted-foreground: var(--text-muted);
+  --zo-muted-foreground: var(--text-soft); /* #298: >=4.5 on message surfaces */
   --zo-border: #e2ddd3;
   --zo-border-primary: rgba(109, 40, 217, 0.30);
   --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
@@ -236,8 +248,9 @@
   --bg-input: #faf2e2;
   --bg-glass: rgba(246, 236, 218, 0.88);
   --text: #3d3024;
-  --text-muted: #7a6b5a;
+  --text-muted: #6f6050; /* #297/#298: 4.76:1 on --bg-deep, floor with margin */  /* #297: 4.66:1 on --bg-surface (was 4.40, sub-AA) */
   --text-faint: #a89880;
+  --text-soft: #5f5142; /* #298 readable floor */
   --text-inverse: #f6ecda;
   --amber: #a0592a;
   --amber-muted: #b8733e;
@@ -256,7 +269,7 @@
   --zo-primary-foreground: #f6ecda;
   --zo-accent: var(--bg-elevated);
   --zo-accent-foreground: var(--text);
-  --zo-muted-foreground: var(--text-muted);
+  --zo-muted-foreground: var(--text-soft); /* #298: >=4.5 on message surfaces */
   --zo-border: #d4c8b0;
   --zo-border-primary: rgba(139, 90, 43, 0.30);
   --shadow-sm: 0 1px 3px rgba(61,48,36,0.10);
@@ -277,6 +290,7 @@
   --text: #dce8d4;
   --text-muted: #8a9e82;
   --text-faint: #5a7052;
+  --text-soft: #a4b89b; /* #298 readable floor */
   --text-inverse: #0f1a14;
   --amber: #c9a84c;
   --amber-muted: #a8883c;
@@ -295,7 +309,7 @@
   --zo-primary-foreground: #0f1a14;
   --zo-accent: var(--bg-elevated);
   --zo-accent-foreground: var(--text);
-  --zo-muted-foreground: var(--text-muted);
+  --zo-muted-foreground: var(--text-soft); /* #298: >=4.5 on message surfaces */
   --zo-border: #2a4032;
   --zo-border-primary: rgba(138, 170, 144, 0.40);
   --shadow-sm: 0 1px 3px rgba(0,0,0,0.5);
@@ -316,6 +330,7 @@
   --text: #d8eaf0;
   --text-muted: #7a9aaa;
   --text-faint: #4a7080;
+  --text-soft: #96b2c2; /* #298 readable floor */
   --text-inverse: #0a1820;
   --amber: #e06b5a;
   --amber-muted: #c05a4a;
@@ -334,7 +349,7 @@
   --zo-primary-foreground: #0a1820;
   --zo-accent: var(--bg-elevated);
   --zo-accent-foreground: var(--text);
-  --zo-muted-foreground: var(--text-muted);
+  --zo-muted-foreground: var(--text-soft); /* #298: >=4.5 on message surfaces */
   --zo-border: #1a3850;
   --zo-border-primary: rgba(122, 196, 218, 0.40);
   --shadow-sm: 0 1px 3px rgba(0,0,0,0.5);
@@ -456,6 +471,20 @@ input, textarea, select {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
+
+/* ── Screen-reader-only utility (#308) — visually hidden in every theme,
+   rendered for AT/magnifier users. ── */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 
 /* ── Header ── */
 .header {
@@ -689,7 +718,7 @@ input, textarea, select {
 }
 .page-icon {
   font-size: 11px;
-  color: var(--text-faint);
+  color: var(--text-muted); /* #297: was --text-faint @ 2.4-3.1:1 */
   flex-shrink: 0;
 }
 #page-url {
@@ -715,11 +744,15 @@ input, textarea, select {
   flex-wrap: wrap;
 }
 .controls-bar label {
-  font-size: 10px;
+  /* #297: 10px @ --text-faint measured 2.40-3.14:1 across themes (WCAG AA
+     needs 4.5). 11px matches the smallest legible size elsewhere in the
+     panel; --text-muted is the value-text token, >=4.5 on --bg-surface in
+     every theme after the sepia token nudge. */
+  font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--text-faint);
+  color: var(--text-muted);
 }
 /* #140: stacked label-over-value groups; MODE gets the widest group (it is
    switched per task and its value must read at ~400px dock width), PERSONA
@@ -742,7 +775,6 @@ input, textarea, select {
   padding: 3px 6px;
   font-size: 11px;
   color: var(--text);
-  outline: none;
   cursor: pointer;
   transition: border-color 0.15s;
 }
@@ -787,7 +819,6 @@ input, textarea, select {
 .select-shim-btn:focus-visible {
   border-color: var(--amber);
   box-shadow: 0 0 0 2px var(--amber-glow);
-  outline: none;
 }
 .select-shim-pop {
   position: fixed;
@@ -834,7 +865,7 @@ input, textarea, select {
   border-radius: 20px;
   border: 1px solid var(--border);
   background: var(--bg-surface);
-  color: var(--text-muted);
+  color: var(--text-soft); /* #298: readable floor — was --text-muted, 4.06 worst-case */
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
@@ -972,7 +1003,7 @@ input, textarea, select {
   border-radius: var(--radius-md);
   text-align: center;
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--text-soft); /* #298: was --text-muted @ 4.32 on --bg-elevated (dark) */
   padding: 6px 16px;
   max-width: 90%;
 }
@@ -1002,7 +1033,9 @@ input, textarea, select {
   font-size: 12.5px;
   line-height: 1.55;
   font-style: italic;
-  opacity: 0.9;
+  /* #298: no alpha dilution — --zo-muted-foreground resolves to --text-soft
+     (>=4.5:1); opacity 0.9 pushed readable prose back under AA. */
+  opacity: 1;
   word-wrap: break-word;
   overflow-wrap: break-word;
 }
@@ -1035,7 +1068,7 @@ input, textarea, select {
   width: 1em;
   text-align: center;
   transition: transform 0.15s ease;
-  color: var(--text-faint);
+  color: var(--text-muted); /* #298: was --text-faint, sub-AA everywhere */
 }
 .reasoning-toggle[aria-expanded="true"] .reasoning-caret {
   transform: rotate(90deg);
@@ -1053,7 +1086,7 @@ input, textarea, select {
   white-space: nowrap;
   color: var(--zo-muted-foreground);
   font-weight: 400;
-  opacity: 0.85;
+  opacity: 1; /* #298: was 0.85 — alpha pushed the preview under AA */
 }
 .reasoning-content {
   margin-top: 6px;
@@ -1465,7 +1498,6 @@ input, textarea, select {
   color: var(--text);
   font-size: 13px;
   line-height: 1.4;
-  outline: none;
   resize: none;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
@@ -1693,7 +1725,6 @@ input, textarea, select {
   background: var(--bg-surface);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
-  outline: none;
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 .history-search:focus {
@@ -1734,7 +1765,6 @@ input, textarea, select {
   background: var(--bg-deep);
   border: 1px solid var(--amber-muted);
   border-radius: var(--radius-sm);
-  outline: none;
 }
 
 /* ── Layout shell ── */
@@ -1915,7 +1945,6 @@ body.options-page {
   color: var(--text);
   font-size: 13px;
   font-family: var(--font-ui);
-  outline: none;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .form-group input:focus,
@@ -2067,6 +2096,16 @@ body.options-page {
 }
 
 /* ── Responsive tweaks ── */
+/* #296: dock-width header policy — the panel's real dock width is ~400–420px,
+   where the fixed brand row starved the page title (the user's primary
+   "where am I" signal) to a few characters. Below 480px the brand collapses
+   to the icon; .header-page (flex:1, min-width:0) takes the freed space, and
+   the title keeps its ellipsis + full-URL tooltip. ≥600px renders unchanged. */
+@media (max-width: 480px) {
+  .header-brand .brand-zo,
+  .header-brand .brand-sub { display: none; }
+  .header-brand { gap: 0; }
+}
 @media (max-width: 300px) {
   .header { padding: 0 8px; }
   .toolbar { padding: 4px 8px; }
@@ -2331,7 +2370,7 @@ body.options-page {
 .msg-footer-time {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
-  color: var(--text-faint);
+  color: var(--text-muted); /* #298: turn duration is information, not decoration — was --text-faint @ 2.43-3.38:1 */
 }
 
 /* Live "processing" timer shown on the in-flight assistant bubble until the
@@ -2450,17 +2489,36 @@ body.options-page {
   font-family: var(--font-code);
   font-size: 11px;
   line-height: 1.45;
+  letter-spacing: normal; /* #306: pinned — the mono face carries the code distinction */
   color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
 }
+/* #306: copy affordance on the inspector meta row (footer-copy language). */
+.prompt-copy-btn {
+  border: 1px solid var(--border-soft);
+  background: transparent;
+  color: var(--text-soft, var(--text-muted));
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-family: inherit;
+  padding: 2px 8px;
+  min-height: 24px;
+  cursor: pointer;
+}
+.prompt-copy-btn:hover { color: var(--text); border-color: var(--border-focus, var(--amber, #f0a832)); }
 
 /* ── Tab contexts (referenced tabs as VSCode-style context) ── */
 .tab-contexts {
   margin: 0 12px 4px;
+  /* #303: one wrapping row — the collapse button, the tab strip, and the
+     three set-once toggles share lines and wrap together. The old column
+     stacked the toggles as three permanent right-aligned rows (~78px of
+     dead vertical chrome at dock width). */
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  flex-flow: row wrap;
+  align-items: center;
+  gap: 4px 6px;
 }
 .tab-strip-collapse {
   align-self: flex-start;
@@ -2505,7 +2563,6 @@ body.options-page {
    strip row — same chip language, amber when armed. */
 .shot-toggle {
   flex: 0 0 auto;
-  margin-left: auto;
   padding: 3px 10px;
   font-size: 11px;
   font-family: inherit;
@@ -2645,6 +2702,19 @@ body.options-page {
 .tab-ac-item:hover, .tab-ac-item.tab-ac-active {
   background: var(--amber-glow, rgba(240,168,50,0.15));
 }
+/* #304: the active row gets an accent edge (amber clears 3:1 non-text
+   contrast on every theme's popup surface; tint alone was too faint). */
+.tab-ac-item.tab-ac-active {
+  box-shadow: inset 3px 0 0 0 var(--amber, #f0a832);
+}
+/* #304: keyboard-affordance hint shared by all three composer popups. */
+.picker-hint {
+  padding: 4px 10px 6px;
+  border-top: 1px solid var(--border-soft, #262a4d);
+  color: var(--text-soft, var(--text-muted, #8884a8));
+  font-size: 11px;
+  user-select: none;
+}
 /* #72: title primary + dimmed host secondary inside @ autocomplete rows. */
 .tab-ac-item .tab-ac-host {
   opacity: 0.55;
@@ -2703,6 +2773,7 @@ body.options-page {
 .picker-item:hover, .picker-item.picker-item-active {
   background: var(--amber-glow, rgba(240,168,50,0.15));
 }
+.picker-item.picker-item-active { box-shadow: inset 3px 0 0 0 var(--amber, #f0a832); } /* #304 accent edge */
 .picker-item-name {
   font-size: 13px;
   font-weight: 500;
@@ -2926,16 +2997,23 @@ body.options-page {
   font-size: 12px;
   opacity: 0.85;
 }
-.msg-handoff-line .handoff-stop {
+/* #301: the stop control lives INSIDE the run line, right-aligned, with a
+   >=24px hit target (Lane A3 floor). Covers handoff + recipe run lines. */
+.msg-handoff-line .handoff-stop,
+.msg-recipe-line .handoff-stop {
   border: 1px solid var(--border, #ccc);
   background: transparent;
   color: inherit;
   border-radius: 4px;
   font-size: 11px;
-  padding: 2px 8px;
+  padding: 4px 10px;
+  min-width: 24px;
+  min-height: 24px;
   cursor: pointer;
 }
-.msg-handoff-line .handoff-stop:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
+.msg-recipe-line .handoff-stop { margin-left: auto; }
+.msg-handoff-line .handoff-stop:hover,
+.msg-recipe-line .handoff-stop:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
 .handoff-batch { display: flex; flex-direction: column; gap: 2px; font-size: 12px; opacity: 0.9; }
 .update-banner-dismiss {
   margin-top: 4px;
@@ -2995,7 +3073,6 @@ body.options-page {
   color: var(--text);
 }
 .form-review-row input:focus {
-  outline: none;
   border-color: var(--amber);
   box-shadow: 0 0 0 2px var(--amber-glow);
 }
@@ -3026,7 +3103,6 @@ body.options-page {
   font-family: inherit;
 }
 .recipe-review-text:focus {
-  outline: none;
   border-color: var(--accent, #5b8def);
   box-shadow: 0 0 0 2px var(--amber-glow);
 }
@@ -3041,4 +3117,78 @@ body.options-page {
   gap: 8px;
   font-size: 12px;
   color: var(--text-muted, var(--text));
+}
+
+/* ── #309: 24px hit-target floor (WCAG 2.5.8) — one sizing policy, shared
+   levers. Visible glyphs stay exactly as they were; the extra box comes
+   from transparent padding / min-size on the control itself. ── */
+.select-shim-btn {
+  min-height: 24px;
+}
+.msg-footer-btn {
+  padding: 4px 6px;
+  min-height: 24px;
+}
+.msg-footer-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+}
+.tts-btn {
+  min-width: 24px;
+  min-height: 24px;
+}
+.theme-toggle::before {
+  /* options switch: invisible hit-slop around the 40x22 track */
+  content: '';
+  position: absolute;
+  inset: -5px;
+}
+.picker-item-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+}
+/* ── #309 sweep follow-ups: the composer chip row + 📎 toggle + the header
+   theme button (which inherits the global switch's 40x22 dims). ── */
+.tab-strip-collapse {
+  min-height: 24px;
+}
+.tab-chip,
+.shot-toggle {
+  min-height: 24px;
+}
+.tab-chip {
+  display: inline-flex;
+  align-items: center;
+}
+.shot-toggle {
+  display: inline-flex;
+  align-items: center;
+}
+/* The header theme button must NOT inherit the options switch's fixed
+   40x22 dims — restore the .icon-btn box (glyph unchanged). */
+.icon-btn.theme-toggle {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  border-radius: var(--radius-sm);
+}
+.icon-btn.theme-toggle::after {
+  display: none; /* the switch knob is options-only chrome */
+}
+
+/* ── #314: library row overflow — the ⋯ button and the menu items inherit
+   the tab-menu styling; hit targets meet the A3 24px floor. ── */
+.recipe-lib-actions button {
+  min-height: 24px;
+}
+.chat-tab-menu .danger {
+  color: #ff6369;
+}
+.chat-tab-menu button {
+  min-height: 24px;
 }

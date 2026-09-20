@@ -13,12 +13,12 @@ import {
 } from './lib/context-policy.js';
 import { describePrompt } from './lib/prompt.js';
 import { SKILL_STATE_KEY } from './lib/protocol-skill.js';
-import { assignRefs, ensureActiveTabRef, isBlankPage, thinTabExcerpts } from './lib/tab-contexts.js';
+import { assignRefs, disambiguatedLabel, ensureActiveTabRef, isBlankPage, thinTabExcerpts } from './lib/tab-contexts.js';
 import { visionModelSuggestion, modelVisionSupport, findModelEntry } from './lib/vision.js';
 import { extractUrls, MAX_LINK_CHIPS } from './lib/links.js';
 import { zoChatUrl, truncateId } from './lib/zo-links.js';
 import { WORKSPACE_ROOT, filterPickerEntries } from './lib/pickers.js';
-import { applyI18nDom } from './lib/i18n.js';
+import { applyI18nDom, tOr } from './lib/i18n.js';
 import { handoffInstructions, runProgress } from './lib/handoff.js';
 import { recipeProgress, composeInstructions } from './lib/recipes.js';
 import { conversationToMarkdown, exportFileName, pageContextToMarkdown, pageExportFileName, slugifyTitle } from './lib/export.js';
@@ -401,7 +401,10 @@ async function finishInit() {
           const evidence = (run.status === 'done' && (run.evidence || []).length)
             ? `\n\n${run.evidence.map((e) => `- **${safeText(e.label)}:** ${safeText(e.value)}`).join('\n')}`
             : '';
-          const note = `${icon} Recipe ${run.status} — ${safeText(run.name)}${reason}${evidence}`;
+          // #300: deterministic replay never captures the page — say so where
+          // a normal turn would show its capture tier.
+          const capture = run.boundary === 'compose' ? '' : ' · 🔗 no page capture';
+          const note = `${icon} Recipe ${run.status} — ${safeText(run.name)}${reason}${evidence}${capture}`;
           const line = addMessage('system', note);
           // R2 (#256): a healed run whose origin is a workspace file — offer
           // the cue write-back (the origin file is stale until saved).
@@ -623,26 +626,30 @@ function createSelectShim(select) {
 const OB_KEY = 'cobrowse_onboarding_done';
 const OB_STEP_KEY = 'cobrowse_onboarding_step';
 
+// #315: tour copy extracted (surface a) — tOr falls back to the English
+// literal, so behavior is identical in en and in tests.
 const OB_STEPS = [
   {
-    title: 'Welcome to Zo Co-browse',
-    desc: 'Your browser, supercharged with AI.',
-    body: '<p>Zo Co-browse connects your browser to Zo Computer — your personal AI server. Zo can see what\'s on the page, answer questions, fill forms, extract data, run DuckDB queries, and even create automations — all from this side panel.</p><p>Let\'s get you set up in 30 seconds.</p>',
+    title: tOr('ob1Title', 'Welcome to Zo Co-browse'),
+    desc: tOr('ob1Desc', 'Your browser, supercharged with AI.'),
+    body: tOr('ob1Body', '<p>Zo Co-browse connects your browser to Zo Computer — your personal AI server. Zo can see what\'s on the page, answer questions, fill forms, extract data, run DuckDB queries, and even create automations — all from this side panel.</p><p>Let\'s get you set up in 30 seconds.</p>'),
   },
   {
-    title: 'Connect Your Zo',
-    desc: 'You need a Zo Computer account to use Co-browse.',
-    body: '<p>If you haven\'t already, sign up at <a href="https://zocomputer.com" target="_blank">zocomputer.com</a> — it\'s free.</p><p>Already have an account? Great — the next step is to add your API token.</p>',
+    title: tOr('ob2Title', 'Connect Your Zo'),
+    desc: tOr('ob2Desc', 'You need a Zo Computer account to use Co-browse.'),
+    body: tOr('ob2Body', '<p>If you haven\'t already, sign up at <a href="https://zocomputer.com" target="_blank">zocomputer.com</a> — it\'s free.</p><p>Already have an account? Great — the next step is to add your API token.</p>'),
   },
   {
-    title: 'Add Your API Token',
-    desc: 'This connects the extension to your Zo.',
-    body: '<ol style="text-align:left;margin:0 auto;max-width:340px;line-height:1.8"><li>Open your Zo <strong>Settings → Advanced → Access Tokens</strong></li><li>Create a new token (or copy an existing one)</li><li>Paste it in the <strong>extension settings</strong> (gear icon below)</li></ol><p style="margin-top:12px">💡 Your token is stored locally and never shared.</p>',
+    title: tOr('ob3Title', 'Add Your API Token'),
+    desc: tOr('ob3Desc', 'This connects the extension to your Zo.'),
+    body: tOr('ob3Body', '<ol style="text-align:left;margin:0 auto;max-width:340px;line-height:1.8"><li>Open your Zo <strong>Settings → Advanced → Access Tokens</strong></li><li>Create a new token (or copy an existing one)</li><li>Paste it in the <strong>extension settings</strong> — the button below opens them</li></ol><p style="margin-top:12px">💡 Your token is stored locally and never shared.</p>'),
+    openSettings: true,
   },
   {
-    title: 'Test Your Connection',
-    desc: 'Let\'s make sure everything works.',
-    body: '<p>Click <strong>Test Connection</strong> below, or open the extension settings and hit "Test Connection" there.</p><p>If it works, you\'re all set! You can ask Zo anything about the page you\'re on.</p>',
+    title: tOr('ob4Title', 'Test Your Connection'),
+    desc: tOr('ob4Desc', 'Let\'s make sure everything works.'),
+    body: tOr('ob4Body', '<p>Open the <strong>extension settings</strong> (button below) and hit <strong>Test Connection</strong> there.</p><p>If it works, you\'re all set! You can ask Zo anything about the page you\'re on.</p>'),
+    openSettings: true,
     final: true,
   },
 ];
@@ -664,6 +671,23 @@ function renderOnboardingStep(step) {
   document.getElementById('ob-title').textContent = s.title;
   document.getElementById('ob-desc').textContent = s.desc;
   document.getElementById('ob-body').innerHTML = s.body;
+
+  // #313: steps may carry a REAL affordance — an in-card button that opens
+  // the extension settings (the tour used to point at a nonexistent gear
+  // icon and a Test Connection button the panel never had).
+  const actionsEl = document.getElementById('ob-actions');
+  actionsEl.replaceChildren();
+  actionsEl.classList.toggle('hidden', !s.openSettings);
+  if (s.openSettings) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.id = 'ob-open-settings';
+    b.className = 'btn btn-sm btn-primary';
+    b.textContent = tOr('obOpenSettings', '⚙ Open settings');
+    b.title = 'Open the extension settings (token + Test Connection live there)';
+    b.addEventListener('click', () => chrome.runtime.openOptionsPage());
+    actionsEl.appendChild(b);
+  }
 
   const backBtn = document.getElementById('ob-back');
   const nextBtn = document.getElementById('ob-next');
@@ -707,6 +731,12 @@ async function completeOnboarding() {
 function updateStatus(connected) {
   statusDot.className = `dot ${connected ? 'dot-connected' : 'dot-disconnected'}`;
   statusDot.title = connected ? 'Zo connected' : 'Not configured — open settings';
+  // #307: the dot is color-only visually — keep its accessible name on state.
+  const label = `Connection status: ${statusDot.title}`;
+  statusDot.setAttribute('aria-label', label);
+  // #308: mirror the same text for magnifier/BR users (WCAG 1.4.1).
+  const statusText = document.getElementById('status-text');
+  if (statusText) statusText.textContent = label;
 }
 
 function bindEvents() {
@@ -777,10 +807,7 @@ function bindEvents() {
 
   // Pending actions
   runAllBtn.addEventListener('click', runPendingActions);
-  skipBtn.addEventListener('click', () => {
-    hidePendingActionsBar();
-    clearStoredPendingActions(activeId);
-  });
+  skipBtn.addEventListener('click', () => skipParkedActions(activeId));
 
   // New conversation
   newChatBtn.addEventListener('click', startNewConversation);
@@ -982,10 +1009,10 @@ async function ensureActiveConversation() {
 // prefill the composer — the panel answers "what can I even ask?" at a glance.
 // The card removes itself the moment a real message lands.
 const EMPTY_STATE_CHIPS = [
-  { label: '📝 Summarize this page', value: 'Summarize this page' },
-  { label: '❓ What is on this page?', value: '!context What are the main points on this page?' },
-  { label: '📥 Extract the links', value: 'Extract all links on this page as a list' },
-  { label: '🔬 Research this topic', value: 'Do deep research on this page\'s topic: give me the key facts, data, and sources' },
+  { key: 'emptyStateChipSummarize', label: '📝 Summarize this page', value: 'Summarize this page' },
+  { key: 'emptyStateChipWhat', label: '❓ What is on this page?', value: '!context What are the main points on this page?' },
+  { key: 'emptyStateChipExtract', label: '📥 Extract the links', value: 'Extract all links on this page as a list' },
+  { key: 'emptyStateChipResearch', label: '🔬 Research this topic', value: 'Do deep research on this page\'s topic: give me the key facts, data, and sources' },
 ];
 function renderEmptyState() {
   let card = document.getElementById('empty-state');
@@ -995,7 +1022,7 @@ function renderEmptyState() {
   card.className = 'empty-state';
   const hint = document.createElement('div');
   hint.className = 'empty-state-hint';
-  hint.textContent = 'Try asking:';
+  hint.textContent = tOr('emptyStateHint', 'Try asking:');
   card.appendChild(hint);
   const chipRow = document.createElement('div');
   chipRow.className = 'empty-state-chips';
@@ -1003,7 +1030,7 @@ function renderEmptyState() {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'empty-state-chip';
-    btn.textContent = chip.label;
+    btn.textContent = tOr(chip.key, chip.label);
     btn.title = chip.value;
     btn.addEventListener('click', () => {
       input.value = chip.value;
@@ -1044,7 +1071,17 @@ function renderCurrentConversation() {
     renderEmptyState();
     return;
   }
+  let lastUserText = '';
   for (const msg of conv.messages) {
+    // #299: persisted failures redraw as the Zo error card, with Retry
+    // re-sending the failed turn (the nearest preceding user message) —
+    // same semantics as the live card, available after reload.
+    if (msg.role === 'error') {
+      const detail = String(msg.text || '').replace(/^Response interrupted:\s*/, '');
+      addErrorCard(detail, () => { if (lastUserText) sendQueryFromLabel(lastUserText); });
+      continue;
+    }
+    if (msg.role === 'user') lastUserText = String(msg.text || '');
     const m = msg.role === 'assistant' ? healAssistantMessage(msg) : msg;
     const opts = m.role === 'assistant'
       ? { timestamp: m.timestamp, durationMs: m.durationMs, contextTier: m.contextTier, contextReason: m.contextReason, screenshot: m.screenshot, conversationId: conv.zoThreadId || undefined }
@@ -1345,6 +1382,37 @@ function closeTabContextMenu() {
     tabContextMenuEl.remove();
     tabContextMenuEl = null;
   }
+}
+
+/** #314: per-row overflow menu for library rows — the tab-strip context-menu
+ * machinery (same .chat-tab-menu class + tabContextMenuEl dismissal:
+ * outside click + Escape). `keepOpen` items keep the menu for a second
+ * click (the Delete confirm). */
+function openRowMenu(anchorBtn, items) {
+  closeTabContextMenu();
+  const menu = document.createElement('div');
+  menu.className = 'chat-tab-menu';
+  menu.setAttribute('role', 'menu');
+  for (const it of items) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.setAttribute('role', 'menuitem');
+    b.textContent = it.label;
+    b.title = it.title || '';
+    if (it.cls) b.className = it.cls;
+    b.addEventListener('click', () => {
+      if (!it.keepOpen) closeTabContextMenu();
+      it.fn(b);
+    });
+    menu.appendChild(b);
+  }
+  document.body.appendChild(menu);
+  const r = anchorBtn.getBoundingClientRect();
+  const px = Math.min(r.left, window.innerWidth - menu.offsetWidth - 8);
+  const py = Math.min(r.bottom + 4, window.innerHeight - menu.offsetHeight - 8);
+  menu.style.left = Math.max(4, px) + 'px';
+  menu.style.top = Math.max(4, py) + 'px';
+  tabContextMenuEl = menu;
 }
 
 function openTabContextMenu(e, chatId) {
@@ -1981,6 +2049,23 @@ async function renderPromptInspector() {
   const reasonSpan = document.createElement('span');
   reasonSpan.textContent = effReason;
   meta.appendChild(reasonSpan);
+  // #306: one-click copy of the assembled prompt (bug reports / trust) —
+  // copies the RAW string, not the rendered <pre> HTML.
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.className = 'prompt-copy-btn';
+  copyBtn.textContent = '⧉ Copy';
+  copyBtn.title = 'Copy the full assembled prompt';
+  copyBtn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(described.prompt);
+      copyBtn.textContent = 'Copied ✓';
+    } catch {
+      copyBtn.textContent = 'Copy failed';
+    }
+    setTimeout(() => { copyBtn.textContent = '⧉ Copy'; }, 1500);
+  });
+  meta.appendChild(copyBtn);
   pre.textContent = described.prompt;
 }
 
@@ -2281,18 +2366,18 @@ function addErrorCard(errorText, onRetry) {
 
   const title = document.createElement('div');
   title.className = 'error-card-title';
-  title.textContent = 'Response interrupted';
+  title.textContent = tOr('errorCardTitle', 'Response interrupted');
 
   const detail = document.createElement('div');
   detail.className = 'error-card-detail';
-  detail.textContent = safeText(errorText) || 'An unexpected error occurred.';
+  detail.textContent = safeText(errorText) || tOr('errorCardFallback', 'An unexpected error occurred.');
 
   const actionsEl = document.createElement('div');
   actionsEl.className = 'error-card-actions';
   const retry = document.createElement('button');
   retry.type = 'button';
   retry.className = 'btn btn-sm btn-primary error-card-retry';
-  retry.textContent = '↻ Retry';
+  retry.textContent = tOr('errorCardRetry', '↻ Retry');
   retry.addEventListener('click', () => { if (onRetry) onRetry(); });
   actionsEl.appendChild(retry);
 
@@ -2647,6 +2732,39 @@ function hidePendingActionsBar() {
   pendingActions = null;
   pendingActionsReasoning = '';
   actionsBar.classList.add('hidden');
+}
+
+/** #302: Skip discards the parked plan — record it in the chat (persisted, so
+ * reload keeps the note) with the dropped action types, and for handoff parks
+ * state that the boundary action was NOT performed. One click, no modal — the
+ * note is the recovery story. */
+function skipParkedActions(chatId) {
+  const dropped = Array.isArray(pendingActions)
+    ? pendingActions
+    : (pendingActions && Array.isArray(pendingActions.actions) ? pendingActions.actions : []);
+  const handoffPark = pendingActionsReasoning === PARKED_REASONING
+    || (conversations[chatId]?.pendingActions?.reasoning === PARKED_REASONING);
+  hidePendingActionsBar();
+  clearStoredPendingActions(chatId);
+  if (!dropped.length) return;
+  const counts = {};
+  for (const a of dropped) {
+    const t = safeText(a && a.type) || 'action';
+    counts[t] = (counts[t] || 0) + 1;
+  }
+  const list = Object.entries(counts).map(([t, n]) => (n > 1 ? `${n}× ${t}` : t)).join(', ');
+  const plural = dropped.length === 1 ? 'action' : 'actions';
+  const note = handoffPark
+    ? `⏭️ Skipped ${dropped.length} parked ${plural}${list ? ` — ${list}` : ''}. The boundary action was NOT performed — do it yourself or ask again.`
+    : `⏭️ Skipped ${dropped.length} parked ${plural}${list ? ` — ${list}` : ''}. Ask again if you want them re-planned.`;
+  addMessage('system', note);
+  // addMessage renders but skips system roles in history — persist explicitly.
+  const conv = conversations[chatId];
+  if (conv) {
+    conv.messages.push({ role: 'system', text: note, timestamp: Date.now() });
+    if (conv.messages.length > MAX_HISTORY) conv.messages = conv.messages.slice(-MAX_HISTORY);
+    saveConversations();
+  }
 }
 
 /** Clear a chat's stored pending actions (Run All finished or Skipped). */
@@ -3124,7 +3242,13 @@ function renderTabStrip() {
     chip.className = 'tab-chip' + (tabRefsEnabled.has(t.tabId) ? ' tab-chip-on' : '');
     // #72: title preferred over bare host — two github.com tabs must be
     // distinguishable at a glance; host + full url live in the tooltip.
-    const label = safeText(t.title || t.host || t.url).slice(0, 24);
+    // #305: same-title(+host) twins get a path suffix so chips differ — the
+    // suffix goes at the END, so colliding labels get a longer cap (the CSS
+    // max-width + tooltip still carry the overflow); unique titles keep the
+    // exact 24-char rendering they always had.
+    const full = disambiguatedLabel(t, openTabs);
+    const collides = full !== safeText(t.title || t.host || t.url);
+    const label = full.length <= (collides ? 40 : 24) ? full : safeText(t.title || t.host || t.url).slice(0, 24);
     chip.textContent = (t.active ? '◈ ' : '') + label;
     chip.title = safeText(t.title || t.url) + (t.url ? `\n${safeText(t.url)}` : '') +
       (t.active ? ' — this tab' : '') +
@@ -3253,6 +3377,15 @@ function closeTabAutocomplete() {
   tabAcIndex = 0;
 }
 
+// #304: one keyboard-affordance hint line for all three composer popups.
+const PICKER_HINT_TEXT = '↑↓ navigate · ↵ select · Esc close';
+function appendPickerHint(popup) {
+  const hint = document.createElement('div');
+  hint.className = 'picker-hint';
+  hint.textContent = PICKER_HINT_TEXT;
+  popup.appendChild(hint);
+}
+
 function renderTabAutocomplete(filterText) {
   const popup = document.getElementById('tab-autocomplete');
   if (!popup) return;
@@ -3268,11 +3401,15 @@ function renderTabAutocomplete(filterText) {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'tab-ac-item' + (i === tabAcIndex ? ' tab-ac-active' : '');
+    item.id = `tab-ac-opt-${i}`; // #304: aria-activedescendant target
+    item.setAttribute('role', 'option');
+    item.setAttribute('aria-selected', i === tabAcIndex ? 'true' : 'false');
     // #72: page title primary, dimmed host secondary — bare hostnames made
-    // same-site tabs indistinguishable.
+    // same-site tabs indistinguishable. #305: title(+host) twins get a path
+    // suffix so rows differ.
     const name = document.createElement('span');
     name.className = 'tab-ac-name';
-    name.textContent = (t.active ? '◈ ' : '') + safeText(t.title || t.host || t.url).slice(0, 40);
+    name.textContent = (t.active ? '◈ ' : '') + disambiguatedLabel(t, tabAcItems).slice(0, 56);
     item.appendChild(name);
     if (t.host && (t.title || '') !== t.host) {
       const host = document.createElement('span');
@@ -3284,6 +3421,8 @@ function renderTabAutocomplete(filterText) {
     item.addEventListener('mousedown', (e) => { e.preventDefault(); selectTabAutocomplete(i); });
     popup.appendChild(item);
   });
+  popup.setAttribute('aria-activedescendant', 'tab-ac-opt-0'); // #304
+  appendPickerHint(popup);
   popup.classList.remove('hidden');
 }
 
@@ -3317,7 +3456,11 @@ function onComposerKeydownForTabs(e) {
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     e.preventDefault();
     tabAcIndex = (tabAcIndex + (e.key === 'ArrowDown' ? 1 : tabAcItems.length - 1)) % tabAcItems.length;
-    popup.querySelectorAll('.tab-ac-item').forEach((el, i) => el.classList.toggle('tab-ac-active', i === tabAcIndex));
+    popup.querySelectorAll('.tab-ac-item').forEach((el, i) => {
+      el.classList.toggle('tab-ac-active', i === tabAcIndex);
+      el.setAttribute('aria-selected', i === tabAcIndex ? 'true' : 'false');
+    });
+    popup.setAttribute('aria-activedescendant', `tab-ac-opt-${tabAcIndex}`); // #304
   } else if (e.key === 'Enter' || e.key === 'Tab') {
     e.preventDefault();
     e.stopPropagation();
@@ -3411,6 +3554,9 @@ function renderSkillPopup(filterText) {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'picker-item' + (i === 0 ? ' picker-item-active' : '');
+    item.id = `skill-ac-opt-${i}`; // #304
+    item.setAttribute('role', 'option');
+    item.setAttribute('aria-selected', i === 0 ? 'true' : 'false');
     const name = document.createElement('span');
     name.className = 'picker-item-name';
     name.textContent = `⚡ ${s.name}`;
@@ -3433,6 +3579,8 @@ function renderSkillPopup(filterText) {
   if (hidden > 0) {
     popup.appendChild(pickerNoteItem(`+${hidden} more skill folder${hidden === 1 ? '' : 's'} not listed — no SKILL.md head found, or the listing was cut short. ⟳ refreshes.`));
   }
+  popup.setAttribute('aria-activedescendant', 'skill-ac-opt-0'); // #304
+  appendPickerHint(popup);
   popup.classList.remove('hidden');
 }
 
@@ -3495,6 +3643,9 @@ function renderFilePopup(filterText, keepFilter) {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'picker-item' + (i === 0 ? ' picker-item-active' : '');
+    item.id = `file-ac-opt-${i}`; // #304
+    item.setAttribute('role', 'option');
+    item.setAttribute('aria-selected', i === 0 ? 'true' : 'false');
     const name = document.createElement('span');
     name.className = 'picker-item-name';
     name.textContent = e.kind === 'dir' ? `📂 ${e.name}/` : e.kind === 'up' ? '⬆ ..' : `📄 ${e.name}`;
@@ -3521,6 +3672,8 @@ function renderFilePopup(filterText, keepFilter) {
     item.addEventListener('mousedown', (ev) => { ev.preventDefault(); selectFileRow(i); });
     popup.appendChild(item);
   });
+  popup.setAttribute('aria-activedescendant', 'file-ac-opt-0'); // #304
+  appendPickerHint(popup);
   popup.classList.remove('hidden');
 }
 
@@ -3604,8 +3757,14 @@ function onComposerKeydownForPickers(e) {
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     e.preventDefault();
     ac.index = (ac.index + (e.key === 'ArrowDown' ? 1 : ac.items.length - 1)) % ac.items.length;
-    const buttons = [...popup.querySelectorAll('button.picker-item')];
-    buttons.forEach((el, i) => el.classList.toggle('picker-item-active', i === ac.index));
+    const buttons = [...popup.querySelectorAll('button.picker-item:not(.picker-item-note)')];
+    buttons.forEach((el, i) => {
+      el.classList.toggle('picker-item-active', i === ac.index);
+      el.setAttribute('aria-selected', i === ac.index ? 'true' : 'false');
+    });
+    // #304: keep the listbox's active descendant on the highlighted row.
+    const active = buttons[ac.index];
+    if (active && active.id) popup.setAttribute('aria-activedescendant', active.id);
   } else if (e.key === 'Enter' || e.key === 'Tab') {
     e.preventDefault();
     e.stopPropagation();
@@ -4438,7 +4597,7 @@ function persistTurnToConversation(msg, sess, fallbackFullText = '', opts = {}) 
   if (msg.conversationId) conv.zoThreadId = msg.conversationId;
   if (responseText) {
     const reasoningVal = safeText(msg.reasoning) || safeText(sess.reasoningText) || undefined;
-    conv.messages.push({ role: 'assistant', text: responseText, reasoning: reasoningVal, timestamp: doneTimestamp, durationMs: doneDuration || undefined, contextTier: sess.effectiveTier, contextReason: sess.contextReason, screenshot: sess.hadScreenshot || undefined });
+    conv.messages.push({ role: 'assistant', text: responseText, reasoning: reasoningVal, timestamp: doneTimestamp, durationMs: doneDuration || undefined, contextTier: Number.isInteger(sess.effectiveTier) ? sess.effectiveTier : msg.contextTier, contextReason: sess.contextReason || msg.contextReason, screenshot: sess.hadScreenshot || undefined });
     if (conv.messages.length > MAX_HISTORY) {
       conv.messages = conv.messages.slice(-MAX_HISTORY);
     }
@@ -4817,8 +4976,10 @@ function handleStreamMessage(msg) {
           modeName: mode.name,
           modelName: config.selectedModel || undefined,
           durationMs: doneDuration,
-          contextTier: streamSession.effectiveTier,
-          contextReason: streamSession.contextReason,
+          // #300: user-initiated turns carry the panel's decision; chained
+          // (adopted) turns fall back to the capture the background performed.
+          contextTier: Number.isInteger(streamSession.effectiveTier) ? streamSession.effectiveTier : msg.contextTier,
+          contextReason: streamSession.contextReason || msg.contextReason,
           screenshot: streamSession.hadScreenshot,
           conversationId: msg.conversationId || undefined,
         });
@@ -4897,6 +5058,17 @@ function handleStreamMessage(msg) {
       if (streamSession.msgEl) {
         const timerLine = streamSession.msgEl.querySelector('.msg-processing-timer');
         if (timerLine) timerLine.remove();
+      }
+      // #299: persist the failure like background chats do — a card that only
+      // lives in the DOM leaves an orphaned user bubble after reload. One
+      // record per failed turn: a duplicate delivery replaces, never stacks.
+      const errConv = getActiveConversation();
+      if (errConv) {
+        const record = { role: 'error', text: `Response interrupted: ${safeText(msg.error)}`, timestamp: Date.now() };
+        const last = errConv.messages[errConv.messages.length - 1];
+        if (last && last.role === 'error') errConv.messages[errConv.messages.length - 1] = record;
+        else errConv.messages.push(record);
+        saveConversationById(activeId);
       }
       // Zo error card: "Response interrupted" + technical detail + Retry.
       addErrorCard(msg.error, () => {
@@ -5018,8 +5190,11 @@ function removeHandoffLine() {
 
 /** Slim run-status line above the messages (progress + stop) — the recipe
  * twin of renderHandoffLine. */
-function renderRecipeLine(run) {
+function renderRecipeLine(run, phase) {
   if (!msgsEl) return;
+  // #301: ONE live run element — RECIPE_START creates it in the "started"
+  // state and every RECIPE_UPDATE flips it in place, so the run never
+  // announces progress above (before) its own start announcement.
   let line = msgsEl.querySelector('.msg-recipe-line');
   if (!line) {
     line = document.createElement('div');
@@ -5034,8 +5209,11 @@ function renderRecipeLine(run) {
     stopBtn.disabled = true;
     await chrome.runtime.sendMessage({ type: 'RECIPE_STOP', runId: run.runId, reason: 'stopped by user' }).catch(() => {});
   });
+  const label = phase === 'started'
+    ? `🧾 Recipe started — ${safeText(run.name)} (v${safeText(run.version)})`
+    : `🧾 Recipe — ${recipeProgress(run)} · ${safeText(run.name).slice(0, 60)}`;
   line.replaceChildren(
-    Object.assign(document.createElement('span'), { textContent: `🧾 Recipe — ${recipeProgress(run)} · ${safeText(run.name).slice(0, 60)}` }),
+    Object.assign(document.createElement('span'), { textContent: label }),
     stopBtn,
   );
   line.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -5353,7 +5531,9 @@ async function startRecipeRun(source) {
   }
   activeRecipeRun = start.run;
   renderChatTabs(); // the run's chat tab carries the run marker
-  addMessage('system', `🧾 Recipe started — ${safeText(start.run.name)} (v${safeText(start.run.version)})`);
+  // #301: the started announcement IS the live run line — updates flip it in
+  // place instead of racing it with a separate progress element.
+  renderRecipeLine(start.run, 'started');
   return start.run;
 }
 
@@ -5487,37 +5667,24 @@ function recipeLibraryRow(r, liveRun) {
   }
   const actions = document.createElement('div');
   actions.className = 'recipe-lib-actions';
-  const act = (label, title, fn, cls = '') => {
-    const b = document.createElement('button');
-    b.textContent = label;
-    b.title = title;
-    if (cls) b.className = cls;
-    b.addEventListener('click', () => fn(b));
-    actions.appendChild(b);
-    return b;
-  };
-  act('▶ Run', 'Run this recipe (pauses at human checkpoints)', async (b) => {
+  const runBtn = document.createElement('button');
+  runBtn.textContent = '▶ Run';
+  runBtn.title = 'Run this recipe (pauses at human checkpoints)';
+  runBtn.addEventListener('click', async () => {
     // One live run at a time — the second click is the confirmation.
-    if (liveRun && liveRun.name !== r.name && !b.dataset.confirmed) {
-      b.dataset.confirmed = '1';
-      b.textContent = `▶ Run anyway? (${safeText(liveRun.name)} is live)`;
+    if (liveRun && liveRun.name !== r.name && !runBtn.dataset.confirmed) {
+      runBtn.dataset.confirmed = '1';
+      runBtn.textContent = `▶ Run anyway? (${safeText(liveRun.name)} is live)`;
       return;
     }
     closeRecipeLibrary();
     await startRecipeRun({ localName: r.name });
   });
-  act('↥ Save', 'Write this recipe to the workspace (R2 #256)', async () => {
-    closeRecipeLibrary();
-    await saveRecipeToWorkspace(r.name);
-  });
-  act('⤓ Export', 'Export as a Zo skill (SKILL.md — documentation only)', async (b) => {
-    b.disabled = true;
-    const resp = await chrome.runtime.sendMessage({ type: 'RECIPE_EXPORT', names: [r.name], skillName: r.name }).catch(() => null);
-    b.disabled = false;
-    if (resp?.ok) addMessage('system', `⤓ Exported **${safeText(r.name)}** as skill \`${safeText(resp.skillName)}\` → ${resp.paths.map((p) => `\`${safeText(p)}\``).join(', ')}`);
-    else addMessage('error', resp?.error || 'Export failed.');
-  });
-  act('✎ Rename', 'Rename the local library entry', () => {
+  actions.appendChild(runBtn);
+  // #314: Save/Export/Rename/Delete live in a per-row ⋯ overflow — five
+  // inline buttons cramped the rows at dock width and parked Delete next to
+  // Export. Run stays inline (the popup's entry point).
+  const renameAct = () => {
     const input = document.createElement('input');
     input.value = safeText(r.name);
     input.className = 'recipe-lib-rename';
@@ -5543,19 +5710,44 @@ function recipeLibraryRow(r, liveRun) {
     let committed = false;
     const commitOnce = () => { if (!committed) { committed = true; commit(); } };
     input.addEventListener('blur', commitOnce);
-  });
-  act('🗑 Delete', 'Remove from the LOCAL library (workspace files are never touched)', (b) => {
+  };
+  const exportAct = async (b) => {
+    b.disabled = true;
+    const resp = await chrome.runtime.sendMessage({ type: 'RECIPE_EXPORT', names: [r.name], skillName: r.name }).catch(() => null);
+    b.disabled = false;
+    if (resp?.ok) addMessage('system', `⤓ Exported **${safeText(r.name)}** as skill \`${safeText(resp.skillName)}\` → ${resp.paths.map((p) => `\`${safeText(p)}\``).join(', ')}`);
+    else addMessage('error', resp?.error || 'Export failed.');
+  };
+  const deleteAct = (b) => {
+    // Two-click confirm lives INSIDE the menu (keepOpen) — destructive and
+    // no longer adjacent to Export on the row.
     if (!b.dataset.confirmed) {
       b.dataset.confirmed = '1';
       b.textContent = '🗑 Sure? click again';
       return;
     }
+    closeTabContextMenu();
     chrome.runtime.sendMessage({ type: 'RECIPE_DELETE', name: r.name }).then(async (resp) => {
       if (resp?.ok) addMessage('system', `🗑 Removed **${safeText(r.name)}** from the local library.`);
       else addMessage('error', resp?.error || 'Delete failed.');
       await renderRecipeLibrary();
     }).catch(() => {});
-  }, 'danger');
+  };
+  const moreBtn = document.createElement('button');
+  moreBtn.textContent = '⋯';
+  moreBtn.className = 'recipe-lib-more';
+  moreBtn.setAttribute('aria-label', `More actions for ${safeText(r.name)}`);
+  moreBtn.title = 'Save / Export / Rename / Delete';
+  moreBtn.addEventListener('click', (e) => {
+    e.stopPropagation(); // the document outside-click closer must not eat the opening click
+    openRowMenu(moreBtn, [
+      { label: '↥ Save', title: 'Write this recipe to the workspace (R2 #256)', fn: async () => { closeRecipeLibrary(); await saveRecipeToWorkspace(r.name); } },
+      { label: '⤓ Export', title: 'Export as a Zo skill (SKILL.md — documentation only)', fn: exportAct },
+      { label: '✎ Rename', title: 'Rename the local library entry', fn: renameAct },
+      { label: '🗑 Delete', title: 'Remove from the LOCAL library (workspace files are never touched)', cls: 'danger', keepOpen: true, fn: deleteAct },
+    ]);
+  });
+  actions.appendChild(moreBtn);
   row.appendChild(actions);
   return row;
 }

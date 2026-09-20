@@ -256,7 +256,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       row.innerHTML = `
         <input type="text" class="qa-label" placeholder="Label" value="${escapeHtml(action.label)}" data-index="${i}" />
         <input type="text" class="qa-prompt" placeholder="Prompt" value="${escapeHtml(action.prompt)}" data-index="${i}" />
-        <button class="qa-remove" data-index="${i}" ${actions.length === 1 ? 'disabled' : ''}>✕</button>
+        <button class="qa-remove" data-index="${i}" aria-label="Remove quick action ${i + 1}" ${actions.length === 1 ? 'disabled' : ''}>✕</button>
       `;
       area.appendChild(row);
     });

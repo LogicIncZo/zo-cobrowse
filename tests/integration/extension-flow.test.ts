@@ -338,6 +338,86 @@ describe("sidepanel render contract (real background pipeline)", () => {
     expect(panelWin.document.querySelectorAll("#messages .msg-error").length).toBe(errCardsBefore);
     expect(panelWin.document.querySelector("#query-input").disabled).toBe(false);
   }, 20000);
+
+  it("#299: active-chat stream errors persist as role:'error' records; re-render draws the card and Retry re-sends", async () => {
+    let failed = false;
+    fm.handle((url) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      if (!failed) {
+        failed = true;
+        return sseResponse(`event: Error\ndata: ${JSON.stringify({ message: "Zo API error: 500 — gone" })}\n`);
+      }
+      return sseResponse(
+        `event: PartStartEvent\ndata: ${JSON.stringify({ index: 1, part: { part_kind: "text", content: "recovered." } })}\n` +
+        `event: completed\ndata: {}\n`
+      );
+    });
+    await typeAndSend("Persist my failure");
+    await waitUntil(() => panelWin.document.querySelector("#messages .msg-error .error-card-title"), 8000);
+
+    // Persisted: the conversation carrying this turn has the error record last.
+    const targetId = bus.storage.local._store.cobrowse_active_id;
+    await waitUntil(() => {
+      const c = (bus.storage.local._store.cobrowse_convos || {})[targetId];
+      return !!c && c.messages[c.messages.length - 1].role === "error";
+    }, 8000);
+    // Re-render from records (switch away and back): the card redraws.
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await waitUntil(() => !panelWin.document.querySelector("#messages .msg-error"), 8000);
+    // Tab buttons carry no conversation id — click by stored open-tabs order.
+    const openOrder: string[] = bus.storage.local._store.cobrowse_open_tabs;
+    const tab = panelWin.document.querySelectorAll(".chat-tab")[openOrder.indexOf(targetId)] as HTMLElement;
+    expect(tab).toBeTruthy();
+    tab.click();
+    await waitUntil(() => !!panelWin.document.querySelector("#messages .msg-error .error-card-title"), 8000);
+    const conv = (bus.storage.local._store.cobrowse_convos || {})[targetId];
+    const errCount = conv.messages.filter((m: any) => m.role === "error").length;
+    expect(panelWin.document.querySelectorAll("#messages .msg-error").length).toBe(errCount); // no double-render
+    const details = [...panelWin.document.querySelectorAll("#messages .error-card-detail")];
+    expect(details[details.length - 1].textContent).toContain("gone");
+
+    // Retry from the re-rendered card re-sends the failed turn.
+    const box = armAskCapture();
+    (panelWin.document.querySelector(".error-card-retry") as HTMLElement).click();
+    await waitUntil(() => box.msg != null, 8000);
+    expect(box.msg.userQuery).toContain("Persist my failure");
+    await waitUntil(() => {
+      const bodies = [...panelWin.document.querySelectorAll("#messages .msg-assistant .msg-body")];
+      return bodies.some((el: any) => el.textContent.includes("recovered."));
+    }, 8000);
+  }, 20000);
+
+  it("#299: error arriving while the chat is backgrounded renders exactly one card on return", async () => {
+    const d = deferredSse();
+    fm.handle((url) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      return d.response;
+    });
+    await typeAndSend("Fail in the background");
+    await waitUntil(() => askLog.length > 0, 8000);
+    const targetId = bus.storage.local._store.cobrowse_active_id;
+    // Switch away while the stream is in flight…
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await waitUntil(() => panelWin.document.querySelectorAll(".chat-tab").length >= 2, 8000);
+    // …release the error: the backgrounded-chat branch persists, no DOM.
+    d.push(sseEvent("Error", { message: "Zo API error: 500 — backgrounded" }));
+    await waitUntil(() => {
+      const convs: any[] = Object.values(bus.storage.local._store.cobrowse_convos || {});
+      return convs.some((c: any) => (c.messages || []).some((m: any) => m.role === "error" && String(m.text).includes("backgrounded")));
+    }, 8000);
+    // …switch back: the new record renders as a card, EXACTLY once.
+    const openOrder: string[] = bus.storage.local._store.cobrowse_open_tabs;
+    const idx = Math.max(0, openOrder.indexOf(targetId));
+    const tab = panelWin.document.querySelectorAll(".chat-tab")[idx] as HTMLElement;
+    expect(tab).toBeTruthy();
+    tab.click();
+    await waitUntil(() => [...panelWin.document.querySelectorAll("#messages .error-card-detail")]
+      .some((el: any) => el.textContent.includes("backgrounded")), 8000);
+    expect([...panelWin.document.querySelectorAll("#messages .error-card-detail")]
+      .filter((el: any) => el.textContent.includes("backgrounded")).length).toBe(1);
+  }, 20000);
 });
 
 describe("sidepanel ↔ background ↔ content — action turn end-to-end", () => {
@@ -1774,6 +1854,97 @@ describe("parked handoff actions reach the review card (#163)", () => {
     expect(bar()?.className || "").not.toContain("hidden");
     const card = panelWin.document.querySelector("#actions-reasoning") as any;
     expect(String(card?.textContent || "")).toContain("run these yourself");
+  }, 30000);
+
+  it("#302: Skip on a handoff park posts a persisted note saying the boundary action was NOT performed", async () => {
+    const RUN_TAB = 47;
+    bus.tabs.registerTab({ id: RUN_TAB, url: "https://pinned302.example/checkout", title: "Checkout 302", active: false });
+    const chatId = (bus.storage.local._store.cobrowse_open_tabs || {}).activeId
+      || Object.keys(bus.storage.local._store.cobrowse_convos || {})[0];
+    expect(chatId).toBeTruthy();
+
+    bus.storage.session._store["cobrowse_handoff_runs"] = {
+      "run-302-skip": {
+        runId: "run-302-skip", chatId, goal: "buy the thing",
+        status: "paused", boundaryMode: "readonly",
+        budget: { maxTurns: 6, maxNavigations: 12, maxMinutes: 15 },
+        usage: { turns: 1, navigations: 0, startedAt: Date.now() - 30_000 },
+        pagesVisited: [], parkLog: [], tabId: RUN_TAB,
+        createdAt: Date.now() - 60_000, updatedAt: Date.now() - 20_000,
+      },
+    };
+    await bus.runtime.sendMessage({
+      type: "HANDOFF_UPDATE",
+      run: bus.storage.session._store["cobrowse_handoff_runs"]["run-302-skip"],
+    });
+    await waitUntil(() => {
+      const btns = [...panelWin.document.querySelectorAll("#messages .msg-system button")];
+      return btns.some((b: any) => (b.textContent || "").includes("Resume"));
+    }, 5000);
+
+    let asks = 0;
+    fm.handle((url, _init, req) => {
+      if (url.includes("/models/available")) return jsonResponse({ models: [] });
+      if (url.includes("/personas/available")) return jsonResponse({ personas: [] });
+      const input = String((req as any)?.body?.input || "");
+      if (!input.includes("[handoff-run continuation]")) return sseResponse(zoSseText({ text: "ok" }));
+      asks++;
+      if (asks === 1) return envelope163({ actions: [{ type: "click", selector: "#buy" }] });
+      return envelope163({ actions: [{ type: "done", response: "Cart ready" }] });
+    });
+
+    ([...panelWin.document.querySelectorAll("#messages .msg-system button")] as any[])
+      .find((b: any) => (b.textContent || "").includes("Resume")).click();
+    const bar = () => panelWin.document.querySelector("#actions-bar") as any;
+    await waitUntil(() => bar() && !String(bar().className).includes("hidden"), 10_000);
+
+    // SKIP: one click, no modal — the note is the record.
+    (panelWin.document.querySelector("#skip-btn") as HTMLElement).click();
+    await waitUntil(() => {
+      const notes = [...panelWin.document.querySelectorAll("#messages .msg-system")];
+      return notes.some((n: any) => String(n.textContent).includes("Skipped 1 parked action"));
+    }, 5000);
+    const note = [...panelWin.document.querySelectorAll("#messages .msg-system")]
+      .find((n: any) => String(n.textContent).includes("Skipped 1 parked action"));
+    expect(String(note.textContent)).toContain("click");
+    expect(String(note.textContent)).toContain("NOT performed"); // boundary closure
+
+    // Persisted: the note survives in the conversation record + bar cleared.
+    await waitUntil(() => {
+      const c = (bus.storage.local._store.cobrowse_convos || {})[chatId];
+      return (c?.messages || []).some((m: any) => m.role === "system" && String(m.text).includes("NOT performed"));
+    }, 5000);
+    expect(String(bar().className)).toContain("hidden");
+  }, 30000);
+
+  it("#302: Skip on an ordinary park lists the dropped action types (no boundary wording)", async () => {
+    const chatId = (bus.storage.local._store.cobrowse_open_tabs || {}).activeId
+      || Object.keys(bus.storage.local._store.cobrowse_convos || {})[0];
+    const conv = (bus.storage.local._store.cobrowse_convos || {})[chatId];
+    conv.pendingActions = {
+      actions: [{ type: "click", selector: "#a" }, { type: "fill", selector: "#b" }, { type: "fill", selector: "#c" }],
+      reasoning: "streamed while backgrounded",
+    };
+    await bus.storage.local.set({ cobrowse_convos: bus.storage.local._store.cobrowse_convos });
+
+    // Switch away and back: the parked bar re-arms from the stored set.
+    panelWin.document.querySelector("#new-chat-btn").click();
+    await new Promise((r) => setTimeout(r, 300));
+    const openOrder: string[] = bus.storage.local._store.cobrowse_open_tabs;
+    const tab = panelWin.document.querySelectorAll(".chat-tab")[Math.max(0, openOrder.indexOf(chatId))] as HTMLElement;
+    tab.click();
+    const bar = () => panelWin.document.querySelector("#actions-bar") as any;
+    await waitUntil(() => bar() && !String(bar().className).includes("hidden"), 5000);
+
+    (panelWin.document.querySelector("#skip-btn") as HTMLElement).click();
+    await waitUntil(() => {
+      const notes = [...panelWin.document.querySelectorAll("#messages .msg-system")];
+      return notes.some((n: any) => String(n.textContent).includes("Skipped 3 parked actions"));
+    }, 5000);
+    const note = [...panelWin.document.querySelectorAll("#messages .msg-system")]
+      .find((n: any) => String(n.textContent).includes("Skipped 3 parked actions"));
+    expect(String(note.textContent)).toContain("click, 2× fill"); // count + types
+    expect(String(note.textContent)).not.toContain("NOT performed"); // no boundary claim
   }, 30000);
 });
 

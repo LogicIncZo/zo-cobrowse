@@ -18,12 +18,19 @@ open the side panel on a normal website.
 - [ ] **Toggles render + persist** — 📷 Image and 🧩 DOM toggles visible even with no referenced
       tabs; 🧩 DOM off → 🚫 DOM label sticks across panel reopen; tier chip shows the cap reason
       after a send.
+- [ ] **Keyboard focus visible (#310)** — Tab through header → controls → composer: every stop
+      shows the 2px amber ring; mouse clicks show no ring (text fields excepted — UA behavior).
+- [ ] **Screen-reader spot check (#307)** — with an SR running, Tab through the header + composer:
+      "Toggle theme", "Help", "Conversation history", "New chat", "Create a custom Mode", "Voice input",
+      "Send" announce meaningfully; the connection dot announces its state.
 - [ ] **Page title in header** — title truncates without pushing the action buttons out; tooltip
-      shows the full URL; blank/new-tab pages show "— no page —".
+      shows the full URL; blank/new-tab pages show "— no page —". At dock width (~400px) the
+      brand collapses to the icon and a long page title still shows ≥16 characters (#296).
 - [ ] **`/` skills picker** — opens instantly on the second use (no "Loading skills…" flash, given
       a warm session); "+N more skill folders" note appears when folders were skipped.
 - [ ] **`%` picker folder arming** — ＋ on a folder arms a 📁 chip; row click still navigates.
 - [ ] **`@` autocomplete** — rows show page title + dimmed host; two same-host tabs are
+      distinguishable, and same-TITLE tabs get a path suffix in the strip + @ rows (#305).
       distinguishable; chips match.
 - [ ] **TTS** — if voices are installed: Settings → Speech shows the voice dropdown filtered by
       language; picking one + Read aloud uses it (ear check); zero-voice systems show the disabled
