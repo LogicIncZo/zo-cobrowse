@@ -1818,6 +1818,11 @@ function finishStream(port, sid, output, extra = {}) {
     // The effective Zo thread id for this stream (per-chat when the sidepanel
     // sent one) — echoed back so the sidepanel persists it on the chat.
     conversationId: extra.conversationId,
+    // #300: chained turns (handoff continuations) carry the capture tier they
+    // used so the footer context-tier chip can render for unattended turns.
+    ...(Number.isInteger(extra.contextTier)
+      ? { contextTier: extra.contextTier, contextReason: extra.contextReason }
+      : {}),
   });
   // Stream-shape discovery: surface which events/fields Zo actually emitted.
   emitStreamDiagnostic(port, sid);
@@ -1833,6 +1838,11 @@ function finishStream(port, sid, output, extra = {}) {
  * contexts (legacy paths finish immediately).
  */
 async function finishStreamWithPullLoop(port, sid, output, extra, loop) {
+  // #300: a chained turn marks its own capture on the turn message — forward
+  // it so STREAM_DONE (and the footer chip) reflects what actually ran.
+  if (!Number.isInteger(extra?.contextTier) && Number.isInteger(loop?.msg?.contextTier)) {
+    extra = { ...extra, contextTier: loop.msg.contextTier, contextReason: loop.msg.contextReason };
+  }
   if (!loop || port._dead) {
     finishStream(port, sid, output, extra);
     return;
@@ -2718,9 +2728,10 @@ async function handoffChainNextTurn(runId) {
     return;
   }
   // Fresh page state for the driven tab — Zo navigated since the last capture.
+  const captureTier = msg.effectiveTier || 1;
   let pageContext = null;
   try {
-    pageContext = await getActiveTabContext(run.tabId, msg.effectiveTier || 1, msg.modeId);
+    pageContext = await getActiveTabContext(run.tabId, captureTier, msg.modeId);
   } catch { /* capture failed — Zo can still pull (read_page) */ }
   const turnMsg = handoffContinuationPayload(msg, {
     sessionId: `${msg.sessionId}-h${run.usage.turns + 1}-${Date.now() % 100000}`,
@@ -2733,6 +2744,9 @@ async function handoffChainNextTurn(runId) {
     userQuery: buildContinuationTurn(run),
     pageContext,
     runId,
+    // #300: the capture THIS turn performed — surfaces as the footer chip.
+    contextTier: captureTier,
+    contextReason: 'handoff continuation capture',
   });
   askZoStream(port, turnMsg).catch(async () => {
     // Stream failed mid-run — blocked, not paused: the run cannot proceed

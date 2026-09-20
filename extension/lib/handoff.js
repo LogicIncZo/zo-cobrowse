@@ -314,7 +314,7 @@ export const SEND_ONCE_FIELDS = ['skills', 'workspaceFiles', 'tabContexts', 'sho
  * send-once attachments, keep everything identity/thread-related (mode,
  * tier, model, chat/thread ids), then re-stamp the turn's own fields. Pure —
  * the background calls this so the loop cannot drift from the contract. */
-export function continuationPayload(msg, { sessionId, conversationId, userQuery, pageContext, runId } = {}) {
+export function continuationPayload(msg, { sessionId, conversationId, userQuery, pageContext, runId, contextTier, contextReason } = {}) {
   const out = {};
   for (const [k, v] of Object.entries(msg || {})) {
     if (!SEND_ONCE_FIELDS.includes(k)) out[k] = v;
@@ -324,6 +324,13 @@ export function continuationPayload(msg, { sessionId, conversationId, userQuery,
   out.userQuery = userQuery;
   out.pageContext = pageContext;
   out.handoffRunId = runId;
+  // #300: what THIS turn actually captured (the copied effectiveTier is turn
+  // 1's decision and can diverge — a tier-0 turn 1 still captures tier 1
+  // here since `effectiveTier || 1`). Drives the footer context-tier chip.
+  if (Number.isInteger(contextTier)) {
+    out.contextTier = contextTier;
+    out.contextReason = contextReason;
+  }
   return out;
 }
 

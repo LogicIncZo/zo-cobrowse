@@ -345,6 +345,25 @@ describe("continuationPayload — send-once attachments never replay", () => {
     expect(out.handoffRunId).toBe('r');
     expect(SEND_ONCE_FIELDS.every((f) => out[f] === undefined)).toBe(true);
   });
+
+  it("#300: stamps the chained turn's own capture tier + reason for the footer chip", () => {
+    // Turn 1 decided tier 0 (read), but the continuation captures tier 1 —
+    // the copied effectiveTier must NOT masquerade as what this turn captured.
+    const out = continuationPayload(turn1Msg, {
+      sessionId: '900-h2-123',
+      conversationId: 'con_abc',
+      userQuery: '[handoff-run continuation] …',
+      runId: 'run-1',
+      contextTier: 1,
+      contextReason: 'handoff continuation capture',
+    });
+    expect(out.contextTier).toBe(1);
+    expect(out.contextReason).toBe('handoff continuation capture');
+    // Absent tier metadata → fields stay off the payload (old shape intact).
+    const bare = continuationPayload(turn1Msg, { sessionId: 's', runId: 'r' });
+    expect(bare.contextTier).toBeUndefined();
+    expect(bare.contextReason).toBeUndefined();
+  });
 });
 
 describe("handoff — compose boundary (C2 #290)", () => {

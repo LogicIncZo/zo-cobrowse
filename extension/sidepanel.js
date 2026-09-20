@@ -401,7 +401,10 @@ async function finishInit() {
           const evidence = (run.status === 'done' && (run.evidence || []).length)
             ? `\n\n${run.evidence.map((e) => `- **${safeText(e.label)}:** ${safeText(e.value)}`).join('\n')}`
             : '';
-          const note = `${icon} Recipe ${run.status} — ${safeText(run.name)}${reason}${evidence}`;
+          // #300: deterministic replay never captures the page — say so where
+          // a normal turn would show its capture tier.
+          const capture = run.boundary === 'compose' ? '' : ' · 🔗 no page capture';
+          const note = `${icon} Recipe ${run.status} — ${safeText(run.name)}${reason}${evidence}${capture}`;
           const line = addMessage('system', note);
           // R2 (#256): a healed run whose origin is a workspace file — offer
           // the cue write-back (the origin file is stale until saved).
@@ -4448,7 +4451,7 @@ function persistTurnToConversation(msg, sess, fallbackFullText = '', opts = {}) 
   if (msg.conversationId) conv.zoThreadId = msg.conversationId;
   if (responseText) {
     const reasoningVal = safeText(msg.reasoning) || safeText(sess.reasoningText) || undefined;
-    conv.messages.push({ role: 'assistant', text: responseText, reasoning: reasoningVal, timestamp: doneTimestamp, durationMs: doneDuration || undefined, contextTier: sess.effectiveTier, contextReason: sess.contextReason, screenshot: sess.hadScreenshot || undefined });
+    conv.messages.push({ role: 'assistant', text: responseText, reasoning: reasoningVal, timestamp: doneTimestamp, durationMs: doneDuration || undefined, contextTier: Number.isInteger(sess.effectiveTier) ? sess.effectiveTier : msg.contextTier, contextReason: sess.contextReason || msg.contextReason, screenshot: sess.hadScreenshot || undefined });
     if (conv.messages.length > MAX_HISTORY) {
       conv.messages = conv.messages.slice(-MAX_HISTORY);
     }
@@ -4827,8 +4830,10 @@ function handleStreamMessage(msg) {
           modeName: mode.name,
           modelName: config.selectedModel || undefined,
           durationMs: doneDuration,
-          contextTier: streamSession.effectiveTier,
-          contextReason: streamSession.contextReason,
+          // #300: user-initiated turns carry the panel's decision; chained
+          // (adopted) turns fall back to the capture the background performed.
+          contextTier: Number.isInteger(streamSession.effectiveTier) ? streamSession.effectiveTier : msg.contextTier,
+          contextReason: streamSession.contextReason || msg.contextReason,
           screenshot: streamSession.hadScreenshot,
           conversationId: msg.conversationId || undefined,
         });
