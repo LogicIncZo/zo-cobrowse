@@ -3118,3 +3118,65 @@ body.options-page {
   font-size: 12px;
   color: var(--text-muted, var(--text));
 }
+
+/* ── #309: 24px hit-target floor (WCAG 2.5.8) — one sizing policy, shared
+   levers. Visible glyphs stay exactly as they were; the extra box comes
+   from transparent padding / min-size on the control itself. ── */
+.select-shim-btn {
+  min-height: 24px;
+}
+.msg-footer-btn {
+  padding: 4px 6px;
+  min-height: 24px;
+}
+.msg-footer-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+}
+.tts-btn {
+  min-width: 24px;
+  min-height: 24px;
+}
+.theme-toggle::before {
+  /* options switch: invisible hit-slop around the 40x22 track */
+  content: '';
+  position: absolute;
+  inset: -5px;
+}
+.picker-item-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+}
+/* ── #309 sweep follow-ups: the composer chip row + 📎 toggle + the header
+   theme button (which inherits the global switch's 40x22 dims). ── */
+.tab-strip-collapse {
+  min-height: 24px;
+}
+.tab-chip,
+.shot-toggle {
+  min-height: 24px;
+}
+.tab-chip {
+  display: inline-flex;
+  align-items: center;
+}
+.shot-toggle {
+  display: inline-flex;
+  align-items: center;
+}
+/* The header theme button must NOT inherit the options switch's fixed
+   40x22 dims — restore the .icon-btn box (glyph unchanged). */
+.icon-btn.theme-toggle {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  border-radius: var(--radius-sm);
+}
+.icon-btn.theme-toggle::after {
+  display: none; /* the switch knob is options-only chrome */
+}
