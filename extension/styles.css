@@ -2949,16 +2949,23 @@ body.options-page {
   font-size: 12px;
   opacity: 0.85;
 }
-.msg-handoff-line .handoff-stop {
+/* #301: the stop control lives INSIDE the run line, right-aligned, with a
+   >=24px hit target (Lane A3 floor). Covers handoff + recipe run lines. */
+.msg-handoff-line .handoff-stop,
+.msg-recipe-line .handoff-stop {
   border: 1px solid var(--border, #ccc);
   background: transparent;
   color: inherit;
   border-radius: 4px;
   font-size: 11px;
-  padding: 2px 8px;
+  padding: 4px 10px;
+  min-width: 24px;
+  min-height: 24px;
   cursor: pointer;
 }
-.msg-handoff-line .handoff-stop:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
+.msg-recipe-line .handoff-stop { margin-left: auto; }
+.msg-handoff-line .handoff-stop:hover,
+.msg-recipe-line .handoff-stop:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
 .handoff-batch { display: flex; flex-direction: column; gap: 2px; font-size: 12px; opacity: 0.9; }
 .update-banner-dismiss {
   margin-top: 4px;

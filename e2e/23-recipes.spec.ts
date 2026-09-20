@@ -30,8 +30,23 @@ test.describe("recipes player", () => {
     await card.locator("input").fill("Ada Lovelace");
     await card.locator(".form-review-confirm").click();
 
-    // The run starts and the progress line shows.
-    await expect(h.panel.locator(".msg-recipe-line")).toContainText("E2E filing", { timeout: 20_000 });
+    // The run starts and the progress line shows. #301: the FIRST state of
+    // the single live run line is the started announcement — no separate
+    // progress element racing ahead of it.
+    const runLine = h.panel.locator(".msg-recipe-line");
+    await expect(runLine).toContainText("Recipe started — E2E filing", { timeout: 20_000 });
+    await expect(runLine.locator(".handoff-stop")).toBeVisible(); // stop lives inside the line
+
+    // The line flips in place as the run steps — a single element cannot
+    // render progress above its own start announcement (#301).
+    await expect(runLine).toContainText("waiting for you", { timeout: 30_000 });
+
+    // Stop control: inside the line, ≥24px hit target (Lane A3 floor).
+    const stopBox = await runLine.locator(".handoff-stop").boundingBox();
+    expect(stopBox).toBeTruthy();
+    expect(stopBox.height).toBeGreaterThanOrEqual(24);
+    const lineBox = await runLine.boundingBox();
+    expect(stopBox.x).toBeGreaterThanOrEqual(lineBox.x); // right side, inside
 
     // The player drove the tab to the gateway and parked at the checkpoint.
     await expect(h.site).toHaveURL(/gateway\.html/, { timeout: 30_000 });
@@ -58,7 +73,8 @@ test.describe("recipes player", () => {
     // where a normal Zo turn would show its capture tier.
     await expect(doneLine).toContainText("no page capture");
 
-    // The progress line and checkpoint cleared on the terminal push.
+    // The progress line and checkpoint cleared on the terminal push — the
+    // single live line is replaced by the persisted terminal note.
     await expect(h.panel.locator(".msg-recipe-line")).toHaveCount(0);
     await expect(h.panel.locator(".recipe-checkpoint-card")).toHaveCount(0);
   });
