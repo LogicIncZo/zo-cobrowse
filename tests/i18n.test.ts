@@ -79,3 +79,36 @@ describe("i18n scaffolding (#68)", () => {
     expect(doc.querySelector("span").textContent).toBe("");
   });
 });
+
+describe("i18n census gate (#315)", () => {
+  it("baseline file matches messages.json exactly", async () => {
+    const { readFileSync } = await import("fs");
+    const { resolve } = await import("path");
+    const messages = JSON.parse(readFileSync(resolve(import.meta.dir, "../extension/_locales/en/messages.json"), "utf8"));
+    const baseline = JSON.parse(readFileSync(resolve(import.meta.dir, "../scripts/i18n-census.json"), "utf8"));
+    expect(Object.keys(messages).sort()).toEqual(baseline.keys);
+    expect(Object.keys(messages).length).toBe(baseline.count);
+  });
+
+  it("surface (a) keys exist and carry the English literals", async () => {
+    const { readFileSync } = await import("fs");
+    const { resolve } = await import("path");
+    const messages = JSON.parse(readFileSync(resolve(import.meta.dir, "../extension/_locales/en/messages.json"), "utf8"));
+    for (const k of [
+      "emptyStateHint", "emptyStateChipSummarize", "emptyStateChipWhat", "emptyStateChipExtract", "emptyStateChipResearch",
+      "errorCardTitle", "errorCardFallback", "errorCardRetry",
+      "ob1Title", "ob2Title", "ob3Title", "ob4Title", "obOpenSettings",
+    ]) {
+      expect(typeof messages[k]?.message, `key ${k}`).toBe("string");
+    }
+    expect(messages.errorCardTitle.message).toBe("Response interrupted");
+    expect(messages.ob1Title.message).toBe("Welcome to Zo Co-browse");
+  });
+
+  it("tOr falls back to the English literal when the key is missing", async () => {
+    const { tOr } = await import("../extension/lib/i18n.js");
+    // No chrome in bun → i18n resolves '' → the literal must come back.
+    expect(tOr("nonexistentKey", "Hello fallback")).toBe("Hello fallback");
+    expect(tOr("", "x")).toBe("x");
+  });
+});

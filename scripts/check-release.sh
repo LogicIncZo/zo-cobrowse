@@ -80,6 +80,15 @@ else
 fi
 
 echo ""
+echo -e "${BOLD}i18n census (#315)${NC}"
+if command -v bun >/dev/null 2>&1 && bun scripts/i18n-census.ts; then
+  :
+else
+  echo -e "  ${RED}✗ See above${NC}"
+  fail=1
+fi
+
+echo ""
 echo -e "${BOLD}Docs changelog mirror${NC}"
 # Policy (#96): docs/changelog.md's [Unreleased] mirrors root CHANGELOG.md.
 if command -v bun >/dev/null 2>&1 && bun scripts/sync-changelog.ts --check; then
