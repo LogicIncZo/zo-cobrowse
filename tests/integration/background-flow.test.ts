@@ -127,6 +127,33 @@ describe("background streaming pipeline", () => {
     expect(req.body.input).toContain("hi");
   });
 
+  it("#300: a chained handoff turn's STREAM_DONE carries the capture tier it used", async () => {
+    fm.handle(() => sseResponse(zoSseText({ text: "continuation answer" })));
+    const rec = connectRecorder();
+    // What handoffChainNextTurn posts: the continuation payload stamps the
+    // tier THIS turn captured (not turn 1's decision).
+    rec.post({
+      sessionId: 30,
+      type: "ASK_ZO",
+      userQuery: "[handoff-run continuation] progress…",
+      modeId: "ask",
+      chatId: "chat-30",
+      handoffRunId: "run-300",
+      contextTier: 1,
+      contextReason: "handoff continuation capture",
+    });
+    await waitUntil(() => rec.seen.some((m) => m.type === "STREAM_DONE"), 8000);
+    const done = rec.seen.find((m) => m.type === "STREAM_DONE");
+    expect(done.contextTier).toBe(1);
+    expect(done.contextReason).toBe("handoff continuation capture");
+
+    // Ordinary turns (no chained marker) stay chip-free in the payload.
+    rec.post({ sessionId: 31, type: "ASK_ZO", userQuery: "plain", modeId: "ask", chatId: "chat-30" });
+    await waitUntil(() => rec.seen.filter((m) => m.type === "STREAM_DONE").length === 2, 8000);
+    const plain = rec.seen.filter((m) => m.type === "STREAM_DONE")[1];
+    expect(plain.contextTier).toBeUndefined();
+  });
+
   it("a transient network failure shows the reconnect banner — no terminal error — then completes (QA finding D)", async () => {
     let attempt = 0;
     fm.handle(() => {

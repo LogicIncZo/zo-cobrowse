@@ -54,6 +54,9 @@ test.describe("recipes player", () => {
     await expect(doneLine).toContainText("E2E filing", { timeout: 30_000 });
     await expect(doneLine).toContainText("REG-2026-E2E-777");
     await expect(doneLine).toContainText("Ada Lovelace");
+    // #300: replay runs never capture the page — the terminal note says so
+    // where a normal Zo turn would show its capture tier.
+    await expect(doneLine).toContainText("no page capture");
 
     // The progress line and checkpoint cleared on the terminal push.
     await expect(h.panel.locator(".msg-recipe-line")).toHaveCount(0);
