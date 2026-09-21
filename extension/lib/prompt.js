@@ -114,7 +114,11 @@ export function compactForm(f) {
  * instructions always ride, whatever the install state.
  */
 function actionTail(opts, mode, wantJson) {
-  const slim = wantJson && opts && opts.protocolSkill && opts.protocolSkill.installed;
+  // opts.noSlimTail (#343 follow-up): compose turns keep the FULL action
+  // tail — the slim pointer sends Zo to read the skill from the workspace
+  // mid-run, and one polluted/failed read there costs minutes (observed on
+  // a real compose run). Regular action turns keep the slim pointer.
+  const slim = wantJson && opts && opts.protocolSkill && opts.protocolSkill.installed && !opts.noSlimTail;
   if (!slim) {
     return { instructions: mode.instructions, protocol: `${ACTION_SCHEMA_COMPACT}${SHARED_SAFETY_RULES}` };
   }

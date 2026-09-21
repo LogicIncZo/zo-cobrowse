@@ -10,7 +10,7 @@
 
 import { test, expect } from "@playwright/test";
 import { E2E_BASE } from "./helpers/extension";
-import { openHarness, sendQuery, type ExtensionHarness } from "./helpers/extension";
+import { openHarness, sendQuery, recordedAsks, clearRecordedRequests, type ExtensionHarness } from "./helpers/extension";
 
 let h: ExtensionHarness;
 
@@ -70,5 +70,40 @@ test.describe("recipe compose", () => {
     await expect(promoted.filter({ hasText: runName })).toBeVisible({ timeout: 30_000 });
     await expect(promoted.filter({ hasText: runName })).toContainText("Rehearsal passed");
     await expect(h.site.locator("#name")).toHaveValue("Rehearsed Human");
+  });
+});
+
+test.describe("compose run-priming fixes (0.3.4.N)", () => {
+  test("compose with the DOM toggle OFF still sends full context, and the bang bubble renders once", async () => {
+    test.setTimeout(90_000);
+    // Own harness + fresh chat: the shared harness's chat already carries
+    // compose context for this fixture page, and a same-page second compose
+    // would legitimately dedup ("context already sent") — this test needs a
+    // first-turn-on-a-page situation to prove the DOM-cap bypass.
+    const h2: ExtensionHarness = await openHarness({ sitePath: "/index.html", freshProfile: true });
+    try {
+      // Sticky DOM cap OFF — a manual chat would go URL-only from here.
+      await h2.panel.evaluate(() => (document.getElementById("dom-toggle") as HTMLElement).click());
+      await expect(h2.panel.locator("#dom-toggle")).toHaveAttribute("aria-pressed", "false");
+      await clearRecordedRequests();
+      await sendQuery(h2.panel, "!recipe compose dom-off context check");
+      // The compose session announces itself (run armed + priming turn sent).
+      await expect(h2.panel.locator(".msg-handoff-line").first()).toBeVisible({ timeout: 30_000 });
+      // The run-priming turn carries the FULL element context despite the cap.
+      // (The ask lands just after the run line — poll rather than pop.)
+      let last: any = null;
+      for (let i = 0; i < 30 && !last; i++) {
+        const asks = await recordedAsks();
+        last = asks[asks.length - 1];
+        if (!last) await h2.panel.waitForTimeout(500);
+      }
+      expect(last?.body?.input || "").toContain("## Elements");
+      // Exactly ONE user bubble — the compose bang must not double-add it.
+      await expect(
+        h2.panel.locator("#messages .msg-user", { hasText: "dom-off context check" }),
+      ).toHaveCount(1);
+    } finally {
+      await h2.context.close();
+    }
   });
 });

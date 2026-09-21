@@ -499,3 +499,36 @@ describe("describePrompt — tab contexts in the structured view", () => {
     expect(d.sections.find((s) => s.id === "tabs")).toBeUndefined();
   });
 });
+
+describe("slim skill tail + noSlimTail (0.3.4.N compose fix)", () => {
+  const INSTALLED = { installed: true, checkedVersion: "1.0.0", version: "1.0.0" };
+
+  it("a verified install slims the tail to the skill pointer", () => {
+    const d = describePrompt(BUILTIN_MODES.cobrowse, makeCtx(), "q", {
+      effectiveTier: 2,
+      protocolSkill: INSTALLED,
+    });
+    expect(d.prompt).toContain("cobrowse-protocol-skill");
+    expect(d.prompt).not.toContain(ACTION_SCHEMA_COMPACT);
+  });
+
+  it("noSlimTail keeps the FULL grammar in-prompt even on a verified install (compose turns)", () => {
+    const d = describePrompt(BUILTIN_MODES.cobrowse, makeCtx(), "q", {
+      effectiveTier: 2,
+      protocolSkill: INSTALLED,
+      noSlimTail: true,
+    });
+    expect(d.prompt).toContain(ACTION_SCHEMA_COMPACT);
+    expect(d.prompt).toContain(SHARED_SAFETY_RULES);
+    // And the structured view mirrors it (inspector parity).
+    expect(d.sections.find((s) => s.id === "tail")).toBeDefined();
+  });
+
+  it("noSlimTail without an install is a no-op (full tail either way)", () => {
+    const d = describePrompt(BUILTIN_MODES.cobrowse, makeCtx(), "q", {
+      effectiveTier: 2,
+      noSlimTail: true,
+    });
+    expect(d.prompt).toContain(ACTION_SCHEMA_COMPACT);
+  });
+});
