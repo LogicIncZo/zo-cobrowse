@@ -4,6 +4,7 @@ import {
   DEFAULTS,
   loadConfig,
   saveConfig,
+  deriveZoHosts,
 } from "../extension/lib/config.js";
 import { DEFAULT_BUDGET } from "../extension/lib/handoff.js";
 
@@ -320,5 +321,51 @@ describe("watchConfig — change subscription", () => {
     await new Promise((r) => setTimeout(r, 10));
     // No relevant key changed → handler not called again.
     expect(seen.length).toBe(0);
+  });
+
+  // ── #339: Zo username → derived hosts ────────────────────────────────────
+
+  it("deriveZoHosts derives both hosts from a plain slug", () => {
+    expect(deriveZoHosts("alice")).toEqual({
+      spaceEndpoint: "https://alice.zo.space",
+      webOrigin: "https://alice.zo.computer",
+    });
+  });
+
+  it("deriveZoHosts accepts hyphenated/digit slugs and trims + lowercases", () => {
+    expect(deriveZoHosts("  Bob-42  ")).toEqual({
+      spaceEndpoint: "https://bob-42.zo.space",
+      webOrigin: "https://bob-42.zo.computer",
+    });
+    expect(deriveZoHosts("a").spaceEndpoint).toBe("https://a.zo.space");
+  });
+
+  it("deriveZoHosts returns null on invalid input (spaces, punctuation, edge hyphens, empty)", () => {
+    expect(deriveZoHosts("bad slug")).toBe(null);
+    expect(deriveZoHosts("bad!slug")).toBe(null);
+    expect(deriveZoHosts("-leading")).toBe(null);
+    expect(deriveZoHosts("trailing-")).toBe(null);
+    expect(deriveZoHosts("")).toBe(null);
+    expect(deriveZoHosts(null)).toBe(null);
+    expect(deriveZoHosts(undefined)).toBe(null);
+    expect(deriveZoHosts("x".repeat(64))).toBe(null);
+    expect(deriveZoHosts("x".repeat(63)).webOrigin).toBe("https://" + "x".repeat(63) + ".zo.computer");
+  });
+
+  it("DEFAULTS ship no owner-specific space endpoint or username (#339)", () => {
+    expect(DEFAULTS[STORAGE.SPACE_ENDPOINT]).toBe("");
+    expect(DEFAULTS[STORAGE.ZO_USERNAME]).toBe("");
+    expect(JSON.stringify(DEFAULTS)).not.toContain("cashlessconsumer");
+  });
+
+  it("saveConfig routes zoUsername to storage.sync (a name, not a credential)", async () => {
+    await saveConfig({ [STORAGE.ZO_USERNAME]: "alice" });
+    const local = await chromeMock.storage.local.get(STORAGE.ZO_USERNAME);
+    const sync = await chromeMock.storage.sync.get(STORAGE.ZO_USERNAME);
+    expect(local[STORAGE.ZO_USERNAME]).toBeUndefined();
+    expect(sync[STORAGE.ZO_USERNAME]).toBe("alice");
+    // …and it round-trips through loadConfig.
+    const config = await loadConfig();
+    expect(config[STORAGE.ZO_USERNAME]).toBe("alice");
   });
 });

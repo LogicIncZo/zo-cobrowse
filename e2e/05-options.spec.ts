@@ -49,6 +49,70 @@ test.describe("options page", () => {
     }
   });
 
+  test("username + token (#339): hosts derive from the slug, Advanced overrides win, no owner-URL default", async () => {
+    const { context, extensionId, serviceWorker } = await launchExtension({ freshProfile: true });
+    try {
+      await seedExtensionConfig(serviceWorker);
+      // Simulate a genuinely fresh profile: the harness seeds a space endpoint
+      // for other specs; S1's default is NONE until the user picks a username.
+      await serviceWorker.evaluate(() =>
+        new Promise((r) => chrome.storage.local.remove("zoSpaceEndpoint", () => r(null))),
+      );
+      const page = await context.newPage();
+      await page.goto(`chrome-extension://${extensionId}/options.html`);
+
+      // Typing the username derives both hosts live (they sit in Advanced).
+      await page.fill("#zo-username", "alice");
+      await expect(page.locator("#space-endpoint")).toHaveValue("https://alice.zo.space");
+      await expect(page.locator("#zo-web-origin")).toHaveValue("https://alice.zo.computer");
+
+      await page.click("button[type=submit]");
+      await expect(page.locator("#status-message")).toContainText("Saved");
+      const stored = await serviceWorker.evaluate(
+        () =>
+          new Promise<any>((r) =>
+            chrome.storage.local.get(["zoSpaceEndpoint"], (local) =>
+              chrome.storage.sync.get(["zoUsername", "zoWebOrigin"], (sync) => r({ local, sync })),
+            ),
+          ),
+      );
+      expect(stored.local.zoSpaceEndpoint).toBe("https://alice.zo.space");
+      expect(stored.sync.zoUsername).toBe("alice");
+      expect(stored.sync.zoWebOrigin).toBe("https://alice.zo.computer");
+
+      // Reload: username + derived hosts render back from storage.
+      await page.reload();
+      await expect(page.locator("#zo-username")).toHaveValue("alice");
+      await expect(page.locator("#space-endpoint")).toHaveValue("https://alice.zo.space");
+
+      // A hand-edited Advanced origin wins: it survives a username change
+      // (the space host follows, the custom origin does not get clobbered).
+      await page.locator("#connection-advanced summary").click();
+      await page.fill("#zo-web-origin", "https://custom.example.org");
+      await page.fill("#zo-username", "bob");
+      await expect(page.locator("#space-endpoint")).toHaveValue("https://bob.zo.space");
+      await expect(page.locator("#zo-web-origin")).toHaveValue("https://custom.example.org");
+      await page.click("button[type=submit]");
+      await expect(page.locator("#status-message")).toContainText("Saved");
+      const after = await serviceWorker.evaluate(
+        () => new Promise<any>((r) => chrome.storage.sync.get(["zoUsername", "zoWebOrigin"], (v) => r(v))),
+      );
+      expect(after.zoUsername).toBe("bob");
+      expect(after.zoWebOrigin).toBe("https://custom.example.org");
+
+      // Invalid slug → honest error, nothing saved.
+      await page.fill("#zo-username", "Bad Slug!");
+      await page.click("button[type=submit]");
+      await expect(page.locator("#status-message")).toContainText("lowercase slug");
+      const unbroken = await serviceWorker.evaluate(
+        () => new Promise<any>((r) => chrome.storage.sync.get("zoUsername", (v) => r(v.zoUsername))),
+      );
+      expect(unbroken).toBe("bob");
+    } finally {
+      await context.close();
+    }
+  });
+
   test("Prompts editor previews the built prompt and saves overrides", async () => {
     const { context, extensionId, serviceWorker } = await launchExtension({ freshProfile: true });
     try {
@@ -132,8 +196,10 @@ test.describe("options page", () => {
 
       // Dirty indicator: editing a form-only field flags the Save buttons;
       // saving clears it (and the toast is visible — fixed position).
+      // (#339: the endpoint fields live in the Advanced details — open it.)
       await page.click(`#settings-nav .settings-tab[data-pane="pane-connection"]`);
       await expect(page.locator("button[type=submit].save-dirty")).toHaveCount(0);
+      await page.locator("#connection-advanced summary").click();
       await page.fill("#space-endpoint", "https://example.zo.space");
       await expect(page.locator("button[type=submit].save-dirty").first()).toBeVisible();
       await page.click("button[type=submit]");

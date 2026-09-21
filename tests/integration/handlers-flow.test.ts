@@ -40,6 +40,9 @@ function expectValid(schema: any, value: unknown) {
 
 beforeAll(async () => {
   bus.storage.local._store.zoAccessToken = MOCK_ZO_TOKEN;
+  // #339: the space endpoint is no longer defaulted — seed it explicitly the
+  // way a configured user would (Settings derives it from their username).
+  bus.storage.local._store.zoSpaceEndpoint = "https://testspace.zo.space";
   fm.install();
   fm.handle(() => jsonResponse({ output: "ok" }));
   (globalThis as any).chrome = bus;
@@ -169,7 +172,7 @@ describe("DUCKDB_QUERY — natural language SQL (#05)", () => {
     expect(resp).toEqual({ ok: true, columns: ["name", "n"], rows: [["a", 1], ["b", 2]], sql: "SELECT 1", rowCount: 2 });
 
     const req = fm.to("/api/cobrowse/query")[0];
-    expect(req.url).toContain("cashlessconsumer.zo.space");
+    expect(req.url).toContain("testspace.zo.space");
     expect(req.body).toEqual({ query: "top pages" });
   });
 

@@ -255,7 +255,9 @@ function safeText(v) {
 const DEFAULTS = {
   zoApiUrl: 'https://api.zo.computer/zo/ask',
   zoModel: '',
-  zoSpaceEndpoint: 'https://cashlessconsumer.zo.space',
+  // #339: no owner-specific default — empty means space-backed features are
+  // off until the user sets their Zo username (which derives this host).
+  zoSpaceEndpoint: '',
   zoPersonaId: '',          // optional: pin the persona sent to the API
   zoActiveMode: 'cobrowse', // active Mode id (replaces personaMode + presets)
   zoAccessToken: '',
@@ -2444,13 +2446,16 @@ async function testConnection() {
     // zoOk stays false
   }
 
-  // Test 2: Zo.space endpoint
+  // Test 2: Zo.space endpoint (optional since #339 — skipped, not failed,
+  // when unconfigured)
   let spaceOk = false;
-  try {
-    const r = await fetch(config.zoSpaceEndpoint, { method: 'HEAD' });
-    spaceOk = r.ok || r.status === 301 || r.status === 302;
-  } catch {
-    // spaceOk stays false
+  if (config.zoSpaceEndpoint) {
+    try {
+      const r = await fetch(config.zoSpaceEndpoint, { method: 'HEAD' });
+      spaceOk = r.ok || r.status === 301 || r.status === 302;
+    } catch {
+      // spaceOk stays false
+    }
   }
 
   return { success: zoOk, zoApi: zoOk, zoSpace: spaceOk };
@@ -4814,7 +4819,12 @@ async function runDuckdbQuery(naturalQuery) {
   if (!config.zoAccessToken) {
     return { ok: false, error: 'Zo access token not configured.' };
   }
-  const endpoint = config.zoSpaceEndpoint || 'https://cashlessconsumer.zo.space';
+  // #339: the space endpoint is user-derived (Zo username) and optional —
+  // report honestly instead of querying someone else's space.
+  if (!config.zoSpaceEndpoint) {
+    return { ok: false, error: 'Zo.space endpoint not configured — set your Zo username in Settings → Connection.' };
+  }
+  const endpoint = config.zoSpaceEndpoint;
   try {
     const resp = await fetch(`${endpoint}/api/cobrowse/query`, {
       method: 'POST',

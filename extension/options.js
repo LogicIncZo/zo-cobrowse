@@ -141,6 +141,30 @@ document.addEventListener('DOMContentLoaded', async () => {
   const apiEndpointInput = document.getElementById('api-endpoint');
   const spaceEndpointInput = document.getElementById('space-endpoint');
   const zoWebOriginInput = document.getElementById('zo-web-origin');
+  const zoUsernameInput = document.getElementById('zo-username');
+
+  // #339: the username slug derives the two hosts — live, but a hand-edited
+  // Advanced field wins (override-not-rewrite, same rule as Mode overrides).
+  // lastDerived snapshots the CURRENT username's derivation so a stored value
+  // that was itself derived keeps following the username after edits.
+  let deriveZoHosts = null;
+  try { ({ deriveZoHosts } = await import('./lib/config.js')); } catch { /* lib unavailable */ }
+  const lastDerived = { spaceEndpoint: '', webOrigin: '' };
+  const fieldFollowsDerivation = (input, key) => {
+    const v = (input?.value || '').trim();
+    return !v || v === lastDerived[key];
+  };
+  const applyDerivation = () => {
+    if (!deriveZoHosts || !zoUsernameInput) return;
+    const hosts = deriveZoHosts(zoUsernameInput.value);
+    if (hosts) {
+      if (fieldFollowsDerivation(spaceEndpointInput, 'spaceEndpoint')) spaceEndpointInput.value = hosts.spaceEndpoint;
+      if (fieldFollowsDerivation(zoWebOriginInput, 'webOrigin')) zoWebOriginInput.value = hosts.webOrigin;
+      lastDerived.spaceEndpoint = hosts.spaceEndpoint;
+      lastDerived.webOrigin = hosts.webOrigin;
+    }
+  };
+  zoUsernameInput?.addEventListener('input', applyDerivation);
   const modelStatus = document.getElementById('model-status');
   const themeSelect = document.getElementById(OPTIONS_THEME_SELECTOR);
 
@@ -272,7 +296,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   chrome.storage.local.get(['zoAccessToken', 'zoSpaceEndpoint'], (localResult) => {
     chrome.storage.sync.get([
       'zoApiUrl', 'zoModel', 'zoPersonaId',
-      'zoQuickActions', 'zoWebOrigin',
+      'zoQuickActions', 'zoWebOrigin', 'zoUsername',
       'zoTtsLang', 'zoTtsRate', 'zoTtsAutoRead', 'enabledMenus', 'enableScreenshots', 'enableWriteAssist'
     ], (syncResult) => {
       const token = localResult.zoAccessToken;
@@ -283,6 +307,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       // from this field (QA finding B).
       if (apiEndpointInput && syncResult.zoApiUrl) apiEndpointInput.value = syncResult.zoApiUrl;
       if (zoWebOriginInput && syncResult.zoWebOrigin) zoWebOriginInput.value = syncResult.zoWebOrigin;
+      if (zoUsernameInput) zoUsernameInput.value = syncResult.zoUsername || '';
+      // Seed the derivation snapshot from the stored username so values that
+      // were themselves derived keep following the username on later edits.
+      if (deriveZoHosts) {
+        const storedHosts = deriveZoHosts(syncResult.zoUsername || '');
+        if (storedHosts) {
+          lastDerived.spaceEndpoint = storedHosts.spaceEndpoint;
+          lastDerived.webOrigin = storedHosts.webOrigin;
+        }
+      }
 
       // Persona — single default; the side panel's Mode selector does the routing.
       const personaId = syncResult.zoPersonaId || '';
@@ -381,6 +415,15 @@ document.addEventListener('DOMContentLoaded', async () => {
       statusMsg.className = 'inline-status err';
       return;
     }
+    // #339: username slug — optional, but a non-empty value must be a valid
+    // slug; it is the derivation source for the two Advanced hosts (which are
+    // saved as shown — a hand-edited value wins over the derivation).
+    const zoUsername = (zoUsernameInput?.value || '').trim().toLowerCase();
+    if (zoUsername && deriveZoHosts && !deriveZoHosts(zoUsername)) {
+      statusMsg.textContent = 'Zo Username must be a lowercase slug: letters, numbers, hyphens; no leading/trailing hyphen.';
+      statusMsg.className = 'inline-status err';
+      return;
+    }
     // Zo web origin (0.2.8.0): optional, but a non-empty value must be a real
     // http(s) URL — it becomes the base of "Open in Zo" deep links.
     const zoWebOrigin = (zoWebOriginInput?.value || '').trim();
@@ -391,20 +434,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         originOk = u.protocol === 'http:' || u.protocol === 'https:';
       } catch { /* not a URL */ }
       if (!originOk) {
-        statusMsg.textContent = 'Zo Web Origin must be a valid http(s) URL (e.g. https://cashlessconsumer.zo.computer), or empty to disable.';
+        statusMsg.textContent = 'Zo Web Origin must be a valid http(s) URL (e.g. https://your-slug.zo.computer), or empty to disable.';
         statusMsg.className = 'inline-status err';
         return;
       }
     }
-    // Store sensitive data separately in storage.local (not synced across devices)
+    // Store sensitive data separately in storage.local (not synced across devices).
+    // #339: no host fallback here — empty space endpoint = space features off.
     chrome.storage.local.set({
       zoAccessToken: token,
-      zoSpaceEndpoint: spaceEndpointInput.value.trim() || 'https://cashlessconsumer.zo.space',
+      zoSpaceEndpoint: spaceEndpointInput.value.trim(),
     }, () => {
       // Non-sensitive config stays in storage.sync
       chrome.storage.sync.set({
         zoApiUrl: (apiEndpointInput?.value || '').trim() || 'https://api.zo.computer/zo/ask',
         zoWebOrigin,
+        zoUsername,
         zoModel: getModelValue(),
         zoPersonaId: personaSelect.value,
         zoQuickActions: quickActions,
@@ -505,7 +550,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   const goToZoBtn = document.getElementById('go-to-zo-settings');
   if (goToZoBtn) {
     goToZoBtn.addEventListener('click', () => {
-      chrome.tabs.create({ url: 'https://cashlessconsumer.zo.computer/?t=settings&s=advanced' });
+      // #339: the USER's Zo web origin (derived from their username) — never a
+      // hardcoded host.
+      chrome.storage.sync.get('zoWebOrigin', (r) => {
+        const origin = (r.zoWebOrigin || '').replace(/\/+$/, '');
+        chrome.tabs.create({ url: origin ? `${origin}/?t=settings&s=advanced` : 'https://www.zo.computer' });
+      });
     });
   }
 

@@ -16,6 +16,7 @@ const FULL_CONFIG = {
   zoActiveMode: "cobrowse",
   zoSpaceEndpoint: "https://cashlessconsumer.zo.space",
   zoWebOrigin: "",
+  zoUsername: "cashlessconsumer",
   enableScreenshots: true,
   enableVision: true,
   enabledMenus: {},

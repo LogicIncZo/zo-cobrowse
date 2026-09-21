@@ -8,6 +8,9 @@ export const ConfigSchema = z.object({
   zoModel: z.string(),
   zoSpaceEndpoint: z.string(),
   zoWebOrigin: z.string(), // Zo web UI origin; '' = Open-in-Zo off (0.2.8.0)
+  // Zo username slug (#339) — derivation source for the two hosts above; the
+  // hosts themselves stay user-overridable (override-not-rewrite).
+  zoUsername: z.string(),
   zoPersonaId: z.string(),
   zoActiveMode: z.string(),
   zoAccessToken: z.string(),
