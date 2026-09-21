@@ -155,6 +155,50 @@ test.describe("options page", () => {
     }
   });
 
+  test("Jev card (#341): renders dark by default, key stays local-only, Test probes the mocked endpoint", async () => {
+    const { context, extensionId, serviceWorker } = await launchExtension({ freshProfile: true });
+    try {
+      await seedExtensionConfig(serviceWorker);
+      const page = await context.newPage();
+      await page.goto(`chrome-extension://${extensionId}/options.html`);
+
+      // The card renders in the Connection pane; ships dark (off, no key).
+      await expect(page.locator("#card-jev")).toBeVisible();
+      await expect(page.locator("#jev-enabled")).not.toBeChecked();
+      await expect(page.locator("#jev-api-key")).toHaveValue("");
+
+      // Enable + key + model persist to the RIGHT storage areas on save.
+      await page.check("#jev-enabled");
+      await page.fill("#jev-api-key", "apik_e2e_secret");
+      await page.fill("#jev-model", "jev-latest");
+      await page.click("button[type=submit]");
+      await expect(page.locator("#status-message")).toContainText("Saved");
+      const areas = await serviceWorker.evaluate(
+        () =>
+          new Promise<any>((r) =>
+            chrome.storage.local.get(["jevApiKey", "jevApiUrl"], (local) =>
+              chrome.storage.sync.get(["jevEnabled", "jevModel", "jevPickConfidence", "jevDoneConfidence", "jevApiKey"], (sync) => r({ local, sync })),
+            ),
+          ),
+      );
+      expect(areas.local.jevApiKey).toBe("apik_e2e_secret");
+      expect(areas.sync.jevApiKey).toBeUndefined(); // never synced
+      expect(areas.sync.jevEnabled).toBe(true);
+      expect(areas.sync.jevModel).toBe("jev-latest");
+
+      // Test Jev probes the decide endpoint (mock server, seeded URL) and
+      // reports latency honestly.
+      await serviceWorker.evaluate(
+        (base: string) => new Promise((r) => chrome.storage.local.set({ jevApiUrl: `${base}/v1/systemone` }, () => r(null))),
+        E2E_BASE,
+      );
+      await page.click("#jev-test-btn");
+      await expect(page.locator("#jev-status")).toContainText(/responded in \d+ms/i, { timeout: 10_000 });
+    } finally {
+      await context.close();
+    }
+  });
+
   test("one save (#340): a single sticky Save from any tab; mode switch persists the outgoing draft", async () => {
     const { context, extensionId, serviceWorker } = await launchExtension({ freshProfile: true });
     try {
