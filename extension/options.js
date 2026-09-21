@@ -141,6 +141,38 @@ document.addEventListener('DOMContentLoaded', async () => {
   const apiEndpointInput = document.getElementById('api-endpoint');
   const spaceEndpointInput = document.getElementById('space-endpoint');
   const zoWebOriginInput = document.getElementById('zo-web-origin');
+  const zoUsernameInput = document.getElementById('zo-username');
+  // Jev card (#341)
+  const jevEnabledCheck = document.getElementById('jev-enabled');
+  const jevKeyInput = document.getElementById('jev-api-key');
+  const jevModelInput = document.getElementById('jev-model');
+  const jevPickInput = document.getElementById('jev-pick-confidence');
+  const jevDoneInput = document.getElementById('jev-done-confidence');
+  const jevTestBtn = document.getElementById('jev-test-btn');
+  const jevStatus = document.getElementById('jev-status');
+
+  // #339: the username slug derives the two hosts — live, but a hand-edited
+  // Advanced field wins (override-not-rewrite, same rule as Mode overrides).
+  // lastDerived snapshots the CURRENT username's derivation so a stored value
+  // that was itself derived keeps following the username after edits.
+  let deriveZoHosts = null;
+  try { ({ deriveZoHosts } = await import('./lib/config.js')); } catch { /* lib unavailable */ }
+  const lastDerived = { spaceEndpoint: '', webOrigin: '' };
+  const fieldFollowsDerivation = (input, key) => {
+    const v = (input?.value || '').trim();
+    return !v || v === lastDerived[key];
+  };
+  const applyDerivation = () => {
+    if (!deriveZoHosts || !zoUsernameInput) return;
+    const hosts = deriveZoHosts(zoUsernameInput.value);
+    if (hosts) {
+      if (fieldFollowsDerivation(spaceEndpointInput, 'spaceEndpoint')) spaceEndpointInput.value = hosts.spaceEndpoint;
+      if (fieldFollowsDerivation(zoWebOriginInput, 'webOrigin')) zoWebOriginInput.value = hosts.webOrigin;
+      lastDerived.spaceEndpoint = hosts.spaceEndpoint;
+      lastDerived.webOrigin = hosts.webOrigin;
+    }
+  };
+  zoUsernameInput?.addEventListener('input', applyDerivation);
   const modelStatus = document.getElementById('model-status');
   const themeSelect = document.getElementById(OPTIONS_THEME_SELECTOR);
 
@@ -159,6 +191,42 @@ document.addEventListener('DOMContentLoaded', async () => {
       tokenInput.type = show ? 'text' : 'password';
       tokenToggle.textContent = show ? 'Hide' : 'Show';
       tokenToggle.title = show ? 'Hide token' : 'Show token';
+    });
+  }
+
+  // Jev key show/hide (#341) — same pattern as the Zo token.
+  const jevKeyToggle = document.getElementById('jev-key-toggle');
+  if (jevKeyToggle && jevKeyInput) {
+    jevKeyToggle.addEventListener('click', () => {
+      const show = jevKeyInput.type === 'password';
+      jevKeyInput.type = show ? 'text' : 'password';
+      jevKeyToggle.textContent = show ? 'Hide' : 'Show';
+      jevKeyToggle.title = show ? 'Hide key' : 'Show key';
+    });
+  }
+
+  // Test Jev (#341): one noul probe through the background transport.
+  if (jevTestBtn) {
+    jevTestBtn.addEventListener('click', async () => {
+      jevTestBtn.disabled = true;
+      jevStatus.textContent = 'Probing…';
+      jevStatus.className = 'inline-status pending';
+      try {
+        const res = await chrome.runtime.sendMessage({ type: 'JEV_TEST' });
+        if (res && res.ok) {
+          jevStatus.textContent = `✅ Jev responded in ${res.latencyMs}ms${res.model ? ' (' + res.model + ')' : ''}`;
+          jevStatus.className = 'inline-status ok';
+        } else {
+          jevStatus.textContent = `❌ ${(res && res.error) || 'Jev probe failed.'}`;
+          jevStatus.className = 'inline-status err';
+        }
+      } catch (err) {
+        jevStatus.textContent = `❌ ${err.message}`;
+        jevStatus.className = 'inline-status err';
+      } finally {
+        jevTestBtn.disabled = false;
+        setTimeout(() => { jevStatus.textContent = ''; jevStatus.className = 'inline-status'; }, 6000);
+      }
     });
   }
 
@@ -269,20 +337,36 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // Load config — sensitive fields from storage.local, rest from storage.sync
-  chrome.storage.local.get(['zoAccessToken', 'zoSpaceEndpoint'], (localResult) => {
+  chrome.storage.local.get(['zoAccessToken', 'zoSpaceEndpoint', 'jevApiKey'], (localResult) => {
     chrome.storage.sync.get([
       'zoApiUrl', 'zoModel', 'zoPersonaId',
-      'zoQuickActions', 'zoWebOrigin',
-      'zoTtsLang', 'zoTtsRate', 'zoTtsAutoRead', 'enabledMenus', 'enableScreenshots', 'enableWriteAssist'
+      'zoQuickActions', 'zoWebOrigin', 'zoUsername',
+      'zoTtsLang', 'zoTtsRate', 'zoTtsAutoRead', 'enabledMenus', 'enableScreenshots', 'enableWriteAssist',
+      'jevEnabled', 'jevModel', 'jevPickConfidence', 'jevDoneConfidence'
     ], (syncResult) => {
       const token = localResult.zoAccessToken;
       const spaceEndpoint = localResult.zoSpaceEndpoint;
       if (token) tokenInput.value = token;
       if (spaceEndpoint) spaceEndpointInput.value = spaceEndpoint;
+      if (localResult.jevApiKey) jevKeyInput.value = localResult.jevApiKey;
+      if (jevEnabledCheck) jevEnabledCheck.checked = !!syncResult.jevEnabled;
+      if (jevModelInput) jevModelInput.value = syncResult.jevModel || 'jev-latest';
+      if (jevPickInput) jevPickInput.value = String(syncResult.jevPickConfidence ?? 0.8);
+      if (jevDoneInput) jevDoneInput.value = String(syncResult.jevDoneConfidence ?? 0.9);
       // Restore BEFORE the model/persona loaders run — they derive their URLs
       // from this field (QA finding B).
       if (apiEndpointInput && syncResult.zoApiUrl) apiEndpointInput.value = syncResult.zoApiUrl;
       if (zoWebOriginInput && syncResult.zoWebOrigin) zoWebOriginInput.value = syncResult.zoWebOrigin;
+      if (zoUsernameInput) zoUsernameInput.value = syncResult.zoUsername || '';
+      // Seed the derivation snapshot from the stored username so values that
+      // were themselves derived keep following the username on later edits.
+      if (deriveZoHosts) {
+        const storedHosts = deriveZoHosts(syncResult.zoUsername || '');
+        if (storedHosts) {
+          lastDerived.spaceEndpoint = storedHosts.spaceEndpoint;
+          lastDerived.webOrigin = storedHosts.webOrigin;
+        }
+      }
 
       // Persona — single default; the side panel's Mode selector does the routing.
       const personaId = syncResult.zoPersonaId || '';
@@ -372,12 +456,36 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  // #340: the Prompts editor registers its persistence here once it loads —
+  // the ONE global Save persists the editor's current draft too (and a draft
+  // that fails validation blocks the whole save, never silently drops).
+  let persistPromptEditor = null;
+
   // Save
-  form.addEventListener('submit', (e) => {
+  form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    // #340: editor draft first — an invalid draft (empty system/instructions)
+    // aborts the whole save with the editor's honest error.
+    if (persistPromptEditor) {
+      const res = await persistPromptEditor();
+      if (!res.ok) {
+        statusMsg.textContent = res.error;
+        statusMsg.className = 'inline-status err';
+        return;
+      }
+    }
     const token = tokenInput.value.trim();
     if (!token) {
       statusMsg.textContent = 'Access token is required.';
+      statusMsg.className = 'inline-status err';
+      return;
+    }
+    // #339: username slug — optional, but a non-empty value must be a valid
+    // slug; it is the derivation source for the two Advanced hosts (which are
+    // saved as shown — a hand-edited value wins over the derivation).
+    const zoUsername = (zoUsernameInput?.value || '').trim().toLowerCase();
+    if (zoUsername && deriveZoHosts && !deriveZoHosts(zoUsername)) {
+      statusMsg.textContent = 'Zo Username must be a lowercase slug: letters, numbers, hyphens; no leading/trailing hyphen.';
       statusMsg.className = 'inline-status err';
       return;
     }
@@ -391,20 +499,27 @@ document.addEventListener('DOMContentLoaded', async () => {
         originOk = u.protocol === 'http:' || u.protocol === 'https:';
       } catch { /* not a URL */ }
       if (!originOk) {
-        statusMsg.textContent = 'Zo Web Origin must be a valid http(s) URL (e.g. https://cashlessconsumer.zo.computer), or empty to disable.';
+        statusMsg.textContent = 'Zo Web Origin must be a valid http(s) URL (e.g. https://your-slug.zo.computer), or empty to disable.';
         statusMsg.className = 'inline-status err';
         return;
       }
     }
-    // Store sensitive data separately in storage.local (not synced across devices)
+    // Store sensitive data separately in storage.local (not synced across devices).
+    // #339: no host fallback here — empty space endpoint = space features off.
     chrome.storage.local.set({
       zoAccessToken: token,
-      zoSpaceEndpoint: spaceEndpointInput.value.trim() || 'https://cashlessconsumer.zo.space',
+      zoSpaceEndpoint: spaceEndpointInput.value.trim(),
+      jevApiKey: (jevKeyInput?.value || '').trim(),
     }, () => {
       // Non-sensitive config stays in storage.sync
       chrome.storage.sync.set({
         zoApiUrl: (apiEndpointInput?.value || '').trim() || 'https://api.zo.computer/zo/ask',
         zoWebOrigin,
+        zoUsername,
+        jevEnabled: !!(jevEnabledCheck?.checked),
+        jevModel: (jevModelInput?.value || '').trim() || 'jev-latest',
+        jevPickConfidence: Math.min(1, Math.max(0, parseFloat(jevPickInput?.value) || 0.8)),
+        jevDoneConfidence: Math.min(1, Math.max(0, parseFloat(jevDoneInput?.value) || 0.9)),
         zoModel: getModelValue(),
         zoPersonaId: personaSelect.value,
         zoQuickActions: quickActions,
@@ -505,7 +620,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   const goToZoBtn = document.getElementById('go-to-zo-settings');
   if (goToZoBtn) {
     goToZoBtn.addEventListener('click', () => {
-      chrome.tabs.create({ url: 'https://cashlessconsumer.zo.computer/?t=settings&s=advanced' });
+      // #339: the USER's Zo web origin (derived from their username) — never a
+      // hardcoded host.
+      chrome.storage.sync.get('zoWebOrigin', (r) => {
+        const origin = (r.zoWebOrigin || '').replace(/\/+$/, '');
+        chrome.tabs.create({ url: origin ? `${origin}/?t=settings&s=advanced` : 'https://www.zo.computer' });
+      });
     });
   }
 
@@ -518,7 +638,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       import('./lib/modes.js'),
       import('./lib/prompt.js'),
     ]);
-    initPromptsEditor(BUILTIN_MODES, mergeOverride, EDITABLE_MODE_FIELDS, describePrompt);
+    persistPromptEditor = initPromptsEditor(BUILTIN_MODES, mergeOverride, EDITABLE_MODE_FIELDS, describePrompt) || null;
   } catch (err) {
     console.warn('Prompts editor failed to load:', err);
   }
@@ -536,16 +656,16 @@ function initPromptsEditor(BUILTIN_MODES, mergeOverride, EDITABLE_MODE_FIELDS, d
   const tierEl = document.getElementById('prompt-tier');
   const budgetEl = document.getElementById('prompt-budget');
   const jsonEl = document.getElementById('prompt-json');
-  const saveBtn = document.getElementById('prompt-save');
   const resetBtn = document.getElementById('prompt-reset');
   const statusEl = document.getElementById('prompt-status');
   const previewPre = document.getElementById('prompt-preview-pre');
   const previewMeta = document.getElementById('prompt-preview-meta');
-  if (!modeSelect || !saveBtn) return;
+  if (!modeSelect) return null;
 
   let overrides = {};
   let customModes = {};
   let currentId = null;
+  let snapshot = null; // #340: the last-filled (saved) draft — edits are diffs against this
   const isBuiltin = (id) => !!BUILTIN_MODES[id];
 
   const flash = (msg, ok = true) => {
@@ -604,8 +724,60 @@ function initPromptsEditor(BUILTIN_MODES, mergeOverride, EDITABLE_MODE_FIELDS, d
     tierEl.value = String(base.contextTier ?? 2);
     budgetEl.value = String(base.textBudget ?? 2000);
     jsonEl.checked = !!base.expectJson;
+    // #340: snapshot what the user sees as the SAVED state — a draft that
+    // differs from this is "edited" and must not be lost on a mode switch.
+    snapshot = readDraft();
     resetBtn.disabled = !(isBuiltin(id) && overrides[id]);
     renderPreview();
+  }
+
+  function readDraft() {
+    return {
+      systemPrompt: sysEl.value,
+      instructions: instrEl.value,
+      contextTier: Math.max(0, Math.min(3, parseInt(tierEl.value, 10) || 0)),
+      textBudget: Math.max(0, parseInt(budgetEl.value, 10) || 0),
+      expectJson: !!jsonEl.checked,
+    };
+  }
+
+  const draftEqualsSnapshot = () => {
+    const d = readDraft();
+    return d.systemPrompt === snapshot.systemPrompt
+      && d.instructions === snapshot.instructions
+      && d.contextTier === snapshot.contextTier
+      && d.textBudget === snapshot.textBudget
+      && d.expectJson === snapshot.expectJson;
+  };
+
+  /** Persist the given mode's draft (#340). Returns {ok, changed} — ok:false
+   *  carries the validation error that must block save/switch. */
+  async function persist(id, { quiet = false } = {}) {
+    const draft = draftMode();
+    if (!draft.systemPrompt || !draft.instructions) {
+      return { ok: false, error: 'System prompt and instructions are required (Prompts editor).' };
+    }
+    if (!quiet && draftEqualsSnapshot()) return { ok: true, changed: false };
+    if (isBuiltin(id)) {
+      // Store only the editable knobs that differ from the base built-in.
+      const base = BUILTIN_MODES[id];
+      const ov = {};
+      for (const k of EDITABLE_MODE_FIELDS) {
+        if (draft[k] !== base[k]) ov[k] = draft[k];
+      }
+      if (Object.keys(ov).length) overrides[id] = ov;
+      else delete overrides[id];
+      await chrome.storage.local.set({ [OVERRIDES_KEY]: overrides });
+    } else {
+      customModes[id] = { ...customModes[id], ...draft, id, builtin: false };
+      await chrome.storage.local.set({ [CUSTOM_MODES_KEY]: customModes });
+    }
+    if (!quiet) flash('✅ Saved');
+    snapshot = readDraft();
+    // The override state changed — Reset's enabled-ness follows it (this
+    // replaced the old save handler's fill() refresh).
+    resetBtn.disabled = !(isBuiltin(id) && overrides[id]);
+    return { ok: true, changed: true };
   }
 
   async function load() {
@@ -634,34 +806,19 @@ function initPromptsEditor(BUILTIN_MODES, mergeOverride, EDITABLE_MODE_FIELDS, d
     fill(modeSelect.value || Object.keys(BUILTIN_MODES)[0]);
   }
 
-  modeSelect.addEventListener('change', () => fill(modeSelect.value));
-  [sysEl, instrEl, tierEl, budgetEl, jsonEl].forEach((el) => {
-    if (el) el.addEventListener('input', renderPreview);
-  });
-
-  saveBtn.addEventListener('click', async () => {
-    const id = modeSelect.value;
-    const draft = draftMode();
-    if (!draft.systemPrompt || !draft.instructions) {
-      flash('System prompt and instructions are required.', false);
+  modeSelect.addEventListener('change', async () => {
+    // #340: switching modes auto-persists the outgoing edited draft — no
+    // silent loss. A draft that fails validation blocks the switch instead.
+    const res = await persist(currentId, { quiet: true });
+    if (!res.ok) {
+      flash(res.error, false);
+      modeSelect.value = currentId; // stay on the draft that needs fixing
       return;
     }
-    if (isBuiltin(id)) {
-      // Store only the editable knobs that differ from the base built-in.
-      const base = BUILTIN_MODES[id];
-      const ov = {};
-      for (const k of EDITABLE_MODE_FIELDS) {
-        if (draft[k] !== base[k]) ov[k] = draft[k];
-      }
-      if (Object.keys(ov).length) overrides[id] = ov;
-      else delete overrides[id];
-      await chrome.storage.local.set({ [OVERRIDES_KEY]: overrides });
-    } else {
-      customModes[id] = { ...customModes[id], ...draft, id, builtin: false };
-      await chrome.storage.local.set({ [CUSTOM_MODES_KEY]: customModes });
-    }
-    flash('✅ Saved');
-    fill(id);
+    fill(modeSelect.value);
+  });
+  [sysEl, instrEl, tierEl, budgetEl, jsonEl].forEach((el) => {
+    if (el) el.addEventListener('input', renderPreview);
   });
 
   resetBtn.addEventListener('click', async () => {
@@ -674,6 +831,9 @@ function initPromptsEditor(BUILTIN_MODES, mergeOverride, EDITABLE_MODE_FIELDS, d
   });
 
   load();
+  // #340: the ONE global Save persists the editor's current draft through this
+  // hook (see the form submit handler).
+  return (opts) => persist(modeSelect.value, opts);
 }
 
 // The configured Zo API endpoint (QA finding B): Test Connection and the

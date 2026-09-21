@@ -8,6 +8,17 @@ export const ConfigSchema = z.object({
   zoModel: z.string(),
   zoSpaceEndpoint: z.string(),
   zoWebOrigin: z.string(), // Zo web UI origin; '' = Open-in-Zo off (0.2.8.0)
+  // Zo username slug (#339) — derivation source for the two hosts above; the
+  // hosts themselves stay user-overridable (override-not-rewrite).
+  zoUsername: z.string(),
+  // Jev (0.3.4 Lane J) — ships dark; thresholds are per-type (noul vs choice
+  // confidences are not comparable per the vendor's model notes).
+  jevEnabled: z.boolean(),
+  jevModel: z.string(),
+  jevPickConfidence: z.number().min(0).max(1),
+  jevDoneConfidence: z.number().min(0).max(1),
+  jevApiKey: z.string(),
+  jevApiUrl: z.string(),
   zoPersonaId: z.string(),
   zoActiveMode: z.string(),
   zoAccessToken: z.string(),

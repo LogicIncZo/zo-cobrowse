@@ -137,6 +137,14 @@ function pickScenario(input) {
     return `handoff-t${Math.min(handoffTurn, 3)}`;
   }
   if (String(input || "").includes("flaky")) return "flaky";
+  // #342 Jev fast-path scenarios: a click whose text cue deliberately misses,
+  // rescued (or not) by the Jev mock. (userRequest() lowercases — match that.)
+  const q0 = userRequest(input);
+  if (q0.includes("jev-pick-rescue")) return "jev-pick-rescue";
+  if (q0.includes("jev-pick-lowconf")) return "jev-pick-lowconf";
+  // #343: Zo plans a pick-ANNOTATED click (the marriage) — Jev resolves it.
+  if (q0.includes("jev-plan-rescue")) return "jev-plan-rescue";
+  if (q0.includes("jev-plan-lowconf")) return "jev-plan-lowconf";
   const q = userRequest(input);
   if (q.includes("schema")) return "pull-form";
   if (q.includes("workspace file")) return "pull-file";
@@ -255,6 +263,37 @@ const server = http.createServer(async (req, res) => {
   // POST, initialize returns the session id header, tools/call `bash`
   // wraps stdout in a Python-repr CmdResult with __ZO_BEGIN__/__ZO_END__
   // markers around the payload.
+  // Jev decide endpoint mock (0.3.4 Lane J) — the documented /v1/systemone
+  // shape; deterministic high-confidence answers, request recorded.
+  if (url.pathname === "/v1/systemone" && req.method === "POST") {
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    let body = {};
+    try {
+      body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+    } catch {}
+    requests.push({ ts: Date.now(), method: "POST", url: "/v1/systemone", body });
+    const answers = {};
+    for (const [id, q] of Object.entries(body.questions || {})) {
+      // #342 e2e: a goal/description tagged JEV-LOWCONF gets a deliberately
+      // below-threshold answer so the fallback arm is testable.
+      const low = JSON.stringify(q).includes("JEV-LOWCONF");
+      if (q.type === "noul") answers[id] = { type: "noul", noul: low ? 0.2 : 0.97 };
+      else if (q.type === "choice") {
+        const keys = Object.keys(q.criteria || {});
+        answers[id] = {
+          type: "choice",
+          choice: keys[0] ?? "",
+          probabilities: { [keys[0] ?? ""]: low ? 0.3 : 0.97 },
+          confidence: low ? 0.3 : 0.97,
+        };
+      } else if (q.type === "score") {
+        answers[id] = { type: "score", score: 1, confidence: 0.95 };
+      }
+    }
+    res.writeHead(200, { "content-type": "application/json", ...cors });
+    return res.end(JSON.stringify({ model: "jev-mock", answers, usage: { input_tokens: 42, output_tokens: 8 } }));
+  }
   if (url.pathname === "/mcp" && req.method === "POST") {
     const chunks = [];
     for await (const c of req) chunks.push(c);
@@ -509,6 +548,30 @@ const server = http.createServer(async (req, res) => {
     }
 
     const scenario = pickScenario(body.input);
+    if (scenario === "jev-plan-rescue" || scenario === "jev-plan-lowconf") {
+      // #343: the marriage — Zo emits the pick-annotated click itself; the
+      // executor resolves it via Jev (mock); the question carries the
+      // JEV-LOWCONF marker for the below-threshold arm.
+      const question = scenario === "jev-plan-lowconf"
+        ? "JEV-LOWCONF Which element opens the form page?"
+        : "Which element opens the form page?";
+      const env = JSON.stringify({ actions: [
+        { type: "click", pick: { question } },
+        { type: "done", response: "planned pick exercised" },
+      ]});
+      return streamSse(res, [textStart(env), completed()], { delayMs: 100 });
+    }
+    if (scenario === "jev-pick-rescue" || scenario === "jev-pick-lowconf") {
+      // #342: a click whose text cue matches NOTHING on the fixture page —
+      // the executor reports cueMiss + candidates, and the Jev fast path
+      // (mocked /v1/systemone) either rescues it or falls back by confidence.
+      const text = scenario === "jev-pick-lowconf" ? "JEV-LOWCONF Buy now" : "Buy now";
+      const env = JSON.stringify({ actions: [
+        { type: "click", text },
+        { type: "done", response: "fast path exercised" },
+      ]});
+      return streamSse(res, [textStart(env), completed()], { delayMs: 100 });
+    }
     if (scenario === "handoff-t1" || scenario === "handoff-t2") {
       // Simulated thinking time — keeps the recorded run watchable.
       await sleep(1100);

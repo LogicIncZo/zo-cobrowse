@@ -53,8 +53,9 @@ test("prompts editor override persists; Reset deletes it", async () => {
   await h.panel.locator('#settings-nav .settings-tab[data-pane="pane-prompts"]').click();
   await h.panel.locator("#prompt-mode-select").selectOption({ index: 4 }); // 🪶 Lean
   await h.panel.locator("#prompt-budget").fill("1234");
-  await h.panel.locator("#prompt-save").click();
-  await expect(h.panel.locator("#prompt-status")).not.toBeEmpty();
+  // #340: the editor has no scoped Save — the ONE global Save persists the draft.
+  await h.panel.locator("button[type=submit]").click();
+  await expect(h.panel.locator("#status-message")).toContainText("Saved");
   const override = await h.panel.evaluate(
     () => new Promise((res) => chrome.storage.local.get("cobrowse_mode_overrides", (d: any) => res(d))),
   );

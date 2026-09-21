@@ -6,6 +6,8 @@
 
 > **2026-09-20 — v0.3.3.0 UX bash:** 20-ticket UX/a11y slate (#296–#315) shipped through the zo-loop factory, one adversarial-reviewed cycle each. All gates green (verify 4/4 incl. the new i18n census, evals 24/24 cached, CI e2e 106 passed); findings queue empty; contrast + hit-target + accessible-name sweeps committed as e2e specs (`e2e/helpers/css-audit.ts`, `e2e/37`, `e2e/39`).
 
+> **2026-09-21 — v0.3.4.0 Jev + settings slate:** five lanes (#339–#343) through the zo-loop factory, one adversarial-reviewed cycle each, planned on a live comparative probe (`tests/test-prompts/probe-jev.ts`: Jev 40–74× per decision, 4/4 agreement). Two real defects caught pre-merge: CI's #309 hit-target sweep flagged the new Jev card's sub-24 controls, and the J3 review round closed the J2 raw re-execution bypass (resolved clicks now re-enter every rail). All gates green (verify 4/4, evals 24/24 cached, full local e2e 117 passed); findings queue empty. Stabilization ships as `0.3.4.N` on bug reports.
+
 | Metric | Before this round | After this round |
 |--------|-------------------|------------------|
 | `bun test` | ❌ red — 81 pass / 9 fail / 5 errors | ✅ **green — 147 pass / 0 fail** (465 expect() calls) |

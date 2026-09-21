@@ -144,6 +144,7 @@ Slate filed as detailed GitHub issues (**#46–#54**, all in the `0.9.0` milesto
 
 **0.3.2 — Zo-composed recipes SHIPPED 2026-09-19 (v0.3.2.0):** both lanes implemented and merged — [#289](https://github.com/LogicIncZo/zo-cobrowse/issues/289) C1 save-Zo-run-as-recipe (PR [#292](https://github.com/LogicIncZo/zo-cobrowse/pull/292): value-stripped executor sink, `assembleComposedDraft`, `RECIPE_COMPOSE_SAVE`, rehearsal semantics) and [#290](https://github.com/LogicIncZo/zo-cobrowse/issues/290) C2 `!recipe compose` (PR [#293](https://github.com/LogicIncZo/zo-cobrowse/pull/293): `compose` boundary mode — fills/submits refused in code, value/choice/checkpoint parks, two-producer assembly with human obs). Adversarial review: 2 rounds per lane (incl. a critical `fill_form` boundary bypass found + closed, also a pre-existing readonly hole). Spec: `docs/superpowers/specs/2026-09-19-0.3.2-slate-design.md`; guide: "Composing with Zo" in `docs/guide/recipes.md`.
 **0.3.3 — UX bash SHIPPED 2026-09-20 (v0.3.3.0):** all 20 atomic audit tickets (#296–#315) implemented and merged via PRs [#316–#335](https://github.com/LogicIncZo/zo-cobrowse/pulls) — one full zo-loop cycle each (intake → implement → verify → adversarial review → CI-gated merge). Highlights: WCAG AA contrast floors across all seven themes (committed CSS-audit walker), error cards + skip notes persisted, context-tier chip on unattended turns, same-title tab disambiguation in strip/@/manifest, 24px hit-target floor, one global focus ring, accessible-name sweep, onboarding now targets the real UI, recipe-library ⋯ overflow, i18n surface (a) + census gate (35 keys pinned in lint). Release model: one v0.3.3.0; follow-ups (i18n surfaces b–e) ship as 0.3.3.N stabilization points.
+**0.3.4 — Jev support + settings rationalization SHIPPED 2026-09-21 (v0.3.4.0):** all five lanes implemented and merged — [#339](https://github.com/LogicIncZo/zo-cobrowse/issues/339) username+token Connection pane (PR [#344](https://github.com/LogicIncZo/zo-cobrowse/pull/344): `deriveZoHosts`, Advanced override-not-rewrite, owner-default space endpoint removed), [#340](https://github.com/LogicIncZo/zo-cobrowse/issues/340) one sticky Save (PR [#345](https://github.com/LogicIncZo/zo-cobrowse/pull/345): Prompts editor folded into the global save, mode-switch auto-persists drafts), [#341](https://github.com/LogicIncZo/zo-cobrowse/issues/341) Jev foundation (PR [#346](https://github.com/LogicIncZo/zo-cobrowse/pull/346): `lib/jev.js`, per-type thresholds, ⚡ options card + `JEV_TEST`), [#342](https://github.com/LogicIncZo/zo-cobrowse/issues/342) fast path (PR [#347](https://github.com/LogicIncZo/zo-cobrowse/pull/347): done-gate + click-pick with full Zo fallback, provenance chips), [#343](https://github.com/LogicIncZo/zo-cobrowse/issues/343) the marriage (PR [#348](https://github.com/LogicIncZo/zo-cobrowse/pull/348): pick-annotated clicks via a gated prompt section, two-pass executor that re-enters every rail). Planned on a live comparative probe (Jev 40–74× per decision, 4/4 agreement; `tests/test-prompts/probe-jev.ts`); ships dark (`jevEnabled` off — default prompts byte-identical, evals 24/24 from cache). Spec: `docs/superpowers/specs/2026-09-20-0.3.4-slate-design.md`. Stabilization ships as `0.3.4.N` points on bug reports.
 
 **Build order:** memory (#46) → permissions (#47) → undo (#48) in the big lane; **recipes (#220) R1 alongside** (the owner-chartered flagship — survey + gap analysis in the issue); compare (#50) right after the 0.2.1 #10 actions half; WebMCP (#49) timeboxed anytime. (Quick wins #51–#54 moved to the 0.2.9 train on 2026-09-14; prompt-optimization lane #235–#239 moved to the 0.3.0 train on 2026-09-15.)
 
@@ -177,3 +178,32 @@ Evaluated 2026-08-28 (repo audit of both). **Decision: neither becomes a runtime
 - *Pros:* **`openapi/mcp-tools.json` is the standout asset** — a nightly-refreshed snapshot of all 93 Zo MCP tool `inputSchema`s (`bash`, `read_file`, `list_directory`, …), consumable as pure data (test fixtures, argument validation, prompt/tool-docs generation). Its nightly-sync commits double as a **free Zo-API drift canary** for our `lib/mcp.js` (live-verified 2026-08-18, but blind to server-side change). Real quality: 14 offline tests + golden files, CI, TypeDoc; useful idioms to crib (`listTools` cursor pagination, isError-as-result, OAuth 2.1+PKCE provider if we ever outgrow static tokens).
 - *Cons:* as a dependency it's a poor MV3 fit — Node ≥22 engines, GitHub-only install (git on PATH + `prepare`-hook TS compile), full MCP SDK dependency vs our 98-line zero-dep `lib/mcp.js`. Client-only (no new runtime capability — we already initialize + callTool); no output schemas so types cover request args only; `LICENSE` file is just the SPDX line.
 - *Verdict:* **drift reference** — pinned baseline `scripts/zo-drift/baseline/mcp-tools.json` (93 tool schemas) is diffed live by the `drift` CI job on every release merge; its nightly-sync commits double as a free Zo-API drift canary for our `lib/mcp.js` (live-verified 2026-08-18, but blind to server-side change). Vendor nothing else: runtime dep rejected (Node ≥22, MCP SDK, GitHub-only install). Vendoring richer checks (per-tool argument validation) only if a feature needs it.
+
+## ✅ 0.3.4 slate (Jev support + settings rationalization) — SHIPPED 2026-09-21 (v0.3.4.0)
+
+Owner intake 2026-09-20: add Jev (TypeSafe AI's "System One model" — typed decisions in
+70–500 ms, no text generation) as an opt-in fast path for agentic browsing with full Zo
+fallback; rationalize the settings Connection pane to ask just **Zo username + token**
+(three of the four current fields derive from the username slug — space endpoint =
+`https://<slug>.zo.space`, web origin = `https://<slug>.zo.computer`; the current default
+space endpoint is hard-coded to the owner's own space); and collapse the two duplicate
+Save Settings buttons + the Prompts editor's scoped save into one sticky dirty-aware save.
+Research + design: `docs/superpowers/specs/2026-09-20-0.3.4-slate-design.md` (Jev API
+contract captured from docs.typesafe.ai). Lanes, in build order:
+
+| Lane | Scope | Ticket |
+|------|-------|--------|
+| S1 | Connection pane → username + token (derived hosts, Advanced collapse, migration) | milestone 0.3.4 |
+| S2 | One save button (sticky, dirty-aware; Prompts editor folded in) | milestone 0.3.4 |
+| J1 | Jev foundation: `lib/jev.js` + config keys + options card + schema/tests | milestone 0.3.4 (after S1 — same pane) |
+| J2 | Jev fast-path: done-gate + click-choice hooks, Zo fallback, redacted state, provenance | milestone 0.3.4 (after J1) |
+| J3 | The marriage — Zo drives Jev: `click.pick {question}` protocol, in-page pick resolution with fallback ladder, code rails preserved, evals refresh | milestone 0.3.4 (after J1+J2) |
+
+J3 is owner-set scope (2026-09-20, after the live probe): when a TypeSafe key exists,
+Zo plans once and Jev carries the page-level decisions — probe-measured 40–74× per
+decision (Jev 340–512 ms vs Zo 15–36 s), 4/4 agreement, key verified live. Per-hook
+confidence thresholds are mandatory (noul vs choice confidences are not comparable per
+the vendor's model notes).
+
+Feature ships dark (default off) even though the key works; release model: one
+`v0.3.4.0` after all lanes merge; stabilization rides `0.3.4.N`.

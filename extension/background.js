@@ -12,6 +12,7 @@ import { buildPrompt } from './lib/prompt.js';
 import { shouldDowngradeToJsonDisabled } from './lib/intent.js';
 import { BUNDLED_SKILL_PATH, PROTOCOL_SKILL_PATH, SKILL_STATE_KEY, injectVersion, parseInstalledVersion } from './lib/protocol-skill.js';
 import { parseZoOutput, stripCodeFence } from './lib/parse-output.js';
+import { buildDecideRequest, parseDecideResponse, shouldAct, doneGateQuestion, matchChoiceQuestion, pickChoiceQuestion, redactStateForJev, jevDecideImpl, DEFAULT_JEV_API_URL, DEFAULT_JEV_MODEL } from './lib/jev.js';
 // safeText stays the local one (line ~156) — do NOT import it here.
 import {
   STRIP_MAX_TABS,
@@ -255,9 +256,16 @@ function safeText(v) {
 const DEFAULTS = {
   zoApiUrl: 'https://api.zo.computer/zo/ask',
   zoModel: '',
-  zoSpaceEndpoint: 'https://cashlessconsumer.zo.space',
+  // #339: no owner-specific default — empty means space-backed features are
+  // off until the user sets their Zo username (which derives this host).
+  zoSpaceEndpoint: '',
   zoPersonaId: '',          // optional: pin the persona sent to the API
   zoActiveMode: 'cobrowse', // active Mode id (replaces personaMode + presets)
+  // Jev (0.3.4 Lane J) — ships dark; jevEnabled false = zero behavioral delta.
+  jevEnabled: false,
+  jevModel: 'jev-latest',
+  jevPickConfidence: 0.8, // choice hooks (click-target picks)
+  jevDoneConfidence: 0.9, // noul hooks (done-gates) — NOT comparable to choice
   zoAccessToken: '',
   enableScreenshots: true,  // global kill-switch; per-Mode tiers also gate capture
   enableWriteAssist: true,  // textarea write-assist floating icon (content script)
@@ -338,7 +346,7 @@ try {
 
 // ---- Init ----
 chrome.storage.sync.get(
-  ['zoApiUrl', 'zoModel', 'zoPersonaId', 'zoActiveMode', 'enableScreenshots', 'enableWriteAssist', 'enabledMenus', 'cobrowse_handoff_budget', 'zoWebOrigin'],
+  ['zoApiUrl', 'zoModel', 'zoPersonaId', 'zoActiveMode', 'enableScreenshots', 'enableWriteAssist', 'enabledMenus', 'cobrowse_handoff_budget', 'zoWebOrigin', 'jevEnabled', 'jevModel', 'jevPickConfidence', 'jevDoneConfidence'],
   (result) => {
     if (result.zoApiUrl) config.zoApiUrl = result.zoApiUrl;
     if (result.zoModel) config.zoModel = result.zoModel;
@@ -352,14 +360,21 @@ chrome.storage.sync.get(
     // #233: the panel reads zoWebOrigin from GET_CONFIG — load it at startup
     // so the ↗ chip works on first open without waiting for a storage change.
     if (result.zoWebOrigin !== undefined) config.zoWebOrigin = result.zoWebOrigin;
+    // Jev knobs (0.3.4 Lane J).
+    if (result.jevEnabled !== undefined) config.jevEnabled = result.jevEnabled;
+    if (result.jevModel) config.jevModel = result.jevModel;
+    if (result.jevPickConfidence !== undefined) config.jevPickConfidence = result.jevPickConfidence;
+    if (result.jevDoneConfidence !== undefined) config.jevDoneConfidence = result.jevDoneConfidence;
   }
 );
 // Sensitive config from storage.local (not synced)
 chrome.storage.local.get(
-  ['zoAccessToken', 'zoSpaceEndpoint'],
+  ['zoAccessToken', 'zoSpaceEndpoint', 'jevApiKey', 'jevApiUrl'],
   (result) => {
     if (result.zoAccessToken) config.zoAccessToken = result.zoAccessToken;
     if (result.zoSpaceEndpoint) config.zoSpaceEndpoint = result.zoSpaceEndpoint;
+    if (result.jevApiKey) config.jevApiKey = result.jevApiKey;
+    if (result.jevApiUrl) config.jevApiUrl = result.jevApiUrl;
   }
 );
 
@@ -372,9 +387,17 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   else if (changes.zoAccessToken?.oldValue && !changes.zoAccessToken?.newValue) config.zoAccessToken = undefined;
   if (changes.zoSpaceEndpoint?.newValue) config.zoSpaceEndpoint = changes.zoSpaceEndpoint.newValue;
   else if (changes.zoSpaceEndpoint?.oldValue && !changes.zoSpaceEndpoint?.newValue) config.zoSpaceEndpoint = undefined;
+  if (changes.jevApiKey?.newValue) config.jevApiKey = changes.jevApiKey.newValue;
+  else if (changes.jevApiKey?.oldValue && !changes.jevApiKey?.newValue) config.jevApiKey = undefined;
+  if (changes.jevApiUrl?.newValue) config.jevApiUrl = changes.jevApiUrl.newValue;
     if (changes.enabledMenus?.newValue) { config.enabledMenus = { ...config.enabledMenus, ...changes.enabledMenus.newValue }; recreateContextMenus(); }
   if (changes.enableScreenshots?.newValue !== undefined) config.enableScreenshots = changes.enableScreenshots.newValue;
   if (changes.enableWriteAssist?.newValue !== undefined) config.enableWriteAssist = changes.enableWriteAssist.newValue;
+  // Jev knobs (0.3.4 Lane J) — sync side.
+  if (changes.jevEnabled?.newValue !== undefined) config.jevEnabled = changes.jevEnabled.newValue;
+  if (changes.jevModel?.newValue) config.jevModel = changes.jevModel.newValue;
+  if (changes.jevPickConfidence?.newValue !== undefined) config.jevPickConfidence = changes.jevPickConfidence.newValue;
+  if (changes.jevDoneConfidence?.newValue !== undefined) config.jevDoneConfidence = changes.jevDoneConfidence.newValue;
 });
 
 // Open side panel on toolbar icon click (global scope — takes effect on every SW wake-up).
@@ -412,6 +435,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
     case 'TEST_CONNECTION': {
       testConnection().then(sendResponse);
+      return true;
+    }
+    case 'JEV_TEST': {
+      jevTest().then(sendResponse);
       return true;
     }
     case 'GET_CONFIG': {
@@ -1454,7 +1481,7 @@ async function _askZoStreamImpl(port, msg) {
     ? await ensureProtocolSkill()
     : null;
   const establishedThread = !!loop.threadId;
-  const prompt = msg._followUpInput || buildPrompt(mode, pageContext, userQuery, { effectiveTier, ...(msg.shotOnly ? { screenshotOnly: true } : {}), tabContexts: loop.tabContexts, skills: msg.skills, workspaceFiles: msg.workspaceFiles, ...(protocolSkill ? { protocolSkill } : {}), ...(establishedThread ? { establishedThread: true } : {}) });
+  const prompt = msg._followUpInput || buildPrompt(mode, pageContext, userQuery, { effectiveTier, ...(msg.shotOnly ? { screenshotOnly: true } : {}), tabContexts: loop.tabContexts, skills: msg.skills, workspaceFiles: msg.workspaceFiles, ...(protocolSkill ? { protocolSkill } : {}), ...(establishedThread ? { establishedThread: true } : {}), jevAssist: jevReady() });
 
   try {
     const response = await fetch(config.zoApiUrl, {
@@ -2015,7 +2042,7 @@ async function askZo(pageContext, userQuery, modelName, personaId, modeId, custo
     ? await ensureProtocolSkill()
     : null;
   const threadId = msgThreadId(conversationId);
-  const prompt = buildPrompt(mode, pageContext, userQuery, { effectiveTier, ...(shotOnly ? { screenshotOnly: true } : {}), skills, workspaceFiles, ...(protocolSkill ? { protocolSkill } : {}), ...(threadId ? { establishedThread: true } : {}) });
+  const prompt = buildPrompt(mode, pageContext, userQuery, { effectiveTier, ...(shotOnly ? { screenshotOnly: true } : {}), skills, workspaceFiles, ...(protocolSkill ? { protocolSkill } : {}), ...(threadId ? { establishedThread: true } : {}), jevAssist: jevReady() });
   // Per-chat threading: the sidepanel sends the chat's stored thread id; the
   // global stays as the fallback for ambient callers (context menu, omnibox).
 
@@ -2444,16 +2471,164 @@ async function testConnection() {
     // zoOk stays false
   }
 
-  // Test 2: Zo.space endpoint
+  // Test 2: Zo.space endpoint (optional since #339 — skipped, not failed,
+  // when unconfigured)
   let spaceOk = false;
-  try {
-    const r = await fetch(config.zoSpaceEndpoint, { method: 'HEAD' });
-    spaceOk = r.ok || r.status === 301 || r.status === 302;
-  } catch {
-    // spaceOk stays false
+  if (config.zoSpaceEndpoint) {
+    try {
+      const r = await fetch(config.zoSpaceEndpoint, { method: 'HEAD' });
+      spaceOk = r.ok || r.status === 301 || r.status === 302;
+    } catch {
+      // spaceOk stays false
+    }
   }
 
   return { success: zoOk, zoApi: zoOk, zoSpace: spaceOk };
+}
+
+/** Jev connectivity probe (0.3.4 Lane J1, JEV_TEST). One noul ping against
+ *  the configured decide endpoint — proves the key + wire format work and
+ *  reports latency. Never throws; works even while jevEnabled is false so
+ *  the user can validate a key before opting in. */
+async function jevTest() {
+  if (!config.jevApiKey) {
+    return { ok: false, error: 'Jev API key not configured.' };
+  }
+  const url = config.jevApiUrl || DEFAULT_JEV_API_URL;
+  const body = buildDecideRequest({
+    model: config.jevModel || DEFAULT_JEV_MODEL,
+    state: 'Jev connectivity probe from the Zo Co-browse extension.',
+    questions: { probe: { type: 'noul', instructions: 'The state is a connectivity probe sent by a browser extension. The probe reached the model.' } },
+  });
+  const t0 = Date.now();
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    const res = await fetch(url, {
+      signal: controller.signal,
+      method: 'POST',
+      headers: { Authorization: `Bearer ${config.jevApiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    clearTimeout(timeout);
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      return { ok: false, error: `Jev endpoint returned ${res.status}${txt ? ' — ' + txt.slice(0, 140) : ''}` };
+    }
+    const parsed = parseDecideResponse(await res.json().catch(() => null));
+    if (!parsed.ok) return { ok: false, error: parsed.error };
+    return { ok: true, latencyMs: Date.now() - t0, model: parsed.model, usage: parsed.usage, answer: parsed.answers.probe || null };
+  } catch (err) {
+    const msg = err && err.name === 'AbortError' ? 'Jev request timed out after 10s.' : `Jev probe failed: ${err.message}`;
+    return { ok: false, error: msg };
+  }
+}
+
+/** Jev decide transport (0.3.4 Lane J2): the lib impl with this worker's
+ *  config + fetch; state passes through the redaction boundary so secrets
+ *  never reach TypeSafe AI. Never throws — every failure carries a reason. */
+async function jevDecide(state, questions) {
+  const r = await jevDecideImpl(
+    fetch,
+    {
+      apiUrl: config.jevApiUrl || DEFAULT_JEV_API_URL,
+      apiKey: config.jevApiKey,
+      model: config.jevModel || DEFAULT_JEV_MODEL,
+    },
+    redactStateForJev(state),
+    questions,
+  );
+  debugLog.push('jev', r.ok ? 'decide' : 'decide-fallback', r.latencyMs, r.ok ? undefined : { reason: r.reason });
+  return r;
+}
+
+/** Jev gating precheck: the fast path only exists for opted-in, keyed users. */
+function jevReady() {
+  return !!(config.jevEnabled && config.jevApiKey);
+}
+
+/** Fresh clickable-candidate inventory for the pick hooks (the Zo action path
+ *  fails without candidates; the tier-2 capture already lists clickables). */
+async function fetchClickableCandidates(tabId) {
+  try {
+    const cap = await chrome.tabs.sendMessage(tabId, { type: 'CAPTURE_CONTEXT', tier: 2 });
+    return (((cap && cap.clickable) || []))
+      .filter((c) => (c.text || '').trim())
+      .slice(0, 20)
+      .map((c) => ({ text: c.text, selector: c.selector }));
+  } catch {
+    return [];
+  }
+}
+
+/** Hook B — click-pick (#342): rescue a failed click by asking Jev which
+ *  near-miss candidate matches the planner's description. High confidence →
+ *  the winner's selector; anything else → the existing failure (and its
+ *  healer/handoff path) stands untouched. */
+async function jevPickClickTarget(action, candidates) {
+  const description = safeText(action.text || action.cue || '').slice(0, 120);
+  if (!description) return { ok: false, reason: 'no description to match' };
+  const labeled = candidates.map((c, i) => ({ id: `c${i}`, label: safeText(c.text || c.question || '').slice(0, 60) }));
+  if (!labeled.some((c) => c.label)) return { ok: false, reason: 'no labeled candidates' };
+  const r = await jevDecide({ url: '', title: '', candidates: labeled }, matchChoiceQuestion(description, labeled));
+  if (!r.ok) return { ok: false, reason: r.reason };
+  const ans = r.answers.target;
+  const idx = Number(String(ans && ans.choice || '').replace(/^c/, ''));
+  const conf = ans && typeof ans.confidence === 'number'
+    ? ans.confidence
+    : (ans && ans.probabilities ? (ans.probabilities[ans.choice] ?? 0) : 0);
+  if (!shouldAct(conf, config.jevPickConfidence)) {
+    return { ok: false, reason: `low confidence (${Number(conf).toFixed(2)} < ${config.jevPickConfidence})`, latencyMs: r.latencyMs };
+  }
+  const winner = candidates[idx];
+  if (!winner || !winner.selector) return { ok: false, reason: 'picked candidate has no selector', latencyMs: r.latencyMs };
+  return { ok: true, selector: winner.selector, question: description, confidence: conf, latencyMs: r.latencyMs };
+}
+
+/** Lane J3 — resolve a pick-ANNOTATED click ({type:'click', pick:{question}}):
+ *  fresh candidate inventory → Jev choice over the planner's own question →
+ *  the winner's selector. The caller re-enters the executor with the concrete
+ *  click so every rail (sensitive/backstop/boundary) runs on it. */
+async function jevResolvePick(action, tabId) {
+  const question = safeText(action.pick && action.pick.question || '').slice(0, 200);
+  if (!question) return { ok: false, reason: 'empty pick question' };
+  const candidates = await fetchClickableCandidates(tabId);
+  if (!candidates.length) return { ok: false, reason: 'no clickable candidates found' };
+  const labeled = candidates.map((c, i) => ({ id: `c${i}`, label: safeText(c.text).slice(0, 60) }));
+  const r = await jevDecide({ url: '', title: '', candidates: labeled }, pickChoiceQuestion(question, labeled));
+  if (!r.ok) return { ok: false, reason: r.reason };
+  const ans = r.answers.target;
+  const idx = Number(String(ans && ans.choice || '').replace(/^c/, ''));
+  const conf = ans && typeof ans.confidence === 'number'
+    ? ans.confidence
+    : (ans && ans.probabilities ? (ans.probabilities[ans.choice] ?? 0) : 0);
+  if (!shouldAct(conf, config.jevPickConfidence)) {
+    return { ok: false, reason: `low confidence (${Number(conf).toFixed(2)} < ${config.jevPickConfidence})`, latencyMs: r.latencyMs };
+  }
+  const winner = candidates[idx];
+  if (!winner || !winner.selector) return { ok: false, reason: 'picked candidate has no selector', latencyMs: r.latencyMs };
+  return { ok: true, selector: winner.selector, question, confidence: conf, latencyMs: r.latencyMs };
+}
+
+/** Hook A — done-gate (#342): is the run's goal ALREADY satisfied on the page
+ *  the fresh capture just saw? A confident yes (noul ≥ jevDoneConfidence)
+ *  completes the run without the continuation's Zo round-trip; low confidence
+ *  or any failure returns false and the chain proceeds exactly as before. */
+async function jevDoneGate(run, pageContext) {
+  const goal = safeText(run && run.goal || '').slice(0, 300);
+  if (!goal || !pageContext) return null;
+  const gate = await jevDecide(
+    {
+      url: safeText(pageContext.url || ''),
+      title: safeText(pageContext.title || ''),
+      pageText: safeText(pageContext.visibleText || '').replace(/\s+/g, ' ').trim().slice(0, 800),
+    },
+    doneGateQuestion(goal),
+  );
+  if (!gate.ok) return null;
+  const noul = gate.answers.goal_done && gate.answers.goal_done.noul;
+  if (typeof noul !== 'number' || !shouldAct(noul, config.jevDoneConfidence)) return null;
+  return { noul, latencyMs: gate.latencyMs };
 }
 
 
@@ -2733,6 +2908,25 @@ async function handoffChainNextTurn(runId) {
   try {
     pageContext = await getActiveTabContext(run.tabId, captureTier, msg.modeId);
   } catch { /* capture failed — Zo can still pull (read_page) */ }
+
+  // Hook A (#342): before spending a Zo turn on the continuation, ask the
+  // fast path whether the goal is ALREADY satisfied on this page. A confident
+  // yes completes the run — no Zo round-trip. Compose runs skip the gate:
+  // their completion is Zo's done() + the save/rehearsal flow. Low confidence
+  // or any Jev failure chains the Zo turn exactly as before.
+  if (!run.compose && jevReady() && pageContext) {
+    const gate = await jevDoneGate(run, pageContext);
+    if (gate) {
+      const t = handoffTransition(run, 'complete', {
+        now: Date.now(),
+        reason: `⚡ Jev done-gate: goal already complete (noul ${gate.noul.toFixed(2)}, ${gate.latencyMs}ms) — no Zo turn spent`,
+      });
+      handoffTurnCtx.delete(runId);
+      await handoffPut(t.ok ? t.run : run);
+      return;
+    }
+  }
+
   const turnMsg = handoffContinuationPayload(msg, {
     sessionId: `${msg.sessionId}-h${run.usage.turns + 1}-${Date.now() % 100000}`,
     // Thread continuity: turn 1's conversation_id echo (the ambient global,
@@ -4048,103 +4242,170 @@ async function executeActions(actions, tabId, opts = {}) {
       continue;
     }
 
-    // Submit backstop (#26): on a page the gate flagged sensitive, a click on
-    // a form's submit/pay control is refused - the user reviews and submits.
-    // Prompt-side rule alone can be ignored by the model; this cannot.
-    if (opts.sensitive && action.type === 'click') {
-      const probe = await probeClickTarget(tabId, action.selector);
-      if (isSensitiveSubmitProbe(probe)) {
-        // #163: on a handoff run the refusal is a PARK, not a failure — the
-        // user still performs it from the review card, so it must reach the
-        // run's park log / "Parked for the user" count like any boundary stop.
-        results.push({
-          ok: false, type: 'click', blocked: true,
-          ...(opts.boundaryMode ? { handoffParked: true, action } : {}),
-          error: 'blocked submit on sensitive page - review and submit yourself',
-        });
-        continue;
+    // #343 (Lane J3): up to TWO passes per action. Pass 0 runs the action as
+    // planned — or, for a pick-annotated click, resolves the pick first. Pass
+    // 1 runs the RESOLVED concrete click. The second pass re-enters EVERY
+    // rail below — a Jev resolution never bypasses the sensitive probe, the
+    // post-fill backstop, or the boundary gate.
+    let current = action;
+    let jevMeta = null; // provenance when a Jev resolution served this action
+    let parked = null;  // set when the pick ladder gives up → pre-built result
+    let result;
+    const MAX_PASSES = 2;
+    for (let pass = 0; pass < MAX_PASSES; pass++) {
+      // Pass 0 only: resolve a pick-annotated click into a concrete one.
+      if (pass === 0 && current.type === 'click' && current.pick) {
+        if (!jevReady()) {
+          // Pick vocabulary without the fast path: degrade honestly — click
+          // a co-declared selector, else refuse with the reason.
+          if (!current.selector) {
+            parked = { ok: false, type: 'click', error: 'pick requested but the Jev fast path is off — re-ask with a concrete selector' };
+            break;
+          }
+          current = { type: 'click', selector: current.selector };
+        } else {
+          const resolved = await jevResolvePick(current, tabId);
+          if (resolved.ok) {
+            jevMeta = { picked: true, question: resolved.question, confidence: resolved.confidence, latencyMs: resolved.latencyMs };
+            current = { type: 'click', selector: resolved.selector };
+          } else {
+            // Ladder step 2/3: low confidence or transport error. On a run
+            // the step PARKS (the next Zo continuation re-plans with the
+            // capture; siblings keep going); a plain chat shows the failed
+            // card and the user re-asks.
+            const note = `Jev could not resolve the click (${resolved.reason}) — click it yourself or re-ask`;
+            if (opts.boundaryMode) {
+              parked = { ok: false, type: 'click', blocked: true, handoffParked: true, action, error: note, jev: { fallback: resolved.reason } };
+              break;
+            }
+            result = { ok: false, type: 'click', error: note, jev: { fallback: resolved.reason } };
+            break;
+          }
+        }
       }
-    }
 
-    // Co-browse contract (user rule): once Zo has filled a form on this page,
-    // it never clicks ANY action button (submit/OK/Next/Continue/Create/…) —
-    // the user reviews and clicks. Links stay allowed (navigation ≠ form
-    // action). The entry clears when the tab navigates elsewhere. Recipe
-    // steps (opts.recipe, #220) are exempt: a declared click was authored
-    // deliberately — the sensitive-page probe below still guards submits.
-    if (action.type === 'click' && filledPages.has(tabId)) {
-      let currentUrl = '';
-      try { currentUrl = (await chrome.tabs.get(tabId)).url || ''; } catch { /* tab gone */ }
-      if (currentUrl && currentUrl !== filledPages.get(tabId)) {
-        filledPages.delete(tabId); // navigated away - the contract is satisfied
-      } else if (currentUrl && !opts.recipe) {
-        const probe = await probeClickTarget(tabId, action.selector);
-        const isActionButton = probe && (
-          probe.tag === 'button' ||
-          (probe.tag === 'input' && (probe.type === 'submit' || probe.type === 'button')) ||
-          probe.role === 'button');
-        if (isActionButton) {
-          results.push({
+      // Submit backstop (#26): on a page the gate flagged sensitive, a click on
+      // a form's submit/pay control is refused - the user reviews and submits.
+      // Prompt-side rule alone can be ignored by the model; this cannot.
+      if (opts.sensitive && current.type === 'click') {
+        const probe = await probeClickTarget(tabId, current.selector);
+        if (isSensitiveSubmitProbe(probe)) {
+          // #163: on a handoff run the refusal is a PARK, not a failure — the
+          // user still performs it from the review card, so it must reach the
+          // run's park log / "Parked for the user" count like any boundary stop.
+          parked = {
             ok: false, type: 'click', blocked: true,
             ...(opts.boundaryMode ? { handoffParked: true, action } : {}),
-            error: 'blocked action-button click after a form fill - review the page and click it yourself',
-          });
-          continue;
+            error: 'blocked submit on sensitive page - review and submit yourself',
+          };
+          break;
         }
       }
-    }
 
-    // Handoff boundary (Lane E): readonly/no-submit/compose runs PARK
-    // interactive actions instead of executing them — the user performs them
-    // later from the review card. Push + continue: parking must not stop
-    // sibling actions. isFillish covers fill_form too (review F1: the
-    // canonical batch-fill shape must not bypass the compose/no-submit gate).
-    if (opts.boundaryMode && (action.type === 'click' || handoffIsFillish(action))) {
-      const verdict = handoffCheckBoundary(action, opts.boundaryMode);
-      if (!verdict.allowed) {
-        results.push({ ok: false, type: action.type, blocked: true, handoffParked: true, action, error: verdict.reason });
-        continue;
-      }
-    }
-
-    let result;
-
-    // Path 1: Debugger eval (fastest, works even if content script not loaded)
-    if (action.selector || action.type === 'scroll') {
-      try {
-        const resp = await evalInPage(tabId, makeActionEval(action), 8000);
-        if (resp.ok && resp.value && resp.value.ok) {
-          result = resp.value;
+      // Co-browse contract (user rule): once Zo has filled a form on this page,
+      // it never clicks ANY action button (submit/OK/Next/Continue/Create/…) —
+      // the user reviews and clicks. Links stay allowed (navigation ≠ form
+      // action). The entry clears when the tab navigates elsewhere. Recipe
+      // steps (opts.recipe, #220) are exempt: a declared click was authored
+      // deliberately — the sensitive-page probe below still guards submits.
+      if (current.type === 'click' && filledPages.has(tabId)) {
+        let currentUrl = '';
+        try { currentUrl = (await chrome.tabs.get(tabId)).url || ''; } catch { /* tab gone */ }
+        if (currentUrl && currentUrl !== filledPages.get(tabId)) {
+          filledPages.delete(tabId); // navigated away - the contract is satisfied
+        } else if (currentUrl && !opts.recipe) {
+          const probe = await probeClickTarget(tabId, current.selector);
+          const isActionButton = probe && (
+            probe.tag === 'button' ||
+            (probe.tag === 'input' && (probe.type === 'submit' || probe.type === 'button')) ||
+            probe.role === 'button');
+          if (isActionButton) {
+            parked = {
+              ok: false, type: 'click', blocked: true,
+              ...(opts.boundaryMode ? { handoffParked: true, action } : {}),
+              error: 'blocked action-button click after a form fill - review the page and click it yourself',
+            };
+            break;
+          }
         }
-      } catch {
-        // debugger not available — fall through
       }
+
+      // Handoff boundary (Lane E): readonly/no-submit/compose runs PARK
+      // interactive actions instead of executing them — the user performs them
+      // later from the review card. Push + continue: parking must not stop
+      // sibling actions. isFillish covers fill_form too (review F1: the
+      // canonical batch-fill shape must not bypass the compose/no-submit gate).
+      if (opts.boundaryMode && (current.type === 'click' || handoffIsFillish(current))) {
+        const verdict = handoffCheckBoundary(current, opts.boundaryMode);
+        if (!verdict.allowed) {
+          parked = { ok: false, type: current.type, blocked: true, handoffParked: true, action: current, error: verdict.reason };
+          break;
+        }
+      }
+
+      result = undefined;
+
+      // Path 1: Debugger eval (fastest, works even if content script not loaded)
+      if (current.selector || current.type === 'scroll') {
+        try {
+          const resp = await evalInPage(tabId, makeActionEval(current), 8000);
+          if (resp.ok && resp.value && resp.value.ok) {
+            result = resp.value;
+          }
+        } catch {
+          // debugger not available — fall through
+        }
+      }
+
+      // Path 2: Content script
+      if (!result) {
+        try {
+          const resp = await chrome.tabs.sendMessage(tabId, { type: 'EXECUTE_ACTION', action: current });
+          result = resp || { ok: false, error: 'no response' };
+        } catch {
+          result = null;
+        }
+      }
+
+      // Path 3: executeScript fallback
+      if (!result) {
+        try {
+          const [r] = await chrome.scripting.executeScript({ target: { tabId }, func: executeDomAction, args: [current] });
+          result = r.result;
+        } catch (err) {
+          result = { ok: false, error: err.message };
+        }
+      }
+
+      // Hook B (#342, pass 0 only): a failed CLICK — not-found, empty or
+      // invalid selector, cue-ladder miss — gets ONE Jev pick among the
+      // page's clickable candidates. Confidence ≥ jevPickConfidence → the
+      // winner becomes the concrete click and pass 1 re-enters every rail.
+      // Blocked results never reach here (they break above).
+      if (pass === 0 && result && !result.ok && current.type === 'click' && jevReady()) {
+        const candidates = (Array.isArray(result.candidates) && result.candidates.length)
+          ? result.candidates
+          : await fetchClickableCandidates(tabId);
+        if (candidates.length) {
+          const pick = await jevPickClickTarget(current, candidates);
+          if (pick.ok && pick.selector) {
+            jevMeta = { picked: true, question: pick.question, confidence: pick.confidence, latencyMs: pick.latencyMs };
+            current = { type: 'click', selector: pick.selector };
+            continue; // pass 1: rails + execution on the resolved click
+          }
+          result = { ...result, jev: { fallback: pick.reason || 'unavailable' } };
+        }
+      }
+      if (jevMeta && result) result = { ...result, jev: jevMeta };
+      break;
     }
 
-    // Path 2: Content script
-    if (!result) {
-      try {
-        const resp = await chrome.tabs.sendMessage(tabId, { type: 'EXECUTE_ACTION', action });
-        result = resp || { ok: false, error: 'no response' };
-      } catch {
-        result = null;
-      }
-    }
-
-    // Path 3: executeScript fallback
-    if (!result) {
-      try {
-        const [r] = await chrome.scripting.executeScript({ target: { tabId }, func: executeDomAction, args: [action] });
-        result = r.result;
-      } catch (err) {
-        result = { ok: false, error: err.message };
-      }
-    }
-
-    results.push(result);
-    if (!result?.ok) break;
+    results.push(parked || result);
+    const finalResult = parked || result;
+    if (parked) continue; // parks never stop sibling actions (#163)
+    if (!finalResult?.ok) break;
     // Arm the post-fill action-button contract for this page.
-    if ((action.type === 'fill' || action.type === 'fill_form') && result.ok) {
+    if ((action.type === 'fill' || action.type === 'fill_form') && finalResult.ok) {
       try {
         const tab = await chrome.tabs.get(tabId);
         if (tab?.url) filledPages.set(tabId, tab.url);
@@ -4814,7 +5075,12 @@ async function runDuckdbQuery(naturalQuery) {
   if (!config.zoAccessToken) {
     return { ok: false, error: 'Zo access token not configured.' };
   }
-  const endpoint = config.zoSpaceEndpoint || 'https://cashlessconsumer.zo.space';
+  // #339: the space endpoint is user-derived (Zo username) and optional —
+  // report honestly instead of querying someone else's space.
+  if (!config.zoSpaceEndpoint) {
+    return { ok: false, error: 'Zo.space endpoint not configured — set your Zo username in Settings → Connection.' };
+  }
+  const endpoint = config.zoSpaceEndpoint;
   try {
     const resp = await fetch(`${endpoint}/api/cobrowse/query`, {
       method: 'POST',
