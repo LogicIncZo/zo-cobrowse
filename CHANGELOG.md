@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.3.4.1] — 2026-09-22
+
+### Fixed — compose creator stabilization 1 (#351, PR #352)
+
+Diagnosed from a real `!recipe compose file an RTI` run (4.3-minute turn at tier 0): the sticky DOM toggle capped the compose priming turn to a URL-only pointer, Zo drove blind — fetching pages itself, reading the protocol skill via `read_file` (came back polluted with workspace index content), and reconstructing the action grammar from repo scrapes. The compose bang also double-added the user bubble.
+
+- **Run-priming turns bypass the sticky DOM cap** — compose and handoff priming sends attach the Mode's full context regardless of the toggle; the prompt inspector mirrors it (preview parity). Manual chats keep the cap — token discipline stays the user's call.
+- **Compose turns keep the FULL action tail** (`noSlimTail`) — no slim "go read the skill" pointer, so a polluted/failed workspace read mid-compose can't happen; the grammar rides in-prompt. Panel preview mirrors.
+- **Single user bubble** for the compose bang (the standard send path already renders it).
+- **Compose continuations clamp capture to tier ≥ 2** — parks and cue re-planning always see elements + forms.
+
+Tests: 1519 unit/integration across 64 files; e2e gate added (`e2e/27-recipe-compose.spec.ts`: DOM off + compose → the priming ask carries `## Elements`, one user bubble).
+
 ## [0.3.4.0] — 2026-09-21
 
 ### Added — Jev support + settings rationalization (0.3.4 slate: #339–#343, PRs #344–#348)
