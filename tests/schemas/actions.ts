@@ -9,10 +9,19 @@ export const NavigateAction = z.object({
   url: z.string().url(),
 });
 
-export const ClickAction = z.object({
-  type: z.literal("click"),
-  selector: z.string().min(1),
-});
+export const ClickAction = z.union([
+  z.object({
+    type: z.literal("click"),
+    selector: z.string().min(1),
+  }),
+  // #343 (Lane J3): the pick-annotated click — Zo delegates an ambiguous
+  // target to Jev with its own literal question; resolved in-page with full
+  // confidence routing, then re-entered through every executor rail.
+  z.object({
+    type: z.literal("click"),
+    pick: z.object({ question: z.string().min(1) }),
+  }),
+]);
 
 export const FillAction = z.object({
   type: z.literal("fill"),
@@ -91,20 +100,25 @@ export const RecipeStepAction = z.object({
   dataB64: z.string().optional(),
 });
 
-export const Action = z.discriminatedUnion("type", [
-  NavigateAction,
+// ClickAction is a union (selector OR #343 pick) and zod v4 rejects two
+// discriminated members sharing "click" — so the click union sits OUTSIDE a
+// discriminated union over every other action type.
+export const Action = z.union([
   ClickAction,
-  FillAction,
-  FillFormAction,
-  ExtractAction,
-  ScrollAction,
-  WaitAction,
-  DoneAction,
-  ReadTabAction,
-  ReadPageAction,
-  GetDomAction,
-  GetFormAction,
-  RecipeStepAction,
+  z.discriminatedUnion("type", [
+    NavigateAction,
+    FillAction,
+    FillFormAction,
+    ExtractAction,
+    ScrollAction,
+    WaitAction,
+    DoneAction,
+    ReadTabAction,
+    ReadPageAction,
+    GetDomAction,
+    GetFormAction,
+    RecipeStepAction,
+  ]),
 ]);
 
 export const ActionArray = z.array(Action);

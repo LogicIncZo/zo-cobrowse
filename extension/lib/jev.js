@@ -112,6 +112,22 @@ export function matchChoiceQuestion(description, candidates) {
   };
 }
 
+/** Pick-annotated click question (Lane J3): Zo's OWN question over the
+ *  candidate list — the planner phrases the judgment, Jev answers it. */
+export function pickChoiceQuestion(question, candidates) {
+  const list = (candidates || [])
+    .filter((c) => c && c.id != null && (c.label || '').trim())
+    .slice(0, MAX_CHOICE_OPTIONS);
+  if (!list.length) throw new Error('jev: pickChoiceQuestion needs at least one labeled candidate');
+  return {
+    target: {
+      type: 'choice',
+      instructions: `The state lists candidate elements from the web page the user is viewing. ${question}`,
+      criteria: Object.fromEntries(list.map((c) => [String(c.id), String(c.label).trim()])),
+    },
+  };
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Transport — pure, fetch injected so tests exercise it directly (the

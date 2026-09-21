@@ -117,4 +117,59 @@ test.describe("jev fast path (#342)", () => {
       await h.context.close();
     }
   });
+
+  test("plan pick (#343): Zo's pick-annotated click resolves in-page and executes", async () => {
+    const h: ExtensionHarness = await openHarness({ freshProfile: true, sitePath: "/" });
+    try {
+      await seedJev(h.serviceWorker, true);
+      await clearRecordedRequests();
+      await sendQuery(h.panel, "jev-plan-rescue open the form page");
+      // The resolved winner (first candidate) opens the form page — the
+      // planner never named a selector; Jev picked it in-page.
+      await h.site.waitForURL(/form\.html/, { timeout: 20_000 });
+      await expect(h.panel.locator("#action-run")).toContainText("⚡ Jev pick (conf 0.97", { timeout: 10_000 });
+    } finally {
+      await h.context.close();
+    }
+  });
+
+  test("plan pick at low confidence parks the step honestly (#343)", async () => {
+    const h: ExtensionHarness = await openHarness({ freshProfile: true, sitePath: "/" });
+    try {
+      await seedJev(h.serviceWorker, true);
+      await clearRecordedRequests();
+      await sendQuery(h.panel, "jev-plan-lowconf open the form page");
+      await h.panel.waitForTimeout(4000);
+      // Below threshold → the step parks: the page is untouched and the
+      // honest reason lands in the chat.
+      expect(h.site.url()).not.toContain("form.html");
+      await expect(h.panel.locator("#messages")).toContainText("Jev could not resolve the click", { timeout: 10_000 });
+      await expect(h.panel.locator("#action-run")).toContainText("⚡ Jev fallback", { timeout: 10_000 });
+    } finally {
+      await h.context.close();
+    }
+  });
+
+  test("prompt inspector shows the Jev section exactly when enabled (#343)", async () => {
+    const h: ExtensionHarness = await openHarness({ freshProfile: true, sitePath: "/" });
+    try {
+      const poke = () => h.panel.evaluate(() => {
+        const i = document.querySelector("#query-input");
+        if (i) {
+          i.value = "probe";
+          i.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+      });
+      // Off by default: no section in the preview.
+      await poke();
+      await h.panel.waitForTimeout(600);
+      await expect(h.panel.locator("#prompt-preview")).not.toContainText("Jev-Assisted Steps");
+      // Enabled + keyed: the section appears (preview parity with the wire).
+      await seedJev(h.serviceWorker, true);
+      await poke();
+      await expect(h.panel.locator("#prompt-preview")).toContainText("Jev-Assisted Steps", { timeout: 10_000 });
+    } finally {
+      await h.context.close();
+    }
+  });
 });

@@ -299,6 +299,12 @@ async function finishInit() {
       if (changes.zoWebOrigin) {
         config.zoWebOrigin = changes.zoWebOrigin.newValue || '';
       }
+      // #343: the inspector's Jev section follows the opt-in live — a key
+      // saved in Settings (local) or the toggle (sync) re-renders the preview
+      // so it never disagrees with what the background will send.
+      if (changes.jevEnabled) config.jevEnabled = !!changes.jevEnabled.newValue;
+      if (changes.jevApiKey) config.jevApiKey = changes.jevApiKey.newValue || '';
+      if (changes.jevEnabled || changes.jevApiKey) renderPromptInspector();
     });
     chrome.runtime.onMessage.addListener((msg) => {
       if (msg.type === 'PENDING_ZO_QUERY' && msg.text) {
@@ -2023,6 +2029,9 @@ async function renderPromptInspector() {
     skills: pickedSkills,
     workspaceFiles: pickedFiles,
     ...(skillState ? { protocolSkill: skillState } : {}),
+    // #343: preview parity — the Jev section shows in the inspector exactly
+    // when the background would send it.
+    jevAssist: !!(config.jevEnabled && config.jevApiKey),
   });
 
   summary.textContent = `🔎 Prompt preview · ~${described.approxTokens} tokens`;
