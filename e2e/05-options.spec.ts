@@ -133,9 +133,11 @@ test.describe("options page", () => {
       await instr.fill("E2E INSTRUCTIONS MARKER");
       await expect(pre).toContainText("E2E INSTRUCTIONS MARKER", { timeout: 5_000 });
 
-      // Save persists a sparse override (original built-ins untouched)
-      await page.click("#prompt-save");
-      await expect(page.locator("#prompt-status")).toContainText(/saved/i, { timeout: 5_000 });
+      // Save persists a sparse override (original built-ins untouched).
+      // (#340: the editor has no scoped Save — the ONE global Save persists
+      // the draft.)
+      await page.click("button[type=submit]");
+      await expect(page.locator("#status-message")).toContainText("Saved", { timeout: 5_000 });
       const stored = await serviceWorker.evaluate(() =>
         new Promise((r) => chrome.storage.local.get("cobrowse_mode_overrides", (v) => r(v.cobrowse_mode_overrides))),
       );
@@ -148,6 +150,37 @@ test.describe("options page", () => {
         new Promise((r) => chrome.storage.local.get("cobrowse_mode_overrides", (v) => r(v.cobrowse_mode_overrides))),
       );
       expect(afterReset ?? {}).toEqual({});
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("one save (#340): a single sticky Save from any tab; mode switch persists the outgoing draft", async () => {
+    const { context, extensionId, serviceWorker } = await launchExtension({ freshProfile: true });
+    try {
+      await seedExtensionConfig(serviceWorker);
+      const page = await context.newPage();
+      await page.goto(`chrome-extension://${extensionId}/options.html`);
+
+      // Exactly ONE submit button exists, and it is visible from a tab far
+      // from the bottom of the page (sticky bar).
+      expect(await page.locator("button[type=submit]").count()).toBe(1);
+      await page.click(`#settings-nav .settings-tab[data-pane="pane-features"]`);
+      await expect(page.locator("button[type=submit]")).toBeVisible();
+
+      // Prompts editor: an edited draft persists on MODE SWITCH (no silent
+      // loss) — the override lands without any explicit save.
+      await page.click(`#settings-nav .settings-tab[data-pane="pane-prompts"]`);
+      const pre = page.locator("#prompt-preview-pre");
+      await expect(pre).toContainText("You are Zo", { timeout: 10_000 });
+      await page.locator("#prompt-instructions").fill("SWITCH-PERSIST MARKER");
+      await page.locator("#prompt-mode-select").selectOption({ index: 1 });
+      const stored = await serviceWorker.evaluate(
+        () => new Promise((r) => chrome.storage.local.get("cobrowse_mode_overrides", (v) => r(v.cobrowse_mode_overrides))),
+      );
+      expect(JSON.stringify(stored ?? {})).toContain("SWITCH-PERSIST MARKER");
+      // The newly-selected mode is now shown (the switch completed).
+      await expect(page.locator("#prompt-mode-select")).not.toHaveValue("cobrowse");
     } finally {
       await context.close();
     }

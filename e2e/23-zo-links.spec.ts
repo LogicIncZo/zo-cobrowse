@@ -93,12 +93,12 @@ test.describe("zo-links (0.2.8.0)", () => {
     // #339: the endpoint fields now live inside the Advanced details — open it.
     await page.locator("#connection-advanced summary").click();
     await page.locator("#zo-web-origin").fill("ftp://example.com");
-    await page.locator("#card-connection button[type=submit]").click();
+    await page.locator("button[type=submit]").click();
     await expect(page.locator("#status-message")).toContainText("Zo Web Origin");
 
     // Valid value saves (token is pre-seeded by the harness).
     await page.locator("#zo-web-origin").fill("https://cashlessconsumer.zo.computer");
-    await page.locator("#card-connection button[type=submit]").click();
+    await page.locator("button[type=submit]").click();
     await expect(page.locator("#status-message")).toContainText("Saved");
     const stored = await page.evaluate(
       () =>
