@@ -290,6 +290,17 @@
       background: var(--bg-deep);
       border-top: 1px solid var(--border-soft);
     }
+    /* ── #309 floor: the Jev card's native checkbox + number inputs measure
+       sub-24 by default — size them to the hit-target floor. ── */
+    #card-jev input[type="checkbox"] {
+      width: 24px;
+      height: 24px;
+      accent-color: var(--amber);
+    }
+    #card-jev input[type="number"] {
+      min-height: 26px;
+      min-width: 64px;
+    }
   </style>
 </head>
 <body>
