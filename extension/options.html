@@ -301,9 +301,15 @@
 
   <form id="settings-form">
     <div class="tab-pane" id="pane-connection">
-    <!-- ── Connection ── -->
+    <!-- ── Connection (#339: username + token; endpoints derive from the
+         username slug and live under Advanced) ── -->
     <div class="card card-wide" id="card-connection">
       <h2>🔌 Connection</h2>
+      <div class="field-group">
+        <label for="zo-username">Zo Username</label>
+        <input type="text" id="zo-username" placeholder="your-zo-slug" autocomplete="off" spellcheck="false" />
+        <p class="desc" style="margin-top:4px;">Your Zo slug — the name in <code>https://<em>slug</em>.zo.space</code> and <code>https://<em>slug</em>.zo.computer</code>. Fills in both hosts below; override them under Advanced only if yours differ.</p>
+      </div>
       <div class="field-group">
         <label for="access-token">Zo Access Token</label>
         <div class="token-row">
@@ -311,19 +317,23 @@
           <button type="button" id="token-toggle" class="token-toggle" title="Show token">Show</button>
         </div>
       </div>
-      <div class="field-group">
-        <label for="api-endpoint">API Endpoint</label>
-        <input type="url" id="api-endpoint" placeholder="https://api.zo.computer/zo/ask" />
-      </div>
-      <div class="field-group">
-        <label for="space-endpoint">Zo.space Endpoint</label>
-        <input type="url" id="space-endpoint" placeholder="https://cashlessconsumer.zo.space" />
-      </div>
-      <div class="field-group">
-        <label for="zo-web-origin">Zo Web Origin</label>
-        <input type="url" id="zo-web-origin" placeholder="https://cashlessconsumer.zo.computer" />
-        <p class="desc">The host of your Zo chat URL — e.g. <code>https://cashlessconsumer.zo.computer</code>. Enables the <code>#con_…</code> copy chip and "Open in Zo" links in the panel. Empty = off.</p>
-      </div>
+      <details id="connection-advanced" style="margin-bottom:12px;">
+        <summary style="cursor:pointer;font-size:12px;color:var(--text-muted);">Advanced — endpoints (derived from your username)</summary>
+        <div class="field-group" style="margin-top:10px;">
+          <label for="api-endpoint">API Endpoint</label>
+          <input type="url" id="api-endpoint" placeholder="https://api.zo.computer/zo/ask" />
+        </div>
+        <div class="field-group">
+          <label for="space-endpoint">Zo.space Endpoint</label>
+          <input type="url" id="space-endpoint" placeholder="https://your-slug.zo.space" />
+          <p class="desc" style="margin-top:4px;">Optional. Powers the space-backed data queries; empty = those features stay off.</p>
+        </div>
+        <div class="field-group">
+          <label for="zo-web-origin">Zo Web Origin</label>
+          <input type="url" id="zo-web-origin" placeholder="https://your-slug.zo.computer" />
+          <p class="desc">The host of your Zo chat URL. Enables the <code>#con_…</code> copy chip and "Open in Zo" links in the panel. Empty = off.</p>
+        </div>
+      </details>
       <div class="btn-row">
         <button type="button" id="test-btn" class="btn btn-primary">Test Connection</button>
         <button type="submit" class="btn">Save Settings</button>

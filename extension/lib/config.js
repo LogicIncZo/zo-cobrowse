@@ -19,6 +19,10 @@ export const STORAGE = {
   // CUSTOM_MODES — intentionally NOT in DEFAULTS.
   MODE_OVERRIDES: 'cobrowse_mode_overrides',
   SPACE_ENDPOINT: 'zoSpaceEndpoint',
+  // Zo username slug (#339) — the one user-known fact the derived hosts come
+  // from: https://<slug>.zo.space + https://<slug>.zo.computer. Non-sensitive
+  // (a name, not a credential); rides storage.sync.
+  ZO_USERNAME: 'zoUsername',
   ENABLE_SCREENSHOTS: 'enableScreenshots',
   ENABLE_WRITE_ASSIST: 'enableWriteAssist',
   ENABLED_MENUS: 'enabledMenus',
@@ -40,7 +44,11 @@ export const STORAGE = {
 export const DEFAULTS = {
   [STORAGE.API_URL]: 'https://api.zo.computer/zo/ask',
   [STORAGE.MODEL]: '',
-  [STORAGE.SPACE_ENDPOINT]: 'https://cashlessconsumer.zo.space',
+  // No owner-specific default (#339): an empty space endpoint means the
+  // space-backed features degrade with a "set your Zo username" hint until
+  // the user configures one — never silently inherit someone else's space.
+  [STORAGE.SPACE_ENDPOINT]: '',
+  [STORAGE.ZO_USERNAME]: '',
   [STORAGE.PERSONA_ID]: '',
   [STORAGE.ACTIVE_MODE]: 'cobrowse',
   [STORAGE.ENABLE_SCREENSHOTS]: true,
@@ -57,6 +65,24 @@ export const DEFAULTS = {
 };
 
 const SENSITIVE_KEYS = new Set([STORAGE.TOKEN, STORAGE.SPACE_ENDPOINT]);
+
+// Zo username slug shape: lowercase DNS-label-ish (letters/digits/hyphens,
+// no leading/trailing hyphen, ≤63 chars) — the same class of name zo.space
+// and zo.computer hand out. Kept permissive on purpose: validation rejects
+// typos, it does not try to mirror the server's exact rules.
+const ZO_SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+/** Derive the per-user hosts from the Zo username slug (#339).
+ *  Returns { spaceEndpoint, webOrigin }, or null when the slug is not a
+ *  valid zo username (callers show a validation error). */
+export function deriveZoHosts(username) {
+  const slug = String(username || '').trim().toLowerCase();
+  if (!ZO_SLUG_RE.test(slug)) return null;
+  return {
+    spaceEndpoint: `https://${slug}.zo.space`,
+    webOrigin: `https://${slug}.zo.computer`,
+  };
+}
 
 /** Load config from storage, merging with DEFAULTS.
  *  Sensitive keys (token, endpoint) come from storage.local;
