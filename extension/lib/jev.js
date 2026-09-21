@@ -96,6 +96,63 @@ export function doneGateQuestion(goal) {
   };
 }
 
+/** Cue-miss rescue question (choice): which candidate matches the description
+ *  the planner gave? Literal, one judgment per question (vendor guidance). */
+export function matchChoiceQuestion(description, candidates) {
+  const list = (candidates || [])
+    .filter((c) => c && c.id != null && (c.label || '').trim())
+    .slice(0, MAX_CHOICE_OPTIONS);
+  if (!list.length) throw new Error('jev: matchChoiceQuestion needs at least one labeled candidate');
+  return {
+    target: {
+      type: 'choice',
+      instructions: `The state lists candidate elements from the web page the user is viewing. Which candidate matches this description: "${description}"?`,
+      criteria: Object.fromEntries(list.map((c) => [String(c.id), String(c.label).trim()])),
+    },
+  };
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Transport — pure, fetch injected so tests exercise it directly (the
+ *  background passes its config; Lane J2). 2.5s timeout; ONE backoff retry
+ *  on 429/529 and transient network errors — a TIMED-OUT call is not retried
+ *  (that would double the latency budget the fast path exists to protect).
+ *  Never throws. */
+export async function jevDecideImpl(fetchImpl, cfg, state, questions) {
+  const { apiUrl, apiKey, model = DEFAULT_JEV_MODEL, timeoutMs = 2500, retries = 1 } = cfg || {};
+  if (!apiUrl || !apiKey) return { ok: false, reason: 'jev not configured' };
+  let body;
+  try {
+    body = JSON.stringify(buildDecideRequest({ model, state, questions }));
+  } catch (e) {
+    return { ok: false, reason: e.message };
+  }
+  for (let attempt = 0; ; attempt++) {
+    const t0 = Date.now();
+    try {
+      const res = await fetchImpl(apiUrl, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body,
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (res.status === 429 || res.status === 529) {
+        if (attempt < retries) { await sleep(300 * (attempt + 1)); continue; }
+        return { ok: false, reason: `jev HTTP ${res.status}` };
+      }
+      if (!res.ok) return { ok: false, reason: `jev HTTP ${res.status}` };
+      const parsed = parseDecideResponse(await res.json().catch(() => null));
+      if (!parsed.ok) return { ok: false, reason: parsed.error };
+      return { ok: true, answers: parsed.answers, usage: parsed.usage, latencyMs: Date.now() - t0 };
+    } catch (e) {
+      const aborted = e && e.name === 'AbortError';
+      if (attempt < retries && !aborted) { await sleep(300 * (attempt + 1)); continue; }
+      return { ok: false, reason: aborted ? 'jev timeout' : `jev ${(e && e.message) || 'network error'}` };
+    }
+  }
+}
+
 /** Redaction boundary for Jev-bound state (#342 consumes this): strip form
  *  field values entirely and drop secret-looking keys. Page text and element
  *  labels are fine; VALUES never are. This is the cheap structural half —

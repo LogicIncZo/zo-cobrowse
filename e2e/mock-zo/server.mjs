@@ -137,6 +137,11 @@ function pickScenario(input) {
     return `handoff-t${Math.min(handoffTurn, 3)}`;
   }
   if (String(input || "").includes("flaky")) return "flaky";
+  // #342 Jev fast-path scenarios: a click whose text cue deliberately misses,
+  // rescued (or not) by the Jev mock. (userRequest() lowercases — match that.)
+  const q0 = userRequest(input);
+  if (q0.includes("jev-pick-rescue")) return "jev-pick-rescue";
+  if (q0.includes("jev-pick-lowconf")) return "jev-pick-lowconf";
   const q = userRequest(input);
   if (q.includes("schema")) return "pull-form";
   if (q.includes("workspace file")) return "pull-file";
@@ -267,10 +272,18 @@ const server = http.createServer(async (req, res) => {
     requests.push({ ts: Date.now(), method: "POST", url: "/v1/systemone", body });
     const answers = {};
     for (const [id, q] of Object.entries(body.questions || {})) {
-      if (q.type === "noul") answers[id] = { type: "noul", noul: 0.97 };
+      // #342 e2e: a goal/description tagged JEV-LOWCONF gets a deliberately
+      // below-threshold answer so the fallback arm is testable.
+      const low = JSON.stringify(q).includes("JEV-LOWCONF");
+      if (q.type === "noul") answers[id] = { type: "noul", noul: low ? 0.2 : 0.97 };
       else if (q.type === "choice") {
         const keys = Object.keys(q.criteria || {});
-        answers[id] = { type: "choice", choice: keys[0] ?? "", probabilities: { [keys[0] ?? ""]: 0.97 }, confidence: 0.97 };
+        answers[id] = {
+          type: "choice",
+          choice: keys[0] ?? "",
+          probabilities: { [keys[0] ?? ""]: low ? 0.3 : 0.97 },
+          confidence: low ? 0.3 : 0.97,
+        };
       } else if (q.type === "score") {
         answers[id] = { type: "score", score: 1, confidence: 0.95 };
       }
@@ -532,6 +545,17 @@ const server = http.createServer(async (req, res) => {
     }
 
     const scenario = pickScenario(body.input);
+    if (scenario === "jev-pick-rescue" || scenario === "jev-pick-lowconf") {
+      // #342: a click whose text cue matches NOTHING on the fixture page —
+      // the executor reports cueMiss + candidates, and the Jev fast path
+      // (mocked /v1/systemone) either rescues it or falls back by confidence.
+      const text = scenario === "jev-pick-lowconf" ? "JEV-LOWCONF Buy now" : "Buy now";
+      const env = JSON.stringify({ actions: [
+        { type: "click", text },
+        { type: "done", response: "fast path exercised" },
+      ]});
+      return streamSse(res, [textStart(env), completed()], { delayMs: 100 });
+    }
     if (scenario === "handoff-t1" || scenario === "handoff-t2") {
       // Simulated thinking time — keeps the recorded run watchable.
       await sleep(1100);

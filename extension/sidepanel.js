@@ -329,8 +329,11 @@ async function finishInit() {
           const icon = { done: '✅', paused: '⏸️', aborted: '🛑', blocked: '⛔' }[run.status] || 'ℹ️';
           // On done, the deliverable already rendered as the turn's answer —
           // repeating run.stopReason here showed the digest twice, once with
-          // raw markdown (#138). Other statuses carry a real reason worth showing.
-          const reason = run.status !== 'done' && run.stopReason ? ` — ${safeText(run.stopReason)}` : '';
+          // raw markdown (#138). Exception: a ⚡-prefixed note is the Jev
+          // fast path's completion reason (#342) — a gate-completed run has
+          // NO Zo digest, so the gate decision is the news worth showing.
+          const gateNote = run.status === 'done' && run.stopReason && String(run.stopReason).startsWith('⚡');
+          const reason = run.status !== 'done' || gateNote ? (run.stopReason ? ` — ${safeText(run.stopReason)}` : '') : '';
           const line = addMessage('system', `${icon} Handoff ${run.status}${reason}`);
           if (run.compose) {
             // C2: a compose run's blocked state IS the park — render the park
@@ -2458,7 +2461,7 @@ function renderActionTimeline() {
   actionsBar.classList.remove('hidden');
 }
 
-function updateActionCard(index, status, error) {
+function updateActionCard(index, status, error, jev) {
   const timeline = document.getElementById('action-timeline');
   if (!timeline) return;
   // A grouped card covers multiple original indices; match by membership.
@@ -2469,7 +2472,14 @@ function updateActionCard(index, status, error) {
   card.classList.remove('pending', 'running', 'done', 'error');
   card.classList.add(status);
   const statusEl = card.querySelector('.action-status');
-  if (statusEl) statusEl.textContent = status === 'error' && error ? error : status;
+  if (statusEl) {
+    let text = status === 'error' && error ? error : status;
+    // #342: honest provenance — when Jev served (or tried to serve) this
+    // decision, the card says so.
+    if (jev && jev.picked) text += ` · ⚡ Jev pick (conf ${Number(jev.confidence).toFixed(2)}, ${jev.latencyMs}ms)`;
+    else if (jev && jev.fallback) text += ` · ⚡ Jev fallback: ${jev.fallback}`;
+    statusEl.textContent = text;
+  }
 }
 
 // Update the inline run header summary (label + step count + duration).
@@ -2689,11 +2699,11 @@ async function runPendingActions() {
     });
     if (!result?.ok) {
       const err = result?.error || 'unknown error';
-      updateActionCard(i, 'error', err);
+      updateActionCard(i, 'error', err, result?.results?.[0]?.jev);
       addMessage('error', `Action failed: ${err}`);
       break;
     }
-    updateActionCard(i, 'done');
+    updateActionCard(i, 'done', undefined, result?.results?.[0]?.jev);
     await new Promise((r) => setTimeout(r, 600));
     await refreshPageContext();
   }
