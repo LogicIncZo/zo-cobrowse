@@ -6,6 +6,7 @@ import {
   clickChoiceQuestion,
   doneGateQuestion,
   matchChoiceQuestion,
+  pickChoiceQuestion,
   jevDecideImpl,
   redactStateForJev,
   DEFAULT_JEV_API_URL,
@@ -215,6 +216,43 @@ describe("jevDecideImpl — transport fallback matrix (#342)", () => {
     expect(r.ok).toBe(false);
     expect(r.reason).toBe("jev not configured");
     expect(calls).toBe(0);
+  });
+});
+
+describe("Lane J3 — the marriage", () => {
+  it("pickChoiceQuestion embeds the planner's question verbatim, schema-clean", () => {
+    const q = pickChoiceQuestion("Which element opens the form page?", CANDIDATES);
+    expect(q.target.instructions).toContain("Which element opens the form page?");
+    expect(JevDecideRequest.safeParse(buildDecideRequest({ state: {}, questions: q })).success).toBe(true);
+    expect(() => pickChoiceQuestion("q", [])).toThrow(/candidate/);
+  });
+
+  it("the pick-annotated click is a valid ClickAction; pick without a question is not", async () => {
+    const { ClickAction } = await import("./schemas/actions");
+    expect(ClickAction.safeParse({ type: "click", selector: "#a" }).success).toBe(true);
+    expect(ClickAction.safeParse({ type: "click", pick: { question: "Which one?" } }).success).toBe(true);
+    expect(ClickAction.safeParse({ type: "click", pick: {} }).success).toBe(false);
+    expect(ClickAction.safeParse({ type: "click" }).success).toBe(false);
+  });
+
+  it("the Jev-Assisted Steps prompt section is config-gated and action-only", async () => {
+    const { buildPrompt, describePrompt } = await import("../extension/lib/prompt.js");
+    const { resolveMode } = await import("../extension/lib/modes.js");
+    const ctx = { url: "https://x", title: "T", visibleText: "body", clickable: [], viewport: { w: 1280, h: 800 } };
+    const cobrowse = resolveMode("cobrowse");
+    const ask = resolveMode("ask");
+    const on = buildPrompt(cobrowse, ctx, "q", { effectiveTier: 2, jevAssist: true });
+    expect(on).toContain("## Jev-Assisted Steps (active)");
+    expect(on).toContain('"pick"');
+    const off = buildPrompt(cobrowse, ctx, "q", { effectiveTier: 2 });
+    expect(off).not.toContain("Jev-Assisted Steps");
+    // Read modes never teach the vocabulary — Jev decides clicks, not prose.
+    const readMode = buildPrompt(ask, ctx, "q", { effectiveTier: 1, jevAssist: true });
+    expect(readMode).not.toContain("Jev-Assisted Steps");
+    // The structured view tags the section for the inspector.
+    const d = describePrompt(cobrowse, ctx, "q", { effectiveTier: 2, jevAssist: true });
+    expect(d.prompt).toContain("Jev-Assisted Steps");
+    expect(d.sections.some((s: any) => s.id === "jev")).toBe(true);
   });
 });
 

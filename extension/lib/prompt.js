@@ -44,6 +44,7 @@ export const SECTION_IDS = Object.freeze([
   'forms',
   'screenshot',
   'userRequest',
+  'jev',
   'tail',
 ]);
 
@@ -59,6 +60,7 @@ export const SECTION_LABELS = Object.freeze({
   forms: 'Forms',
   screenshot: 'Screenshot',
   userRequest: 'User Request',
+  jev: 'Jev-Assisted Steps',
   tail: 'Instructions',
 });
 
@@ -231,6 +233,18 @@ function _compose(mode, pageContext, userQuery, opts) {
   push('sep', '');
   push('userRequest', '## User Request');
   push('userRequest', safeText(userQuery));
+
+  // #343 (Lane J3): the Jev-assisted steps vocabulary — present ONLY when the
+  // user opted in with a key (opts.jevAssist, threaded from the background's
+  // config) and only on action turns (expectJson). Keeps the pick-annotated
+  // click shape + its guardrails in front of Zo; absent otherwise, so the
+  // prompt (and its token cost) is byte-identical for everyone else.
+  if (opts && opts.jevAssist && mode.expectJson) {
+    push('sep', '');
+    push('jev', '## Jev-Assisted Steps (active)');
+    push('jev', 'You may delegate an ambiguous click target to Jev, a fast decision model that sees this page\'s clickable elements: { "type": "click", "pick": { "question": "<one literal question naming which element to click>" } }. Use pick ONLY when you cannot confidently name a selector from the capture above (ambiguous or duplicated labels, wording-dependent targets). One judgment per question — ask WHICH element, never HOW (no fills, URLs, or values; Jev cannot write text). A confident answer executes automatically; a low-confidence one parks the step for the user.');
+  }
+
   push('sep', '');
 
   if (jsonDisabled) {

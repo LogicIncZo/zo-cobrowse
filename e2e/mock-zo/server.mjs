@@ -142,6 +142,9 @@ function pickScenario(input) {
   const q0 = userRequest(input);
   if (q0.includes("jev-pick-rescue")) return "jev-pick-rescue";
   if (q0.includes("jev-pick-lowconf")) return "jev-pick-lowconf";
+  // #343: Zo plans a pick-ANNOTATED click (the marriage) — Jev resolves it.
+  if (q0.includes("jev-plan-rescue")) return "jev-plan-rescue";
+  if (q0.includes("jev-plan-lowconf")) return "jev-plan-lowconf";
   const q = userRequest(input);
   if (q.includes("schema")) return "pull-form";
   if (q.includes("workspace file")) return "pull-file";
@@ -545,6 +548,19 @@ const server = http.createServer(async (req, res) => {
     }
 
     const scenario = pickScenario(body.input);
+    if (scenario === "jev-plan-rescue" || scenario === "jev-plan-lowconf") {
+      // #343: the marriage — Zo emits the pick-annotated click itself; the
+      // executor resolves it via Jev (mock); the question carries the
+      // JEV-LOWCONF marker for the below-threshold arm.
+      const question = scenario === "jev-plan-lowconf"
+        ? "JEV-LOWCONF Which element opens the form page?"
+        : "Which element opens the form page?";
+      const env = JSON.stringify({ actions: [
+        { type: "click", pick: { question } },
+        { type: "done", response: "planned pick exercised" },
+      ]});
+      return streamSse(res, [textStart(env), completed()], { delayMs: 100 });
+    }
     if (scenario === "jev-pick-rescue" || scenario === "jev-pick-lowconf") {
       // #342: a click whose text cue matches NOTHING on the fixture page —
       // the executor reports cueMiss + candidates, and the Jev fast path
