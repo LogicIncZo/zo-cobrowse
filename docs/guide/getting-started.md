@@ -47,18 +47,22 @@ The extension speaks to Zo over **two channels** (see
 
 1. **Right-click the icon → Options** (or open the side panel and use its
    **Options** entry)
-2. Enter your **Zo Access Token** (key format: `zo_sk_...`) — use **Show** to
-   verify a pasted token
-3. (Optional) Choose a **model** — leave blank to use Zo's default
-4. Click **Test Connection** — you should see a green success state
-5. Optionally set your **Zo.space endpoint** to your tenant's data API
-6. Click **Save Settings** — the • marker on the Save buttons disappears when
-   everything is persisted (the sticky section nav jumps between the ~12
-   settings cards)
+2. Enter your **Zo Username** — the slug in `https://<slug>.zo.space` — and
+   your **Zo Access Token** (key format: `zo_sk_...`); both Zo-space and Zo-web
+   hosts fill in from the username automatically (odd setup? Override them
+   under **Advanced**)
+3. Click **Test Connection** — you should see a green success state
+4. (Optional) Choose a **model** (blank = Zo's default), and enable the
+   **⚡ Jev** fast path if you have a TypeSafe AI key — it answers mechanical
+   browsing decisions (click targets, done-checks) in a fraction of a second;
+   page state goes to TypeSafe AI in addition to Zo while it's on
+5. Click **Save Settings** — the sticky bar at the bottom is the one save; its
+   • marker disappears when everything is persisted (the section tabs jump
+   between the settings cards)
 
 ::: tip Unsaved changes
 Fields save only when you press **Save Settings** (the model select and
-Quick-Action rows save immediately). Until then, the Save buttons carry a •
+Quick-Action rows save immediately). Until then, the Save button carries a •
 marker and a toast reminds you.
 :::
 
