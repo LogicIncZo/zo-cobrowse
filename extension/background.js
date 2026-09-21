@@ -12,7 +12,7 @@ import { buildPrompt } from './lib/prompt.js';
 import { shouldDowngradeToJsonDisabled } from './lib/intent.js';
 import { BUNDLED_SKILL_PATH, PROTOCOL_SKILL_PATH, SKILL_STATE_KEY, injectVersion, parseInstalledVersion } from './lib/protocol-skill.js';
 import { parseZoOutput, stripCodeFence } from './lib/parse-output.js';
-import { buildDecideRequest, parseDecideResponse, DEFAULT_JEV_API_URL, DEFAULT_JEV_MODEL } from './lib/jev.js';
+import { buildDecideRequest, parseDecideResponse, shouldAct, doneGateQuestion, matchChoiceQuestion, redactStateForJev, jevDecideImpl, DEFAULT_JEV_API_URL, DEFAULT_JEV_MODEL } from './lib/jev.js';
 // safeText stays the local one (line ~156) — do NOT import it here.
 import {
   STRIP_MAX_TABS,
@@ -2524,6 +2524,88 @@ async function jevTest() {
   }
 }
 
+/** Jev decide transport (0.3.4 Lane J2): the lib impl with this worker's
+ *  config + fetch; state passes through the redaction boundary so secrets
+ *  never reach TypeSafe AI. Never throws — every failure carries a reason. */
+async function jevDecide(state, questions) {
+  const r = await jevDecideImpl(
+    fetch,
+    {
+      apiUrl: config.jevApiUrl || DEFAULT_JEV_API_URL,
+      apiKey: config.jevApiKey,
+      model: config.jevModel || DEFAULT_JEV_MODEL,
+    },
+    redactStateForJev(state),
+    questions,
+  );
+  debugLog.push('jev', r.ok ? 'decide' : 'decide-fallback', r.latencyMs, r.ok ? undefined : { reason: r.reason });
+  return r;
+}
+
+/** Jev gating precheck: the fast path only exists for opted-in, keyed users. */
+function jevReady() {
+  return !!(config.jevEnabled && config.jevApiKey);
+}
+
+/** Fresh clickable-candidate inventory for the pick hook (the Zo action path
+ *  fails without candidates; the tier-2 capture already lists clickables). */
+async function fetchClickableCandidates(tabId) {
+  try {
+    const cap = await chrome.tabs.sendMessage(tabId, { type: 'CAPTURE_CONTEXT', tier: 2 });
+    return (((cap && cap.clickable) || []))
+      .filter((c) => (c.text || '').trim())
+      .slice(0, 20)
+      .map((c) => ({ text: c.text, selector: c.selector }));
+  } catch {
+    return [];
+  }
+}
+
+/** Hook B — click-pick (#342): rescue a failed click by asking Jev which
+ *  near-miss candidate matches the planner's description. High confidence →
+ *  the winner's selector; anything else → the existing failure (and its
+ *  healer/handoff path) stands untouched. */
+async function jevPickClickTarget(action, candidates) {
+  const description = safeText(action.text || action.cue || '').slice(0, 120);
+  if (!description) return { ok: false, reason: 'no description to match' };
+  const labeled = candidates.map((c, i) => ({ id: `c${i}`, label: safeText(c.text || c.question || '').slice(0, 60) }));
+  if (!labeled.some((c) => c.label)) return { ok: false, reason: 'no labeled candidates' };
+  const r = await jevDecide({ url: '', title: '', candidates: labeled }, matchChoiceQuestion(description, labeled));
+  if (!r.ok) return { ok: false, reason: r.reason };
+  const ans = r.answers.target;
+  const idx = Number(String(ans && ans.choice || '').replace(/^c/, ''));
+  const conf = ans && typeof ans.confidence === 'number'
+    ? ans.confidence
+    : (ans && ans.probabilities ? (ans.probabilities[ans.choice] ?? 0) : 0);
+  if (!shouldAct(conf, config.jevPickConfidence)) {
+    return { ok: false, reason: `low confidence (${Number(conf).toFixed(2)} < ${config.jevPickConfidence})`, latencyMs: r.latencyMs };
+  }
+  const winner = candidates[idx];
+  if (!winner || !winner.selector) return { ok: false, reason: 'picked candidate has no selector', latencyMs: r.latencyMs };
+  return { ok: true, selector: winner.selector, question: description, confidence: conf, latencyMs: r.latencyMs };
+}
+
+/** Hook A — done-gate (#342): is the run's goal ALREADY satisfied on the page
+ *  the fresh capture just saw? A confident yes (noul ≥ jevDoneConfidence)
+ *  completes the run without the continuation's Zo round-trip; low confidence
+ *  or any failure returns false and the chain proceeds exactly as before. */
+async function jevDoneGate(run, pageContext) {
+  const goal = safeText(run && run.goal || '').slice(0, 300);
+  if (!goal || !pageContext) return null;
+  const gate = await jevDecide(
+    {
+      url: safeText(pageContext.url || ''),
+      title: safeText(pageContext.title || ''),
+      pageText: safeText(pageContext.visibleText || '').replace(/\s+/g, ' ').trim().slice(0, 800),
+    },
+    doneGateQuestion(goal),
+  );
+  if (!gate.ok) return null;
+  const noul = gate.answers.goal_done && gate.answers.goal_done.noul;
+  if (typeof noul !== 'number' || !shouldAct(noul, config.jevDoneConfidence)) return null;
+  return { noul, latencyMs: gate.latencyMs };
+}
+
 
 
 /** EXECUTE_ACTIONS entry (#26 two-phase gate). A batch containing fill_form
@@ -2801,6 +2883,25 @@ async function handoffChainNextTurn(runId) {
   try {
     pageContext = await getActiveTabContext(run.tabId, captureTier, msg.modeId);
   } catch { /* capture failed — Zo can still pull (read_page) */ }
+
+  // Hook A (#342): before spending a Zo turn on the continuation, ask the
+  // fast path whether the goal is ALREADY satisfied on this page. A confident
+  // yes completes the run — no Zo round-trip. Compose runs skip the gate:
+  // their completion is Zo's done() + the save/rehearsal flow. Low confidence
+  // or any Jev failure chains the Zo turn exactly as before.
+  if (!run.compose && jevReady() && pageContext) {
+    const gate = await jevDoneGate(run, pageContext);
+    if (gate) {
+      const t = handoffTransition(run, 'complete', {
+        now: Date.now(),
+        reason: `⚡ Jev done-gate: goal already complete (noul ${gate.noul.toFixed(2)}, ${gate.latencyMs}ms) — no Zo turn spent`,
+      });
+      handoffTurnCtx.delete(runId);
+      await handoffPut(t.ok ? t.run : run);
+      return;
+    }
+  }
+
   const turnMsg = handoffContinuationPayload(msg, {
     sessionId: `${msg.sessionId}-h${run.usage.turns + 1}-${Date.now() % 100000}`,
     // Thread continuity: turn 1's conversation_id echo (the ambient global,
@@ -4206,6 +4307,42 @@ async function executeActions(actions, tabId, opts = {}) {
         result = r.result;
       } catch (err) {
         result = { ok: false, error: err.message };
+      }
+    }
+
+    // Hook B (#342): a failed CLICK (not-found, empty/invalid selector,
+    // cue-ladder miss — any non-blocked click failure) gets one Jev pick
+    // among the page's clickable candidates. Confidence ≥ jevPickConfidence
+    // → the winner is executed as a concrete click (same rails: this is a
+    // plain click action re-entering the executor); anything else keeps the
+    // original failure. Blocked actions (sensitive/backstop/boundary) never
+    // reach here — they `continue` above.
+    if (result && !result.ok && action.type === 'click' && jevReady()) {
+      const candidates = (Array.isArray(result.candidates) && result.candidates.length)
+        ? result.candidates
+        : await fetchClickableCandidates(tabId);
+      if (candidates.length) {
+        const pick = await jevPickClickTarget(action, candidates);
+        if (pick.ok && pick.selector) {
+          let retry = null;
+          try {
+            const resp = await chrome.tabs.sendMessage(tabId, { type: 'EXECUTE_ACTION', action: { type: 'click', selector: pick.selector } });
+            retry = resp || null;
+          } catch { retry = null; }
+          if (!retry || !retry.ok) {
+            try {
+              const [r2] = await chrome.scripting.executeScript({ target: { tabId }, func: executeDomAction, args: [{ type: 'click', selector: pick.selector }] });
+              retry = r2.result;
+            } catch (e2) { retry = { ok: false, error: e2.message }; }
+          }
+          if (retry && retry.ok) {
+            result = { ...retry, jev: { picked: true, question: pick.question, confidence: pick.confidence, latencyMs: pick.latencyMs } };
+          } else {
+            result = { ...result, jev: { fallback: 'pick did not execute' } };
+          }
+        } else {
+          result = { ...result, jev: { fallback: pick.reason || 'unavailable' } };
+        }
       }
     }
 
