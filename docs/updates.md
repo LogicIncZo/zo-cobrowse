@@ -3,6 +3,43 @@
 New features in Zo Co-browse, newest first. Each entry explains what shipped;
 open **How to use it** for the hands-on steps.
 
+## Jev — a fast path for agentic browsing <span class="badge-new">NEW</span> {#jev}
+
+_2026-09-21 · [#341](https://github.com/LogicIncZo/zo-cobrowse/issues/341)–[#343](https://github.com/LogicIncZo/zo-cobrowse/issues/343) · v0.3.4.0_
+
+Optional, off by default: connect a [Jev](https://jevai.net) API key (TypeSafe
+AI's "System One" model) in **Settings → Connection → ⚡ Jev**, and the
+extension's mechanical decisions stop waiting on full Zo turns. Jev does not
+generate text — it answers bounded questions about the page in a few hundred
+milliseconds (live-probed at 40–74× faster than a Zo decision turn), and Zo
+still plans every turn:
+
+- **Done-gate.** Before a chained `!handoff` continuation, Jev checks whether
+  the goal is already achieved on the page — a confident yes completes the run
+  without the extra Zo round-trip.
+- **Click picks.** When a click's target can't be found (or Zo plans an
+  ambiguous one as `pick: {question}`), Jev chooses among the page's actual
+  clickable elements; only a confident answer executes.
+- **Zo stays the planner, and the rails stay in code.** The sensitive-submit
+  probe, the post-fill no-click rule, and handoff boundaries all run on the
+  resolved click; low-confidence answers fall back to the exact previous
+  behavior, and every fast-path decision is labeled on the action card.
+
+Page state (never form values) goes to TypeSafe AI in addition to Zo only
+while the toggle is on.
+
+## Settings: just a username and a token <span class="badge-new">NEW</span> {#settings-username}
+
+_2026-09-21 · [#339](https://github.com/LogicIncZo/zo-cobrowse/issues/339)–[#340](https://github.com/LogicIncZo/zo-cobrowse/issues/340) · v0.3.4.0_
+
+The Connection pane now asks exactly two things — your **Zo username** (the
+slug in `https://<slug>.zo.space`) and your **access token** — and derives
+both the Zo.space endpoint and the Zo web origin from it as you type. The old
+endpoint fields moved under an **Advanced** section (hand-edited values still
+win), new installs no longer inherit anyone else's space endpoint, and there
+is exactly **one** Save Settings — a sticky bar visible from every settings
+tab.
+
 ## A more legible, more reachable panel <span class="badge-new">NEW</span> {#ux-bash}
 
 _2026-09-20 · [#296](https://github.com/LogicIncZo/zo-cobrowse/issues/296)–[#315](https://github.com/LogicIncZo/zo-cobrowse/issues/315) · v0.3.3.0_

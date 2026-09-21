@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.3.4.0] — 2026-09-21
+
+### Added — Jev support + settings rationalization (0.3.4 slate: #339–#343, PRs #344–#348)
+
+Five lanes from the 2026-09-20 owner intake, planned on a live comparative probe (Jev 340–512 ms vs Zo 15–36 s per decision, 40–74×, 4/4 agreement) and shipped one full zo-loop cycle per lane; milestone `0.3.4` drained. Stabilization ships as `0.3.4.N` points on bug reports.
+
+- **Settings: Zo username + token (#339, PR #344).** The Connection pane asks exactly two things — your Zo username slug and your access token; `deriveZoHosts()` fills the Zo.space endpoint and Zo web origin live (hand-edited Advanced values win, override-not-rewrite). The three endpoint fields moved into a collapsed Advanced section, and the owner-specific default space endpoint is GONE — fresh profiles get none, and space-backed features say so instead of silently querying someone else's tenant.
+- **One save (#340, PR #345).** Exactly one Save Settings — sticky at the form end, visible from every tab, carrying the dirty marker. The duplicate in-card submit and the Prompts editor's scoped Save are gone; the editor's draft persists via the global save, and switching Modes auto-persists the outgoing edited draft (a failing draft blocks the switch instead of losing edits).
+- **Jev foundation (#341, PR #346).** `lib/jev.js` (pure): decide-request builder, never-throw response parser, per-type confidence routing (noul vs choice confidences are not comparable — vendor model notes), question builders (click-choice, done-gate, cue-match), and the `redactStateForJev` boundary. Config: key + endpoint ride storage.local; enable/model/thresholds ride storage.sync. The options ⚡ Jev card ships DARK — off, no key — with a one-question Test probe (`JEV_TEST`) that works before opting in.
+- **Jev fast path (#342, PR #347).** Done-gate: before a chained handoff turn, Jev (`noul` ≥ `jevDoneConfidence`) answers "is the goal already achieved on this page?" — a confident yes completes the run without the Zo round-trip (compose runs exempt). Click-pick: a failed click gets ONE Jev `choice` over the tab's clickable candidates (≥ `jevPickConfidence`) — a confident winner executes; anything else falls back verbatim. Every state passes the redaction boundary; timeline cards carry `⚡ Jev pick` / `⚡ Jev fallback` provenance. With Jev off, every flow is byte-identical.
+- **The marriage — Zo drives Jev (#343, PR #348).** A config-gated prompt section (`## Jev-Assisted Steps`) teaches Zo the `{type:"click", pick:{question}}` vocabulary (default prompts byte-identical — offline evals 24/24 from cache); the executor's two-pass structure resolves picks in-page over a fresh candidate inventory and re-enters EVERY rail (sensitive submit probe, post-fill backstop, handoff boundary) on the resolved click — a Jev resolution can never bypass a gate. Low confidence parks the step: runs re-plan via the next Zo continuation (siblings continue), plain chats show the honest failed card.
+
+Adversarial review caught two real defects pre-merge: CI's #309 hit-target sweep flagged the Jev card's sub-24 controls (fixed), and the J3 review round closed the J2 raw re-execution bypass (resolved clicks now re-enter every rail). Tests: 1516 unit/integration across 64 files (~4966 expects); 121 Playwright e2e across 43 numbered specs + 4 demo-gated. Live probe: `tests/test-prompts/probe-jev.ts`.
+
 ## [0.3.3.0] — 2026-09-20
 
 ### Fixed — UX bash (0.3.3 slate: #296–#315, PRs #316–#335)
