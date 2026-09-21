@@ -1480,8 +1480,17 @@ async function _askZoStreamImpl(port, msg) {
   const protocolSkill = mode.expectJson && !shouldDowngradeToJsonDisabled(mode, userQuery)
     ? await ensureProtocolSkill()
     : null;
+  // Compose turns keep the FULL tail (no slim skill pointer): the slim tail
+  // sends Zo to read the skill from the workspace mid-run, and one polluted
+  // read_file there is a minutes-long failure (observed on a real RTI
+  // compose run). Runs re-read nothing; the grammar rides in-prompt.
+  let composeTurn = false;
+  if (msg.handoffRunId) {
+    const run = await handoffGet({ runId: msg.handoffRunId }).catch(() => null);
+    composeTurn = !!(run && run.compose);
+  }
   const establishedThread = !!loop.threadId;
-  const prompt = msg._followUpInput || buildPrompt(mode, pageContext, userQuery, { effectiveTier, ...(msg.shotOnly ? { screenshotOnly: true } : {}), tabContexts: loop.tabContexts, skills: msg.skills, workspaceFiles: msg.workspaceFiles, ...(protocolSkill ? { protocolSkill } : {}), ...(establishedThread ? { establishedThread: true } : {}), jevAssist: jevReady() });
+  const prompt = msg._followUpInput || buildPrompt(mode, pageContext, userQuery, { effectiveTier, ...(msg.shotOnly ? { screenshotOnly: true } : {}), tabContexts: loop.tabContexts, skills: msg.skills, workspaceFiles: msg.workspaceFiles, ...(protocolSkill ? { protocolSkill } : {}), ...(establishedThread ? { establishedThread: true } : {}), jevAssist: jevReady(), ...(composeTurn ? { noSlimTail: true } : {}) });
 
   try {
     const response = await fetch(config.zoApiUrl, {
@@ -2903,7 +2912,11 @@ async function handoffChainNextTurn(runId) {
     return;
   }
   // Fresh page state for the driven tab — Zo navigated since the last capture.
-  const captureTier = msg.effectiveTier || 1;
+  let captureTier = msg.effectiveTier || 1;
+  // Compose parks/cues need elements + forms (the recorder handles the human
+  // side; Zo's re-planning after a park reads the same capture) — never chain
+  // a compose turn below tier 2, whatever the priming turn inherited.
+  if (run.compose) captureTier = Math.max(captureTier, 2);
   let pageContext = null;
   try {
     pageContext = await getActiveTabContext(run.tabId, captureTier, msg.modeId);

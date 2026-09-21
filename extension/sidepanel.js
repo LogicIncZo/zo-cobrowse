@@ -1991,6 +1991,10 @@ async function renderPromptInspector() {
   const bangModeId = bang && bang.kind === 'command' && bang.mode ? bang.mode : null;
 
   const mode = resolveMode(bangModeId || activeModeId, customModes, modeOverrides);
+  // Mirror sendQuery's run-priming bypass: a compose/handoff bang's turn
+  // ignores the sticky DOM cap (and the slim skill tail) so the preview
+  // matches what the run actually sends.
+  const runBang = !!(bang && (bang.isHandoff || (bang.isRecipe && bang.sub === 'compose')));
   const pageHash = currentContext ? computePageHash(currentContext, mode.contextTier) : null;
   const decision = decideTurn({
     mode,
@@ -1999,7 +2003,7 @@ async function renderPromptInspector() {
     state: contextState,
     pageHash,
     pageBlank: isBlankPage(currentContext?.url || ''),
-    domEnabled: domContextOn,
+    domEnabled: domContextOn || runBang,
   });
   // Mirror sendQuery's 📷-toggle force so the preview can't diverge from the
   // send: armed toggle = tier 3 this turn, same reason string. With the #69
@@ -2032,6 +2036,9 @@ async function renderPromptInspector() {
     // #343: preview parity — the Jev section shows in the inspector exactly
     // when the background would send it.
     jevAssist: !!(config.jevEnabled && config.jevApiKey),
+    // Run bangs keep the FULL action tail (no slim skill pointer) — the
+    // background sends the same on compose turns.
+    ...(runBang ? { noSlimTail: true } : {}),
   });
 
   summary.textContent = `🔎 Prompt preview · ~${described.approxTokens} tokens`;
@@ -5964,6 +5971,11 @@ sendQuery = async function() {
   // ---- Quick Commands (!) ----
   let effectiveQuery = query;
   let tempMode = null;
+  // Run-priming turns (#343 follow-up): a compose/handoff bang starts an
+  // agentic RUN — its turns need page DOM (elements/forms) to drive and park
+  // correctly, so the sticky DOM-toggle cap does NOT apply to them. A manual
+  // chat keeps the cap (token discipline is the user's call there).
+  let runPrimed = false;
   let bangResult = null; // preserved for the context-policy decision below
   if (query.startsWith('!')) {
     const bang = parseBangCommand(query);
@@ -6075,14 +6087,16 @@ sendQuery = async function() {
       }
       activeHandoffRun = start.run;
       renderChatTabs(); // mark the run's chat tab (#166)
+      runPrimed = true;
       effectiveQuery = `${bang.query}\n\n${handoffInstructions(start.run)}`;
       tempMode = 'cobrowse';
     }
     if (bang.isRecipe) {
       // #220: recipes are played by the BACKGROUND deterministically — the
       // panel only starts/stops and renders pushes. Fully handled here; no
-      // chat turn is sent.
-      addMessage('user', query);
+      // chat turn is sent. (compose falls through to the normal send — the
+      // standard path below renders the user bubble; don't double-add it.)
+      if (!(bang.sub === 'compose')) addMessage('user', query);
       const reenable = () => { input.disabled = false; sendBtn.disabled = false; input.focus(); };
       if (bang.sub === 'compose') {
         // 0.3.2 C2 (#290): `!recipe compose <goal>` / `!recipe compose stop`.
@@ -6114,6 +6128,7 @@ sendQuery = async function() {
         }
         activeHandoffRun = start.run;
         renderChatTabs();
+        runPrimed = true; // the priming turn needs DOM context regardless of the toggle
         addMessage('system', `🧩 Composing "**${safeText(start.run.compose.name)}**" — Zo walks the flow (never fills, never submits); park cards will ask you for values and choices. Stop with \`!recipe compose stop\`.`);
         // The first compose turn: goal + compose instructions (stable marker),
         // cobrowse envelope, compose boundary — the loop takes over from here.
@@ -6328,7 +6343,10 @@ sendQuery = async function() {
     pageHash,
     pageBlank,
     hasThread: !!threadId,
-    domEnabled: domContextOn,
+    // Run-priming turns bypass the sticky DOM cap — a compose/handoff run
+    // cannot drive (or park) correctly from a URL-only pointer. The cap
+    // keeps winning for manual chats.
+    domEnabled: domContextOn || runPrimed,
   });
   contextState = turnDecision.newState;
   saveConversationState(activeId, contextState);
