@@ -406,9 +406,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  // #340: the Prompts editor registers its persistence here once it loads —
+  // the ONE global Save persists the editor's current draft too (and a draft
+  // that fails validation blocks the whole save, never silently drops).
+  let persistPromptEditor = null;
+
   // Save
-  form.addEventListener('submit', (e) => {
+  form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    // #340: editor draft first — an invalid draft (empty system/instructions)
+    // aborts the whole save with the editor's honest error.
+    if (persistPromptEditor) {
+      const res = await persistPromptEditor();
+      if (!res.ok) {
+        statusMsg.textContent = res.error;
+        statusMsg.className = 'inline-status err';
+        return;
+      }
+    }
     const token = tokenInput.value.trim();
     if (!token) {
       statusMsg.textContent = 'Access token is required.';
@@ -568,7 +583,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       import('./lib/modes.js'),
       import('./lib/prompt.js'),
     ]);
-    initPromptsEditor(BUILTIN_MODES, mergeOverride, EDITABLE_MODE_FIELDS, describePrompt);
+    persistPromptEditor = initPromptsEditor(BUILTIN_MODES, mergeOverride, EDITABLE_MODE_FIELDS, describePrompt) || null;
   } catch (err) {
     console.warn('Prompts editor failed to load:', err);
   }
@@ -586,16 +601,16 @@ function initPromptsEditor(BUILTIN_MODES, mergeOverride, EDITABLE_MODE_FIELDS, d
   const tierEl = document.getElementById('prompt-tier');
   const budgetEl = document.getElementById('prompt-budget');
   const jsonEl = document.getElementById('prompt-json');
-  const saveBtn = document.getElementById('prompt-save');
   const resetBtn = document.getElementById('prompt-reset');
   const statusEl = document.getElementById('prompt-status');
   const previewPre = document.getElementById('prompt-preview-pre');
   const previewMeta = document.getElementById('prompt-preview-meta');
-  if (!modeSelect || !saveBtn) return;
+  if (!modeSelect) return null;
 
   let overrides = {};
   let customModes = {};
   let currentId = null;
+  let snapshot = null; // #340: the last-filled (saved) draft — edits are diffs against this
   const isBuiltin = (id) => !!BUILTIN_MODES[id];
 
   const flash = (msg, ok = true) => {
@@ -654,8 +669,60 @@ function initPromptsEditor(BUILTIN_MODES, mergeOverride, EDITABLE_MODE_FIELDS, d
     tierEl.value = String(base.contextTier ?? 2);
     budgetEl.value = String(base.textBudget ?? 2000);
     jsonEl.checked = !!base.expectJson;
+    // #340: snapshot what the user sees as the SAVED state — a draft that
+    // differs from this is "edited" and must not be lost on a mode switch.
+    snapshot = readDraft();
     resetBtn.disabled = !(isBuiltin(id) && overrides[id]);
     renderPreview();
+  }
+
+  function readDraft() {
+    return {
+      systemPrompt: sysEl.value,
+      instructions: instrEl.value,
+      contextTier: Math.max(0, Math.min(3, parseInt(tierEl.value, 10) || 0)),
+      textBudget: Math.max(0, parseInt(budgetEl.value, 10) || 0),
+      expectJson: !!jsonEl.checked,
+    };
+  }
+
+  const draftEqualsSnapshot = () => {
+    const d = readDraft();
+    return d.systemPrompt === snapshot.systemPrompt
+      && d.instructions === snapshot.instructions
+      && d.contextTier === snapshot.contextTier
+      && d.textBudget === snapshot.textBudget
+      && d.expectJson === snapshot.expectJson;
+  };
+
+  /** Persist the given mode's draft (#340). Returns {ok, changed} — ok:false
+   *  carries the validation error that must block save/switch. */
+  async function persist(id, { quiet = false } = {}) {
+    const draft = draftMode();
+    if (!draft.systemPrompt || !draft.instructions) {
+      return { ok: false, error: 'System prompt and instructions are required (Prompts editor).' };
+    }
+    if (!quiet && draftEqualsSnapshot()) return { ok: true, changed: false };
+    if (isBuiltin(id)) {
+      // Store only the editable knobs that differ from the base built-in.
+      const base = BUILTIN_MODES[id];
+      const ov = {};
+      for (const k of EDITABLE_MODE_FIELDS) {
+        if (draft[k] !== base[k]) ov[k] = draft[k];
+      }
+      if (Object.keys(ov).length) overrides[id] = ov;
+      else delete overrides[id];
+      await chrome.storage.local.set({ [OVERRIDES_KEY]: overrides });
+    } else {
+      customModes[id] = { ...customModes[id], ...draft, id, builtin: false };
+      await chrome.storage.local.set({ [CUSTOM_MODES_KEY]: customModes });
+    }
+    if (!quiet) flash('✅ Saved');
+    snapshot = readDraft();
+    // The override state changed — Reset's enabled-ness follows it (this
+    // replaced the old save handler's fill() refresh).
+    resetBtn.disabled = !(isBuiltin(id) && overrides[id]);
+    return { ok: true, changed: true };
   }
 
   async function load() {
@@ -684,34 +751,19 @@ function initPromptsEditor(BUILTIN_MODES, mergeOverride, EDITABLE_MODE_FIELDS, d
     fill(modeSelect.value || Object.keys(BUILTIN_MODES)[0]);
   }
 
-  modeSelect.addEventListener('change', () => fill(modeSelect.value));
-  [sysEl, instrEl, tierEl, budgetEl, jsonEl].forEach((el) => {
-    if (el) el.addEventListener('input', renderPreview);
-  });
-
-  saveBtn.addEventListener('click', async () => {
-    const id = modeSelect.value;
-    const draft = draftMode();
-    if (!draft.systemPrompt || !draft.instructions) {
-      flash('System prompt and instructions are required.', false);
+  modeSelect.addEventListener('change', async () => {
+    // #340: switching modes auto-persists the outgoing edited draft — no
+    // silent loss. A draft that fails validation blocks the switch instead.
+    const res = await persist(currentId, { quiet: true });
+    if (!res.ok) {
+      flash(res.error, false);
+      modeSelect.value = currentId; // stay on the draft that needs fixing
       return;
     }
-    if (isBuiltin(id)) {
-      // Store only the editable knobs that differ from the base built-in.
-      const base = BUILTIN_MODES[id];
-      const ov = {};
-      for (const k of EDITABLE_MODE_FIELDS) {
-        if (draft[k] !== base[k]) ov[k] = draft[k];
-      }
-      if (Object.keys(ov).length) overrides[id] = ov;
-      else delete overrides[id];
-      await chrome.storage.local.set({ [OVERRIDES_KEY]: overrides });
-    } else {
-      customModes[id] = { ...customModes[id], ...draft, id, builtin: false };
-      await chrome.storage.local.set({ [CUSTOM_MODES_KEY]: customModes });
-    }
-    flash('✅ Saved');
-    fill(id);
+    fill(modeSelect.value);
+  });
+  [sysEl, instrEl, tierEl, budgetEl, jsonEl].forEach((el) => {
+    if (el) el.addEventListener('input', renderPreview);
   });
 
   resetBtn.addEventListener('click', async () => {
@@ -724,6 +776,9 @@ function initPromptsEditor(BUILTIN_MODES, mergeOverride, EDITABLE_MODE_FIELDS, d
   });
 
   load();
+  // #340: the ONE global Save persists the editor's current draft through this
+  // hook (see the form submit handler).
+  return (opts) => persist(modeSelect.value, opts);
 }
 
 // The configured Zo API endpoint (QA finding B): Test Connection and the

@@ -281,6 +281,15 @@
       color: var(--indigo);
       font-weight: 700;
     }
+    /* ── Sticky save bar (#340): the one Save, visible from any tab ── */
+    .save-bar {
+      position: sticky;
+      bottom: 0;
+      z-index: 10;
+      padding: 10px 0 2px;
+      background: var(--bg-deep);
+      border-top: 1px solid var(--border-soft);
+    }
   </style>
 </head>
 <body>
@@ -336,7 +345,7 @@
       </details>
       <div class="btn-row">
         <button type="button" id="test-btn" class="btn btn-primary">Test Connection</button>
-        <button type="submit" class="btn">Save Settings</button>
+        <!-- #340: no per-card Save — the sticky bar at the form end is the ONE save. -->
       </div>
     </div>
 
@@ -408,7 +417,8 @@
         </label>
       </div>
       <div class="btn-row">
-        <button type="button" id="prompt-save" class="btn btn-primary btn-sm">Save</button>
+        <!-- #340: the editor's draft persists via the ONE global Save (the
+             sticky bar below) — no scoped Save button. Reset stays per-mode. -->
         <button type="button" id="prompt-reset" class="btn btn-sm">Reset to original</button>
         <span id="prompt-status" class="inline-status"></span>
       </div>
@@ -600,8 +610,9 @@
     </div>
     </div><!-- /pane-about -->
 
-    <!-- ── Save ── -->
-    <div class="flex gap-2 items-center card-wide">
+    <!-- ── Save ── (#340: the ONE Save Settings — sticky, always visible,
+         carries the dirty marker) -->
+    <div class="save-bar">
       <button type="submit" class="btn btn-primary">Save Settings</button>
     </div>
   </form>
