@@ -349,6 +349,45 @@
       </div>
     </div>
 
+    <!-- ── Jev (#341, 0.3.4 Lane J): the optional System-One fast path.
+         Ships dark — nothing behavioral changes until enabled with a key. ── -->
+    <div class="card card-wide" id="card-jev">
+      <h2>⚡ Jev — fast-path decisions (optional)</h2>
+      <p class="desc">When enabled, mechanical browsing decisions — picking a click target, checking whether a goal is already done — are answered by <a href="https://jevai.net" target="_blank" rel="noreferrer">Jev</a> in a fraction of a second instead of a full Zo turn. Zo still plans every turn. While enabled, page state (never form values) goes to <strong>both</strong> Zo and TypeSafe AI.</p>
+      <div class="field-group">
+        <label class="row-label">
+          <input type="checkbox" id="jev-enabled" />
+          Enable the Jev fast path
+        </label>
+      </div>
+      <div class="field-group">
+        <label for="jev-api-key">Jev API Key</label>
+        <div class="token-row">
+          <input type="password" id="jev-api-key" placeholder="apik_…" autocomplete="off" />
+          <button type="button" id="jev-key-toggle" class="token-toggle" title="Show key">Show</button>
+        </div>
+        <p class="desc" style="margin-top:4px;">Stored on this device only (never synced), like your Zo token.</p>
+      </div>
+      <div class="field-group-double">
+        <div class="field-group">
+          <label for="jev-model">Model</label>
+          <input type="text" id="jev-model" placeholder="jev-latest" spellcheck="false" />
+        </div>
+        <div class="field-group">
+          <label for="jev-pick-confidence">Click-pick confidence ≥</label>
+          <input type="number" id="jev-pick-confidence" min="0" max="1" step="0.05" placeholder="0.8" />
+        </div>
+      </div>
+      <div class="field-group">
+        <label for="jev-done-confidence">Done-gate confidence ≥</label>
+        <input type="number" id="jev-done-confidence" min="0" max="1" step="0.05" placeholder="0.9" />
+      </div>
+      <div class="btn-row">
+        <button type="button" id="jev-test-btn" class="btn btn-sm">Test Jev</button>
+        <span id="jev-status" class="inline-status"></span>
+      </div>
+    </div>
+
     </div><!-- /pane-connection -->
 
     <div class="tab-pane" id="pane-model" hidden>

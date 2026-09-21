@@ -142,6 +142,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   const spaceEndpointInput = document.getElementById('space-endpoint');
   const zoWebOriginInput = document.getElementById('zo-web-origin');
   const zoUsernameInput = document.getElementById('zo-username');
+  // Jev card (#341)
+  const jevEnabledCheck = document.getElementById('jev-enabled');
+  const jevKeyInput = document.getElementById('jev-api-key');
+  const jevModelInput = document.getElementById('jev-model');
+  const jevPickInput = document.getElementById('jev-pick-confidence');
+  const jevDoneInput = document.getElementById('jev-done-confidence');
+  const jevTestBtn = document.getElementById('jev-test-btn');
+  const jevStatus = document.getElementById('jev-status');
 
   // #339: the username slug derives the two hosts — live, but a hand-edited
   // Advanced field wins (override-not-rewrite, same rule as Mode overrides).
@@ -183,6 +191,42 @@ document.addEventListener('DOMContentLoaded', async () => {
       tokenInput.type = show ? 'text' : 'password';
       tokenToggle.textContent = show ? 'Hide' : 'Show';
       tokenToggle.title = show ? 'Hide token' : 'Show token';
+    });
+  }
+
+  // Jev key show/hide (#341) — same pattern as the Zo token.
+  const jevKeyToggle = document.getElementById('jev-key-toggle');
+  if (jevKeyToggle && jevKeyInput) {
+    jevKeyToggle.addEventListener('click', () => {
+      const show = jevKeyInput.type === 'password';
+      jevKeyInput.type = show ? 'text' : 'password';
+      jevKeyToggle.textContent = show ? 'Hide' : 'Show';
+      jevKeyToggle.title = show ? 'Hide key' : 'Show key';
+    });
+  }
+
+  // Test Jev (#341): one noul probe through the background transport.
+  if (jevTestBtn) {
+    jevTestBtn.addEventListener('click', async () => {
+      jevTestBtn.disabled = true;
+      jevStatus.textContent = 'Probing…';
+      jevStatus.className = 'inline-status pending';
+      try {
+        const res = await chrome.runtime.sendMessage({ type: 'JEV_TEST' });
+        if (res && res.ok) {
+          jevStatus.textContent = `✅ Jev responded in ${res.latencyMs}ms${res.model ? ' (' + res.model + ')' : ''}`;
+          jevStatus.className = 'inline-status ok';
+        } else {
+          jevStatus.textContent = `❌ ${(res && res.error) || 'Jev probe failed.'}`;
+          jevStatus.className = 'inline-status err';
+        }
+      } catch (err) {
+        jevStatus.textContent = `❌ ${err.message}`;
+        jevStatus.className = 'inline-status err';
+      } finally {
+        jevTestBtn.disabled = false;
+        setTimeout(() => { jevStatus.textContent = ''; jevStatus.className = 'inline-status'; }, 6000);
+      }
     });
   }
 
@@ -293,16 +337,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // Load config — sensitive fields from storage.local, rest from storage.sync
-  chrome.storage.local.get(['zoAccessToken', 'zoSpaceEndpoint'], (localResult) => {
+  chrome.storage.local.get(['zoAccessToken', 'zoSpaceEndpoint', 'jevApiKey'], (localResult) => {
     chrome.storage.sync.get([
       'zoApiUrl', 'zoModel', 'zoPersonaId',
       'zoQuickActions', 'zoWebOrigin', 'zoUsername',
-      'zoTtsLang', 'zoTtsRate', 'zoTtsAutoRead', 'enabledMenus', 'enableScreenshots', 'enableWriteAssist'
+      'zoTtsLang', 'zoTtsRate', 'zoTtsAutoRead', 'enabledMenus', 'enableScreenshots', 'enableWriteAssist',
+      'jevEnabled', 'jevModel', 'jevPickConfidence', 'jevDoneConfidence'
     ], (syncResult) => {
       const token = localResult.zoAccessToken;
       const spaceEndpoint = localResult.zoSpaceEndpoint;
       if (token) tokenInput.value = token;
       if (spaceEndpoint) spaceEndpointInput.value = spaceEndpoint;
+      if (localResult.jevApiKey) jevKeyInput.value = localResult.jevApiKey;
+      if (jevEnabledCheck) jevEnabledCheck.checked = !!syncResult.jevEnabled;
+      if (jevModelInput) jevModelInput.value = syncResult.jevModel || 'jev-latest';
+      if (jevPickInput) jevPickInput.value = String(syncResult.jevPickConfidence ?? 0.8);
+      if (jevDoneInput) jevDoneInput.value = String(syncResult.jevDoneConfidence ?? 0.9);
       // Restore BEFORE the model/persona loaders run — they derive their URLs
       // from this field (QA finding B).
       if (apiEndpointInput && syncResult.zoApiUrl) apiEndpointInput.value = syncResult.zoApiUrl;
@@ -459,12 +509,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     chrome.storage.local.set({
       zoAccessToken: token,
       zoSpaceEndpoint: spaceEndpointInput.value.trim(),
+      jevApiKey: (jevKeyInput?.value || '').trim(),
     }, () => {
       // Non-sensitive config stays in storage.sync
       chrome.storage.sync.set({
         zoApiUrl: (apiEndpointInput?.value || '').trim() || 'https://api.zo.computer/zo/ask',
         zoWebOrigin,
         zoUsername,
+        jevEnabled: !!(jevEnabledCheck?.checked),
+        jevModel: (jevModelInput?.value || '').trim() || 'jev-latest',
+        jevPickConfidence: Math.min(1, Math.max(0, parseFloat(jevPickInput?.value) || 0.8)),
+        jevDoneConfidence: Math.min(1, Math.max(0, parseFloat(jevDoneInput?.value) || 0.9)),
         zoModel: getModelValue(),
         zoPersonaId: personaSelect.value,
         zoQuickActions: quickActions,

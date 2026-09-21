@@ -368,4 +368,26 @@ describe("watchConfig — change subscription", () => {
     const config = await loadConfig();
     expect(config[STORAGE.ZO_USERNAME]).toBe("alice");
   });
+
+  it("routes the Jev key + endpoint to storage.local (sensitive), knobs to sync (#341)", async () => {
+    await saveConfig({
+      [STORAGE.JEV_API_KEY]: "apik_secret",
+      [STORAGE.JEV_ENABLED]: true,
+      [STORAGE.JEV_MODEL]: "jev-1.13",
+      [STORAGE.JEV_PICK_CONFIDENCE]: 0.85,
+      [STORAGE.JEV_DONE_CONFIDENCE]: 0.95,
+    });
+    const local = await chromeMock.storage.local.get([STORAGE.JEV_API_KEY, STORAGE.JEV_ENABLED]);
+    const sync = await chromeMock.storage.sync.get([STORAGE.JEV_API_KEY, STORAGE.JEV_ENABLED, STORAGE.JEV_MODEL, STORAGE.JEV_PICK_CONFIDENCE, STORAGE.JEV_DONE_CONFIDENCE]);
+    expect(local[STORAGE.JEV_API_KEY]).toBe("apik_secret");
+    expect(local[STORAGE.JEV_ENABLED]).toBeUndefined();
+    expect(sync[STORAGE.JEV_API_KEY]).toBeUndefined();
+    expect(sync[STORAGE.JEV_ENABLED]).toBe(true);
+    expect(sync[STORAGE.JEV_MODEL]).toBe("jev-1.13");
+    // Round-trip: the key survives a loadConfig (local wins over the '' default).
+    const config = await loadConfig();
+    expect(config[STORAGE.JEV_API_KEY]).toBe("apik_secret");
+    expect(config[STORAGE.JEV_ENABLED]).toBe(true);
+    expect(config[STORAGE.JEV_API_URL]).toBe("https://api.typesafe.ai/v1/systemone");
+  });
 });

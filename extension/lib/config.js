@@ -23,6 +23,17 @@ export const STORAGE = {
   // from: https://<slug>.zo.space + https://<slug>.zo.computer. Non-sensitive
   // (a name, not a credential); rides storage.sync.
   ZO_USERNAME: 'zoUsername',
+  // Jev (TypeSafe AI System One) — 0.3.4 Lane J. The fast path ships DARK:
+  // jevEnabled defaults false and nothing behavioral changes until the user
+  // opts in with a key. Key + endpoint are storage.local (sensitive-routing);
+  // the knobs ride storage.sync. Thresholds are PER-TYPE (noul vs choice
+  // confidences are not comparable per the vendor's model notes).
+  JEV_API_KEY: 'jevApiKey',
+  JEV_API_URL: 'jevApiUrl',
+  JEV_ENABLED: 'jevEnabled',
+  JEV_MODEL: 'jevModel',
+  JEV_PICK_CONFIDENCE: 'jevPickConfidence',
+  JEV_DONE_CONFIDENCE: 'jevDoneConfidence',
   ENABLE_SCREENSHOTS: 'enableScreenshots',
   ENABLE_WRITE_ASSIST: 'enableWriteAssist',
   ENABLED_MENUS: 'enabledMenus',
@@ -49,6 +60,11 @@ export const DEFAULTS = {
   // the user configures one — never silently inherit someone else's space.
   [STORAGE.SPACE_ENDPOINT]: '',
   [STORAGE.ZO_USERNAME]: '',
+  [STORAGE.JEV_API_KEY]: '',
+  [STORAGE.JEV_ENABLED]: false,
+  [STORAGE.JEV_MODEL]: 'jev-latest',
+  [STORAGE.JEV_PICK_CONFIDENCE]: 0.8,
+  [STORAGE.JEV_DONE_CONFIDENCE]: 0.9,
   [STORAGE.PERSONA_ID]: '',
   [STORAGE.ACTIVE_MODE]: 'cobrowse',
   [STORAGE.ENABLE_SCREENSHOTS]: true,
@@ -64,7 +80,11 @@ export const DEFAULTS = {
   [STORAGE.HANDOFF_BUDGET]: { ...DEFAULT_BUDGET },
 };
 
-const SENSITIVE_KEYS = new Set([STORAGE.TOKEN, STORAGE.SPACE_ENDPOINT]);
+const SENSITIVE_KEYS = new Set([STORAGE.TOKEN, STORAGE.SPACE_ENDPOINT, STORAGE.JEV_API_KEY, STORAGE.JEV_API_URL]);
+
+/** The Jev decide endpoint default — lives here (not in DEFAULTS) because it
+ *  is Advanced-only and rides storage.local via SENSITIVE_KEYS routing. */
+DEFAULTS[STORAGE.JEV_API_URL] = 'https://api.typesafe.ai/v1/systemone';
 
 // Zo username slug shape: lowercase DNS-label-ish (letters/digits/hyphens,
 // no leading/trailing hyphen, ≤63 chars) — the same class of name zo.space
@@ -85,15 +105,16 @@ export function deriveZoHosts(username) {
 }
 
 /** Load config from storage, merging with DEFAULTS.
- *  Sensitive keys (token, endpoint) come from storage.local;
+ *  Sensitive keys (token, endpoints, Jev key) come from storage.local;
  *  everything else from storage.sync. Returns a Promise. */
+const LOCAL_KEYS = [STORAGE.TOKEN, STORAGE.SPACE_ENDPOINT, STORAGE.JEV_API_KEY, STORAGE.JEV_API_URL];
 export function loadConfig() {
   return new Promise((resolve) => {
-    chrome.storage.local.get([STORAGE.TOKEN, STORAGE.SPACE_ENDPOINT], (local) => {
+    chrome.storage.local.get(LOCAL_KEYS, (local) => {
       chrome.storage.sync.get(null, (sync) => {
         const config = { ...DEFAULTS };
         // Apply local-storage values (sensitive)
-        for (const k of [STORAGE.TOKEN, STORAGE.SPACE_ENDPOINT]) {
+        for (const k of LOCAL_KEYS) {
           if (local[k] !== undefined) config[k] = local[k];
         }
         // Apply sync-storage values (safe), skip undefined

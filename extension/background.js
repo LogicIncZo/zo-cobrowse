@@ -12,6 +12,7 @@ import { buildPrompt } from './lib/prompt.js';
 import { shouldDowngradeToJsonDisabled } from './lib/intent.js';
 import { BUNDLED_SKILL_PATH, PROTOCOL_SKILL_PATH, SKILL_STATE_KEY, injectVersion, parseInstalledVersion } from './lib/protocol-skill.js';
 import { parseZoOutput, stripCodeFence } from './lib/parse-output.js';
+import { buildDecideRequest, parseDecideResponse, DEFAULT_JEV_API_URL, DEFAULT_JEV_MODEL } from './lib/jev.js';
 // safeText stays the local one (line ~156) — do NOT import it here.
 import {
   STRIP_MAX_TABS,
@@ -260,6 +261,11 @@ const DEFAULTS = {
   zoSpaceEndpoint: '',
   zoPersonaId: '',          // optional: pin the persona sent to the API
   zoActiveMode: 'cobrowse', // active Mode id (replaces personaMode + presets)
+  // Jev (0.3.4 Lane J) — ships dark; jevEnabled false = zero behavioral delta.
+  jevEnabled: false,
+  jevModel: 'jev-latest',
+  jevPickConfidence: 0.8, // choice hooks (click-target picks)
+  jevDoneConfidence: 0.9, // noul hooks (done-gates) — NOT comparable to choice
   zoAccessToken: '',
   enableScreenshots: true,  // global kill-switch; per-Mode tiers also gate capture
   enableWriteAssist: true,  // textarea write-assist floating icon (content script)
@@ -340,7 +346,7 @@ try {
 
 // ---- Init ----
 chrome.storage.sync.get(
-  ['zoApiUrl', 'zoModel', 'zoPersonaId', 'zoActiveMode', 'enableScreenshots', 'enableWriteAssist', 'enabledMenus', 'cobrowse_handoff_budget', 'zoWebOrigin'],
+  ['zoApiUrl', 'zoModel', 'zoPersonaId', 'zoActiveMode', 'enableScreenshots', 'enableWriteAssist', 'enabledMenus', 'cobrowse_handoff_budget', 'zoWebOrigin', 'jevEnabled', 'jevModel', 'jevPickConfidence', 'jevDoneConfidence'],
   (result) => {
     if (result.zoApiUrl) config.zoApiUrl = result.zoApiUrl;
     if (result.zoModel) config.zoModel = result.zoModel;
@@ -354,14 +360,21 @@ chrome.storage.sync.get(
     // #233: the panel reads zoWebOrigin from GET_CONFIG — load it at startup
     // so the ↗ chip works on first open without waiting for a storage change.
     if (result.zoWebOrigin !== undefined) config.zoWebOrigin = result.zoWebOrigin;
+    // Jev knobs (0.3.4 Lane J).
+    if (result.jevEnabled !== undefined) config.jevEnabled = result.jevEnabled;
+    if (result.jevModel) config.jevModel = result.jevModel;
+    if (result.jevPickConfidence !== undefined) config.jevPickConfidence = result.jevPickConfidence;
+    if (result.jevDoneConfidence !== undefined) config.jevDoneConfidence = result.jevDoneConfidence;
   }
 );
 // Sensitive config from storage.local (not synced)
 chrome.storage.local.get(
-  ['zoAccessToken', 'zoSpaceEndpoint'],
+  ['zoAccessToken', 'zoSpaceEndpoint', 'jevApiKey', 'jevApiUrl'],
   (result) => {
     if (result.zoAccessToken) config.zoAccessToken = result.zoAccessToken;
     if (result.zoSpaceEndpoint) config.zoSpaceEndpoint = result.zoSpaceEndpoint;
+    if (result.jevApiKey) config.jevApiKey = result.jevApiKey;
+    if (result.jevApiUrl) config.jevApiUrl = result.jevApiUrl;
   }
 );
 
@@ -374,9 +387,17 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   else if (changes.zoAccessToken?.oldValue && !changes.zoAccessToken?.newValue) config.zoAccessToken = undefined;
   if (changes.zoSpaceEndpoint?.newValue) config.zoSpaceEndpoint = changes.zoSpaceEndpoint.newValue;
   else if (changes.zoSpaceEndpoint?.oldValue && !changes.zoSpaceEndpoint?.newValue) config.zoSpaceEndpoint = undefined;
+  if (changes.jevApiKey?.newValue) config.jevApiKey = changes.jevApiKey.newValue;
+  else if (changes.jevApiKey?.oldValue && !changes.jevApiKey?.newValue) config.jevApiKey = undefined;
+  if (changes.jevApiUrl?.newValue) config.jevApiUrl = changes.jevApiUrl.newValue;
     if (changes.enabledMenus?.newValue) { config.enabledMenus = { ...config.enabledMenus, ...changes.enabledMenus.newValue }; recreateContextMenus(); }
   if (changes.enableScreenshots?.newValue !== undefined) config.enableScreenshots = changes.enableScreenshots.newValue;
   if (changes.enableWriteAssist?.newValue !== undefined) config.enableWriteAssist = changes.enableWriteAssist.newValue;
+  // Jev knobs (0.3.4 Lane J) — sync side.
+  if (changes.jevEnabled?.newValue !== undefined) config.jevEnabled = changes.jevEnabled.newValue;
+  if (changes.jevModel?.newValue) config.jevModel = changes.jevModel.newValue;
+  if (changes.jevPickConfidence?.newValue !== undefined) config.jevPickConfidence = changes.jevPickConfidence.newValue;
+  if (changes.jevDoneConfidence?.newValue !== undefined) config.jevDoneConfidence = changes.jevDoneConfidence.newValue;
 });
 
 // Open side panel on toolbar icon click (global scope — takes effect on every SW wake-up).
@@ -414,6 +435,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
     case 'TEST_CONNECTION': {
       testConnection().then(sendResponse);
+      return true;
+    }
+    case 'JEV_TEST': {
+      jevTest().then(sendResponse);
       return true;
     }
     case 'GET_CONFIG': {
@@ -2459,6 +2484,44 @@ async function testConnection() {
   }
 
   return { success: zoOk, zoApi: zoOk, zoSpace: spaceOk };
+}
+
+/** Jev connectivity probe (0.3.4 Lane J1, JEV_TEST). One noul ping against
+ *  the configured decide endpoint — proves the key + wire format work and
+ *  reports latency. Never throws; works even while jevEnabled is false so
+ *  the user can validate a key before opting in. */
+async function jevTest() {
+  if (!config.jevApiKey) {
+    return { ok: false, error: 'Jev API key not configured.' };
+  }
+  const url = config.jevApiUrl || DEFAULT_JEV_API_URL;
+  const body = buildDecideRequest({
+    model: config.jevModel || DEFAULT_JEV_MODEL,
+    state: 'Jev connectivity probe from the Zo Co-browse extension.',
+    questions: { probe: { type: 'noul', instructions: 'The state is a connectivity probe sent by a browser extension. The probe reached the model.' } },
+  });
+  const t0 = Date.now();
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    const res = await fetch(url, {
+      signal: controller.signal,
+      method: 'POST',
+      headers: { Authorization: `Bearer ${config.jevApiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    clearTimeout(timeout);
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      return { ok: false, error: `Jev endpoint returned ${res.status}${txt ? ' — ' + txt.slice(0, 140) : ''}` };
+    }
+    const parsed = parseDecideResponse(await res.json().catch(() => null));
+    if (!parsed.ok) return { ok: false, error: parsed.error };
+    return { ok: true, latencyMs: Date.now() - t0, model: parsed.model, usage: parsed.usage, answer: parsed.answers.probe || null };
+  } catch (err) {
+    const msg = err && err.name === 'AbortError' ? 'Jev request timed out after 10s.' : `Jev probe failed: ${err.message}`;
+    return { ok: false, error: msg };
+  }
 }
 
 

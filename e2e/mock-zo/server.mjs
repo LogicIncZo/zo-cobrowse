@@ -255,6 +255,29 @@ const server = http.createServer(async (req, res) => {
   // POST, initialize returns the session id header, tools/call `bash`
   // wraps stdout in a Python-repr CmdResult with __ZO_BEGIN__/__ZO_END__
   // markers around the payload.
+  // Jev decide endpoint mock (0.3.4 Lane J) — the documented /v1/systemone
+  // shape; deterministic high-confidence answers, request recorded.
+  if (url.pathname === "/v1/systemone" && req.method === "POST") {
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    let body = {};
+    try {
+      body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+    } catch {}
+    requests.push({ ts: Date.now(), method: "POST", url: "/v1/systemone", body });
+    const answers = {};
+    for (const [id, q] of Object.entries(body.questions || {})) {
+      if (q.type === "noul") answers[id] = { type: "noul", noul: 0.97 };
+      else if (q.type === "choice") {
+        const keys = Object.keys(q.criteria || {});
+        answers[id] = { type: "choice", choice: keys[0] ?? "", probabilities: { [keys[0] ?? ""]: 0.97 }, confidence: 0.97 };
+      } else if (q.type === "score") {
+        answers[id] = { type: "score", score: 1, confidence: 0.95 };
+      }
+    }
+    res.writeHead(200, { "content-type": "application/json", ...cors });
+    return res.end(JSON.stringify({ model: "jev-mock", answers, usage: { input_tokens: 42, output_tokens: 8 } }));
+  }
   if (url.pathname === "/mcp" && req.method === "POST") {
     const chunks = [];
     for await (const c of req) chunks.push(c);
