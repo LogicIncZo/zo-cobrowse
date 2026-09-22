@@ -262,6 +262,18 @@ describe("Lane J3 — the marriage", () => {
     const dDown = describePrompt(cobrowse, ctx, "Summarize what this page is about", { effectiveTier: 0, jevAssist: true });
     expect(dDown.downgradeApplied).toBe(true);
     expect(dDown.sections.some((s: any) => s.id === "jev")).toBe(false);
+    // #371: a READONLY handoff run never learns the vocabulary either — its
+    // boundary parks every click, so the background withholds jevAssist
+    // (jevReady() && !readonlyRun) instead of teaching delegating clicks.
+    // Reproduces the exact turn-1 assembly the panel sends: goal + instructions.
+    const { createRun, handoffInstructions } = await import("../extension/lib/handoff.js");
+    const run = createRun({ goal: "Compare pricing across these tabs", boundaryMode: "readonly" });
+    const handoffQuery = `${run.goal}\n\n${handoffInstructions(run)}`;
+    const withJev = buildPrompt(cobrowse, ctx, handoffQuery, { effectiveTier: 2, jevAssist: true });
+    expect(withJev).toContain("handoff-run marker"); // the instructions ride
+    const withoutJev = buildPrompt(cobrowse, ctx, handoffQuery, { effectiveTier: 2, jevAssist: false });
+    expect(withoutJev).not.toContain("Jev-Assisted Steps");
+    expect(withoutJev).toBe(buildPrompt(cobrowse, ctx, handoffQuery, { effectiveTier: 2, jevAssist: false })); // stable
     // The structured view tags the section for the inspector.
     const d = describePrompt(cobrowse, ctx, "q", { effectiveTier: 2, jevAssist: true });
     expect(d.prompt).toContain("Jev-Assisted Steps");

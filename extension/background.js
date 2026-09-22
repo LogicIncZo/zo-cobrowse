@@ -1497,12 +1497,17 @@ async function _askZoStreamImpl(port, msg) {
   // read_file there is a minutes-long failure (observed on a real RTI
   // compose run). Runs re-read nothing; the grammar rides in-prompt.
   let composeTurn = false;
+  let readonlyRun = false;
   if (msg.handoffRunId) {
     const run = await handoffGet({ runId: msg.handoffRunId }).catch(() => null);
     composeTurn = !!(run && run.compose);
+    // #371: a readonly run parks every click — the Jev pick vocabulary
+    // (delegate-a-click) is dead weight contradicting the run's own
+    // instructions. Compose runs keep it: they legitimately click.
+    readonlyRun = !!(run && run.boundaryMode === 'readonly');
   }
   const establishedThread = !!loop.threadId;
-  const prompt = msg._followUpInput || buildPrompt(mode, pageContext, userQuery, { effectiveTier, ...(msg.shotOnly ? { screenshotOnly: true } : {}), tabContexts: loop.tabContexts, skills: msg.skills, workspaceFiles: msg.workspaceFiles, ...(protocolSkill ? { protocolSkill } : {}), ...(establishedThread ? { establishedThread: true } : {}), jevAssist: jevReady(), ...(composeTurn ? { noSlimTail: true } : {}) });
+  const prompt = msg._followUpInput || buildPrompt(mode, pageContext, userQuery, { effectiveTier, ...(msg.shotOnly ? { screenshotOnly: true } : {}), tabContexts: loop.tabContexts, skills: msg.skills, workspaceFiles: msg.workspaceFiles, ...(protocolSkill ? { protocolSkill } : {}), ...(establishedThread ? { establishedThread: true } : {}), jevAssist: jevReady() && !readonlyRun, ...(composeTurn ? { noSlimTail: true } : {}) });
 
   try {
     const response = await fetch(config.zoApiUrl, {
@@ -4302,7 +4307,10 @@ async function executeActions(actions, tabId, opts = {}) {
     const MAX_PASSES = 2;
     for (let pass = 0; pass < MAX_PASSES; pass++) {
       // Pass 0 only: resolve a pick-annotated click into a concrete one.
-      if (pass === 0 && current.type === 'click' && current.pick) {
+      // #371: a readonly run's clicks are parked by the boundary regardless —
+      // never spend a Jev round-trip resolving one (prompt-side the vocabulary
+      // isn't even taught there; this is the injection backstop).
+      if (pass === 0 && current.type === 'click' && current.pick && opts.boundaryMode !== 'readonly') {
         if (!jevReady()) {
           // Pick vocabulary without the fast path: degrade honestly — click
           // a co-declared selector, else refuse with the reason.
