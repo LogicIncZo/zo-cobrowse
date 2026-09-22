@@ -1166,12 +1166,14 @@ chrome.runtime.onConnect.addListener((port) => {
         // and the first turn flips the run priming → running.
         if (msg.handoffRunId) {
           handoffTurnCtx.set(msg.handoffRunId, { port, msg });
-          handoffGet({ runId: msg.handoffRunId }).then((run) => {
-            if (run && run.status === 'priming') {
-              const res = handoffTransition(run, 'start', { now: Date.now() });
-              if (res.ok) handoffPut(res.run);
-            }
-          });
+          // Awaited (#368): the flip is part of turn registration. The old
+          // fire-and-forget .then raced a fast stream — the turn could finish
+          // before the run left 'priming', stranding the loop's state machine.
+          const run = await handoffGet({ runId: msg.handoffRunId }).catch(() => null);
+          if (run && run.status === 'priming') {
+            const res = handoffTransition(run, 'start', { now: Date.now() });
+            if (res.ok) await handoffPut(res.run);
+          }
         }
         try {
           await askZoStream(port, msg);
@@ -1886,8 +1888,12 @@ async function finishStreamWithPullLoop(port, sid, output, extra, loop) {
   }
   // Every finish from here on belongs to this stream's Zo thread — echo it.
   const withThread = { ...extra, conversationId: loop.threadId ?? undefined };
-  const reqs = extractPullRequests(parseZoOutput(output).actions);
+  const parsedOutput = parseZoOutput(output);
+  const reqs = extractPullRequests(parsedOutput.actions);
   if (!reqs.length) {
+    // #368: block an actionless handoff turn BEFORE the panel sees STREAM_DONE —
+    // the prose still renders, but the run no longer strands 'running'.
+    await handoffBlockOnActionlessTurn(loop, parsedOutput);
     finishStream(port, sid, output, withThread);
     return;
   }
@@ -2899,6 +2905,25 @@ async function handoffAfterExecute(runId, request, res) {
   } catch (e) {
     console.debug('handoffAfterExecute:', e);
   }
+}
+
+// #368: a handoff turn that ends with ZERO actions never reaches
+// handoffAfterExecute — no EXECUTE_ACTIONS follows (the panel executes
+// nothing), so the run strands 'running' forever: no continuation, no budget
+// block, a stuck live badge. Called from the stream finish: block the run
+// honestly (needs-you notification + ▶ Resume) with the prose as the reason.
+async function handoffBlockOnActionlessTurn(loop, parsed) {
+  const runId = loop && loop.msg && loop.msg.handoffRunId;
+  if (!runId || !Array.isArray(parsed && parsed.actions) || parsed.actions.length) return;
+  const run = await handoffGet({ runId });
+  if (!run || run.status !== 'running') return;
+  const prose = safeText(parsed.plainText || parsed.rawOutput).trim();
+  const t = handoffTransition(run, 'block', {
+    now: Date.now(),
+    reason: `turn ended without actions${prose ? ' — ' + prose.slice(0, 200) : ''}`,
+  });
+  handoffTurnCtx.delete(runId);
+  await handoffPut(t.ok ? t.run : run);
 }
 
 async function handoffChainNextTurn(runId) {
