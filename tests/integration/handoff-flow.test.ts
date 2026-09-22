@@ -300,6 +300,22 @@ describe("handoff run loop (Lane E)", () => {
     expect(note.opts.message).toContain("Digest the tabs");
   });
 
+  it("a second HANDOFF_START in the same chat refuses while a run is live (#370)", async () => {
+    const run = await startRun({ goal: "First goal" });
+    const second = await bus.runtime.sendMessage({
+      type: "HANDOFF_START", chatId: run.chatId, tabId: 1, goal: "Second goal", boundaryMode: "readonly",
+    });
+    expect(second.ok).toBe(false);
+    expect(second.error).toContain("already has a live handoff run");
+    // Stopping the live run frees the chat for a fresh start.
+    await bus.runtime.sendMessage({ type: "HANDOFF_STOP", runId: run.runId });
+    const third = await bus.runtime.sendMessage({
+      type: "HANDOFF_START", chatId: run.chatId, tabId: 1, goal: "Third goal", boundaryMode: "readonly",
+    });
+    expect(third.ok).toBe(true);
+    await bus.runtime.sendMessage({ type: "HANDOFF_STOP", runId: third.run.runId });
+  });
+
   it("#371: a readonly run's turns carry no Jev block even with the fast path configured", async () => {
     // Configure Jev the way the options card does (key + enable) — through
     // the storage API so the background's onChanged refresh picks it up.

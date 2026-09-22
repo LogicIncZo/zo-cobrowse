@@ -501,16 +501,25 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // {chatId, tabId, goal, boundaryMode?, budget?} → {ok, run}. The run
       // starts in 'priming'; the panel's first ASK_ZO (carrying handoffRunId)
       // flips it to 'running' and registers the loop's turn context.
-      const run = handoffCreateRunPure({
-        chatId: request.chatId,
-        goal: request.goal,
-        boundaryMode: request.boundaryMode,
-        // #158: explicit request budget wins; else the config default
-        // (storage.sync `cobrowse_handoff_budget`); else the lib default.
-        budget: request.budget || config.cobrowse_handoff_budget || undefined,
+      // #370: one live run per chat (the compose rule, mirrored) — a second
+      // !handoff in the same chat would put two runs on one pinned tab,
+      // interleaving turns and stealing the panel's batch executor.
+      handoffGet({ chatId: request.chatId }).then((liveRun) => {
+        if (liveRun) {
+          sendResponse({ ok: false, error: 'this chat already has a live handoff run — stop it first (✕ on the progress line)' });
+          return;
+        }
+        const run = handoffCreateRunPure({
+          chatId: request.chatId,
+          goal: request.goal,
+          boundaryMode: request.boundaryMode,
+          // #158: explicit request budget wins; else the config default
+          // (storage.sync `cobrowse_handoff_budget`); else the lib default.
+          budget: request.budget || config.cobrowse_handoff_budget || undefined,
+        });
+        run.tabId = request.tabId;
+        handoffPut(run).then((saved) => sendResponse({ ok: true, run: saved }));
       });
-      run.tabId = request.tabId;
-      handoffPut(run).then((saved) => sendResponse({ ok: true, run: saved }));
       return true;
     }
     case 'HANDOFF_STOP': {
