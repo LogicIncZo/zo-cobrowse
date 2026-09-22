@@ -4,6 +4,18 @@ The full, versioned history lives in the repo's
 [CHANGELOG.md](https://github.com/LogicIncZo/zo-cobrowse/blob/dev/CHANGELOG.md).
 This page mirrors everything **unreleased** on `dev`.
 
+## [0.3.4.3] — 2026-09-22
+
+### Fixed — !handoff bug bash (#368–#372, PRs #373–#377)
+
+Second owner-directed 0.3.4 stabilization round, over the Lane E delegate loop (evidence: `tests/test-prompts/probe-handoff-bash.ts`).
+
+- **Prose-only turns no longer strand the run (#368, PR #373)** — blocked with the prose as the reason; ▶ Resume continues.
+- **Resumed runs re-prime with full context (#369, PR #374)** — no more tier-0 crawl on the resume path (#351 class).
+- **One live run per chat (#370, PR #375)** — a second `!handoff` refuses, mirroring compose.
+- **No Jev click machinery on readonly runs (#371, PR #376)** — prompt vocabulary + executor pick calls suppressed run-scoped.
+- **Orphan sweep clears the ▶ badge (#372, PR #377)**.
+
 ## [0.3.4.2] — 2026-09-22
 
 ### Fixed — prompt-efficiency bug bash (#355–#358, PRs #359–#362)

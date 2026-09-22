@@ -501,16 +501,25 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // {chatId, tabId, goal, boundaryMode?, budget?} → {ok, run}. The run
       // starts in 'priming'; the panel's first ASK_ZO (carrying handoffRunId)
       // flips it to 'running' and registers the loop's turn context.
-      const run = handoffCreateRunPure({
-        chatId: request.chatId,
-        goal: request.goal,
-        boundaryMode: request.boundaryMode,
-        // #158: explicit request budget wins; else the config default
-        // (storage.sync `cobrowse_handoff_budget`); else the lib default.
-        budget: request.budget || config.cobrowse_handoff_budget || undefined,
+      // #370: one live run per chat (the compose rule, mirrored) — a second
+      // !handoff in the same chat would put two runs on one pinned tab,
+      // interleaving turns and stealing the panel's batch executor.
+      handoffGet({ chatId: request.chatId }).then((liveRun) => {
+        if (liveRun) {
+          sendResponse({ ok: false, error: 'this chat already has a live handoff run — stop it first (✕ on the progress line)' });
+          return;
+        }
+        const run = handoffCreateRunPure({
+          chatId: request.chatId,
+          goal: request.goal,
+          boundaryMode: request.boundaryMode,
+          // #158: explicit request budget wins; else the config default
+          // (storage.sync `cobrowse_handoff_budget`); else the lib default.
+          budget: request.budget || config.cobrowse_handoff_budget || undefined,
+        });
+        run.tabId = request.tabId;
+        handoffPut(run).then((saved) => sendResponse({ ok: true, run: saved }));
       });
-      run.tabId = request.tabId;
-      handoffPut(run).then((saved) => sendResponse({ ok: true, run: saved }));
       return true;
     }
     case 'HANDOFF_STOP': {
@@ -1166,12 +1175,14 @@ chrome.runtime.onConnect.addListener((port) => {
         // and the first turn flips the run priming → running.
         if (msg.handoffRunId) {
           handoffTurnCtx.set(msg.handoffRunId, { port, msg });
-          handoffGet({ runId: msg.handoffRunId }).then((run) => {
-            if (run && run.status === 'priming') {
-              const res = handoffTransition(run, 'start', { now: Date.now() });
-              if (res.ok) handoffPut(res.run);
-            }
-          });
+          // Awaited (#368): the flip is part of turn registration. The old
+          // fire-and-forget .then raced a fast stream — the turn could finish
+          // before the run left 'priming', stranding the loop's state machine.
+          const run = await handoffGet({ runId: msg.handoffRunId }).catch(() => null);
+          if (run && run.status === 'priming') {
+            const res = handoffTransition(run, 'start', { now: Date.now() });
+            if (res.ok) await handoffPut(res.run);
+          }
         }
         try {
           await askZoStream(port, msg);
@@ -1486,12 +1497,17 @@ async function _askZoStreamImpl(port, msg) {
   // read_file there is a minutes-long failure (observed on a real RTI
   // compose run). Runs re-read nothing; the grammar rides in-prompt.
   let composeTurn = false;
+  let readonlyRun = false;
   if (msg.handoffRunId) {
     const run = await handoffGet({ runId: msg.handoffRunId }).catch(() => null);
     composeTurn = !!(run && run.compose);
+    // #371: a readonly run parks every click — the Jev pick vocabulary
+    // (delegate-a-click) is dead weight contradicting the run's own
+    // instructions. Compose runs keep it: they legitimately click.
+    readonlyRun = !!(run && run.boundaryMode === 'readonly');
   }
   const establishedThread = !!loop.threadId;
-  const prompt = msg._followUpInput || buildPrompt(mode, pageContext, userQuery, { effectiveTier, ...(msg.shotOnly ? { screenshotOnly: true } : {}), tabContexts: loop.tabContexts, skills: msg.skills, workspaceFiles: msg.workspaceFiles, ...(protocolSkill ? { protocolSkill } : {}), ...(establishedThread ? { establishedThread: true } : {}), jevAssist: jevReady(), ...(composeTurn ? { noSlimTail: true } : {}) });
+  const prompt = msg._followUpInput || buildPrompt(mode, pageContext, userQuery, { effectiveTier, ...(msg.shotOnly ? { screenshotOnly: true } : {}), tabContexts: loop.tabContexts, skills: msg.skills, workspaceFiles: msg.workspaceFiles, ...(protocolSkill ? { protocolSkill } : {}), ...(establishedThread ? { establishedThread: true } : {}), jevAssist: jevReady() && !readonlyRun, ...(composeTurn ? { noSlimTail: true } : {}) });
 
   try {
     const response = await fetch(config.zoApiUrl, {
@@ -1886,8 +1902,12 @@ async function finishStreamWithPullLoop(port, sid, output, extra, loop) {
   }
   // Every finish from here on belongs to this stream's Zo thread — echo it.
   const withThread = { ...extra, conversationId: loop.threadId ?? undefined };
-  const reqs = extractPullRequests(parseZoOutput(output).actions);
+  const parsedOutput = parseZoOutput(output);
+  const reqs = extractPullRequests(parsedOutput.actions);
   if (!reqs.length) {
+    // #368: block an actionless handoff turn BEFORE the panel sees STREAM_DONE —
+    // the prose still renders, but the run no longer strands 'running'.
+    await handoffBlockOnActionlessTurn(loop, parsedOutput);
     finishStream(port, sid, output, withThread);
     return;
   }
@@ -2742,7 +2762,13 @@ async function handoffGet({ runId, chatId } = {}) {
         if (res.ok) { runs[run.runId] = res.run; dirty = true; }
       }
     }
-    if (dirty) await handoffStore.save(runs);
+    if (dirty) {
+      await handoffStore.save(runs);
+      // #372: the sweep bypasses handoffPut (no update push — the panel's
+      // port died with the worker) but the BADGE persists across SW
+      // restarts: without this, a paused-by-restart run leaves a stale ▶.
+      handoffUpdateBadge(runs);
+    }
   }).catch(() => { /* storage unavailable — nothing to sweep */ });
 })();
 
@@ -2899,6 +2925,25 @@ async function handoffAfterExecute(runId, request, res) {
   } catch (e) {
     console.debug('handoffAfterExecute:', e);
   }
+}
+
+// #368: a handoff turn that ends with ZERO actions never reaches
+// handoffAfterExecute — no EXECUTE_ACTIONS follows (the panel executes
+// nothing), so the run strands 'running' forever: no continuation, no budget
+// block, a stuck live badge. Called from the stream finish: block the run
+// honestly (needs-you notification + ▶ Resume) with the prose as the reason.
+async function handoffBlockOnActionlessTurn(loop, parsed) {
+  const runId = loop && loop.msg && loop.msg.handoffRunId;
+  if (!runId || !Array.isArray(parsed && parsed.actions) || parsed.actions.length) return;
+  const run = await handoffGet({ runId });
+  if (!run || run.status !== 'running') return;
+  const prose = safeText(parsed.plainText || parsed.rawOutput).trim();
+  const t = handoffTransition(run, 'block', {
+    now: Date.now(),
+    reason: `turn ended without actions${prose ? ' — ' + prose.slice(0, 200) : ''}`,
+  });
+  handoffTurnCtx.delete(runId);
+  await handoffPut(t.ok ? t.run : run);
 }
 
 async function handoffChainNextTurn(runId) {
@@ -4268,7 +4313,10 @@ async function executeActions(actions, tabId, opts = {}) {
     const MAX_PASSES = 2;
     for (let pass = 0; pass < MAX_PASSES; pass++) {
       // Pass 0 only: resolve a pick-annotated click into a concrete one.
-      if (pass === 0 && current.type === 'click' && current.pick) {
+      // #371: a readonly run's clicks are parked by the boundary regardless —
+      // never spend a Jev round-trip resolving one (prompt-side the vocabulary
+      // isn't even taught there; this is the injection backstop).
+      if (pass === 0 && current.type === 'click' && current.pick && opts.boundaryMode !== 'readonly') {
         if (!jevReady()) {
           // Pick vocabulary without the fast path: degrade honestly — click
           // a co-declared selector, else refuse with the reason.

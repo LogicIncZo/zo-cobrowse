@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.3.4.3] — 2026-09-22
+
+### Fixed — !handoff bug bash (#368–#372, PRs #373–#377)
+
+Second owner-directed 0.3.4 stabilization round: a bug bash over the Lane E delegate loop — start, priming, chaining, parks, resume, badge/notification surfaces. Evidence harness: `tests/test-prompts/probe-handoff-bash.ts` (+ a new standalone-process sweep test).
+
+- **Prose-only turns no longer strand the run (#368, PR #373).** A handoff turn whose reply carried zero actions (clarifying question, login wall, envelope drift) never reached `handoffAfterExecute` — the run stayed `running` forever with a stuck ▶ badge and no notification. The stream finish now blocks the run with the prose as the reason (▶ Resume re-issues a continuation); the priming→running flip is awaited during turn registration (the old fire-and-forget raced fast streams).
+- **Resumed runs re-prime with full context (#369, PR #374).** ▶ Resume and compose park-resolve went through the plain send: an unchanged page hash hit the follow-up dedup (tier 0) and the DOM cap wasn't bypassed — the #351 crawl on the resume path. Resumed sends now force-attach (own footer-chip reason, inspector mirrored).
+- **One live run per chat (#370, PR #375).** A second `!handoff` in the same chat refused (compose's guard, mirrored) instead of pinning two runs to one tab and stranding the older one.
+- **No Jev click machinery on readonly runs (#371, PR #376).** The pick-vocabulary block rode every readonly turn (contradicting the run's own "never click or fill"), and the executor resolved pick-annotated clicks — a live Jev round-trip — before the boundary parked them. Suppressed run-scoped; compose keeps it.
+- **Orphan sweep clears the ▶ badge (#372, PR #377).** A paused-by-restart run left a stale live marker; the sweep now updates the badge.
+
+Tests: 1526 unit/integration across 65 files; all five issues closed with evidence; milestone `0.3.4.3` drained.
+
 ## [0.3.4.2] — 2026-09-22
 
 ### Fixed — prompt-efficiency bug bash (#355–#358, PRs #359–#362)

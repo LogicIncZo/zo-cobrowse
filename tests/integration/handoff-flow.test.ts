@@ -299,6 +299,72 @@ describe("handoff run loop (Lane E)", () => {
     expect(note.opts.title).toBe("Zo handoff finished");
     expect(note.opts.message).toContain("Digest the tabs");
   });
+
+  it("a second HANDOFF_START in the same chat refuses while a run is live (#370)", async () => {
+    const run = await startRun({ goal: "First goal" });
+    const second = await bus.runtime.sendMessage({
+      type: "HANDOFF_START", chatId: run.chatId, tabId: 1, goal: "Second goal", boundaryMode: "readonly",
+    });
+    expect(second.ok).toBe(false);
+    expect(second.error).toContain("already has a live handoff run");
+    // Stopping the live run frees the chat for a fresh start.
+    await bus.runtime.sendMessage({ type: "HANDOFF_STOP", runId: run.runId });
+    const third = await bus.runtime.sendMessage({
+      type: "HANDOFF_START", chatId: run.chatId, tabId: 1, goal: "Third goal", boundaryMode: "readonly",
+    });
+    expect(third.ok).toBe(true);
+    await bus.runtime.sendMessage({ type: "HANDOFF_STOP", runId: third.run.runId });
+  });
+
+  it("#371: a readonly run's turns carry no Jev block even with the fast path configured", async () => {
+    // Configure Jev the way the options card does (key + enable) — through
+    // the storage API so the background's onChanged refresh picks it up.
+    await bus.storage.local.set({ jevApiKey: "test-key" });
+    await bus.storage.sync.set({ jevEnabled: true });
+    await flush();
+    const run = await startRun({ goal: "Digest the release notes" });
+    fm.handle(() => sseResponse(zoSseText({ text: "ok" })));
+    const asksBefore = fm.to("/zo/ask").length;
+    port.postMessage({ sessionId: 970, type: "ASK_ZO", chatId: run.chatId, modeId: "cobrowse", userQuery: run.goal, handoffRunId: run.runId });
+    await waitUntil(() => fm.to("/zo/ask").length > asksBefore, 8000);
+    const turn = fm.to("/zo/ask").at(-1);
+    expect(String(turn.body.input)).toContain("Digest the release notes");
+    expect(String(turn.body.input)).not.toContain("Jev-Assisted Steps");
+    await bus.runtime.sendMessage({ type: "HANDOFF_STOP", runId: run.runId });
+    // Control: a plain chat ask with the same config still gets the block —
+    // the suppression is run-scoped (readonly boundary), not global.
+    fm.handle(() => sseResponse(zoSseText({ text: "ok" })));
+    const plainBefore = fm.to("/zo/ask").length;
+    port.postMessage({ sessionId: 971, type: "ASK_ZO", chatId: "chat-jev-control", modeId: "cobrowse", userQuery: "Click the first product" });
+    await waitUntil(() => fm.to("/zo/ask").length > plainBefore, 8000);
+    expect(String(fm.to("/zo/ask").at(-1).body.input)).toContain("Jev-Assisted Steps");
+    await bus.storage.local.remove("jevApiKey");
+    await bus.storage.sync.remove("jevEnabled");
+    await flush();
+  });
+
+  it("blocks the run when a turn ends without actions — no strand, no chain (#368)", async () => {
+    const run = await startRun();
+    fm.handle(() => sseResponse(zoSseText({ text: "The page requires a login — which credentials should I use?" })));
+    const asksBefore = fm.to("/zo/ask").length;
+    port.postMessage({ sessionId: 960, type: "ASK_ZO", chatId: run.chatId, modeId: "cobrowse", userQuery: run.goal, handoffRunId: run.runId });
+    await waitUntil(() => pushes.some((p) => p.run?.runId === run.runId && p.run.status === "blocked"), 8000);
+    const st = await bus.runtime.sendMessage({ type: "HANDOFF_STATUS", runId: run.runId });
+    expect(st.run.status).toBe("blocked");
+    expect(st.run.stopReason).toContain("turn ended without actions");
+    expect(st.run.stopReason).toContain("login"); // the prose is the reason
+    // No continuation was chained — exactly one real Zo turn was spent.
+    expect(fm.to("/zo/ask").length).toBe(asksBefore + 1);
+    // The blocked run fired the needs-you notification…
+    const note = notifications.find((n) => n.id === `handoff-${run.runId}`);
+    expect(note).toBeTruthy();
+    expect(note.opts.title).toBe("Zo handoff needs you");
+    // …and is resumable: the panel re-issues the returned continuation turn.
+    const res = await bus.runtime.sendMessage({ type: "HANDOFF_RESUME", runId: run.runId });
+    expect(res.ok).toBe(true);
+    expect(res.continuationQuery).toContain("[handoff-run continuation]");
+    await bus.runtime.sendMessage({ type: "HANDOFF_STOP", runId: run.runId });
+  });
 });
 
 describe("compose sink (C1 #289)", () => {
