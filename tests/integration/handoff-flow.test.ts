@@ -299,6 +299,29 @@ describe("handoff run loop (Lane E)", () => {
     expect(note.opts.title).toBe("Zo handoff finished");
     expect(note.opts.message).toContain("Digest the tabs");
   });
+
+  it("blocks the run when a turn ends without actions — no strand, no chain (#368)", async () => {
+    const run = await startRun();
+    fm.handle(() => sseResponse(zoSseText({ text: "The page requires a login — which credentials should I use?" })));
+    const asksBefore = fm.to("/zo/ask").length;
+    port.postMessage({ sessionId: 960, type: "ASK_ZO", chatId: run.chatId, modeId: "cobrowse", userQuery: run.goal, handoffRunId: run.runId });
+    await waitUntil(() => pushes.some((p) => p.run?.runId === run.runId && p.run.status === "blocked"), 8000);
+    const st = await bus.runtime.sendMessage({ type: "HANDOFF_STATUS", runId: run.runId });
+    expect(st.run.status).toBe("blocked");
+    expect(st.run.stopReason).toContain("turn ended without actions");
+    expect(st.run.stopReason).toContain("login"); // the prose is the reason
+    // No continuation was chained — exactly one real Zo turn was spent.
+    expect(fm.to("/zo/ask").length).toBe(asksBefore + 1);
+    // The blocked run fired the needs-you notification…
+    const note = notifications.find((n) => n.id === `handoff-${run.runId}`);
+    expect(note).toBeTruthy();
+    expect(note.opts.title).toBe("Zo handoff needs you");
+    // …and is resumable: the panel re-issues the returned continuation turn.
+    const res = await bus.runtime.sendMessage({ type: "HANDOFF_RESUME", runId: run.runId });
+    expect(res.ok).toBe(true);
+    expect(res.continuationQuery).toContain("[handoff-run continuation]");
+    await bus.runtime.sendMessage({ type: "HANDOFF_STOP", runId: run.runId });
+  });
 });
 
 describe("compose sink (C1 #289)", () => {
