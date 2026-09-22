@@ -7,6 +7,7 @@ import {
   buildListAutomationsPrompt,
   buildRunSkillPrompt,
   buildTestConnectionPrompt,
+  buildWorkspaceWritePrompt,
 } from "../extension/lib/zo-prompts.js";
 import { GenerateModeReplySchema } from "./schemas/zo-prompts.js";
 import { presetToMode } from "../extension/lib/modes.js";
@@ -36,6 +37,20 @@ describe("zo-prompts — builder content contracts", () => {
     expect(buildCreateAutomationPrompt("do it", "FREQ=DAILY", null)).toContain("create_agent");
     expect(buildListAutomationsPrompt()).toContain("RRULE");
     expect(buildTestConnectionPrompt().toLowerCase()).toContain("zo_ok");
+  });
+
+  it("#358: buildWorkspaceWritePrompt is the byte-stable one-shot write contract", () => {
+    const p = buildWorkspaceWritePrompt("Documents/research/x.md", "hello\nworld");
+    expect(p).toContain("path \`Documents/research/x.md\` in my workspace");
+    expect(p).toContain("Create the directory if it does not exist");
+    expect(p).toContain("Use write_file or equivalent");
+    expect(p).toContain("---CONTENT START---\nhello\nworld\n---CONTENT END---");
+    // The three background call sites must use the shared builder — no
+    // hand-inlined copies may return (they drifted once).
+    const bg = readFileSync(resolve(import.meta.dir, "../extension/background.js"), "utf-8");
+    expect(bg).not.toContain("Write the following content to the file at path");
+    const uses = bg.match(/buildWorkspaceWritePrompt\(/g) || [];
+    expect(uses.length).toBe(3); // import + savePage + saveConversation + oneShot fallback
   });
 });
 

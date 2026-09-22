@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.3.4.2] — 2026-09-22
+
+### Fixed — prompt-efficiency bug bash (#355–#358, PRs #359–#362)
+
+Owner-directed bash over every prompt the extension sends to `/zo/ask`, across all scenarios (mode × tier × tail state × pull/write-assist/one-shot assemblers). Evidence harness: `tests/test-prompts/probe-bloat-0342.ts` (29 rendered scenarios, per-section token sizes).
+
+- **Jev-Assisted block gated on the post-downgrade decision (#355, PR #359).** The pick-vocabulary block keyed on the Mode's static `expectJson` flag instead of `wantJson`, so every read-intent query typed into Co-browse carried a dead 148-token action block on a plain-markdown turn. Read modes were already exempt; the cobrowse downgrade path now is too.
+- **Visual mode drops the tier-2 selector lists (#356, PR #360).** A read-only screenshot mode can never act, yet attached ~1.3k tokens of Elements/Forms per turn. New `domSections` Mode knob (default true; visual false) omits them; the 📷 Image-toggle in Co-browse still sends DOM with pixels.
+- **Jev-Assisted block tightened 148→123 tokens (#357, PR #361).** Redundancy cut (preamble, restated judgment rule, duplicated no-fills list); every guardrail (only-when-unconfident, Ask WHICH, cannot fill/navigate/write, parks for user) is now test-pinned so future edits can't silently drop one.
+- **One-shot workspace-write prompt deduped (#358, PR #362).** Three hand-inlined copies (save-page, save-conversation, protocol-skill fallback) collapsed into `buildWorkspaceWritePrompt()` in `lib/zo-prompts.js`; byte-identical wire output, with an anti-drift test forbidding inline copies from returning.
+
+Evals: `visual-describe` cache refreshed live post-#356 (PR #363); offline suite 24/24.
+
 ## [0.3.4.1] — 2026-09-22
 
 ### Fixed — compose creator stabilization 1 (#351, PR #352)

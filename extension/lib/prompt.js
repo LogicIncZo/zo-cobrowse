@@ -212,7 +212,11 @@ function _compose(mode, pageContext, userQuery, opts) {
     push('content', text);
     push('content', '```');
   }
-  if (tier >= 2) {
+  // #356: modes that can't act on the DOM (visual: read-only screenshot
+  // description) opt out of the selector lists via domSections:false — the
+  // Elements/Forms sections exist for click/fill targeting, which those modes
+  // can never do. Absent knob = default true (full ladder).
+  if (tier >= 2 && mode.domSections !== false) {
     const els = ctx.clickable;
     if (Array.isArray(els) && els.length) {
       push('sep', '');
@@ -240,13 +244,19 @@ function _compose(mode, pageContext, userQuery, opts) {
 
   // #343 (Lane J3): the Jev-assisted steps vocabulary — present ONLY when the
   // user opted in with a key (opts.jevAssist, threaded from the background's
-  // config) and only on action turns (expectJson). Keeps the pick-annotated
-  // click shape + its guardrails in front of Zo; absent otherwise, so the
-  // prompt (and its token cost) is byte-identical for everyone else.
-  if (opts && opts.jevAssist && mode.expectJson) {
+  // config) and only on action turns (wantJson — the POST-downgrade decision,
+  // #355: gating on mode.expectJson let the block ride read-downgraded turns,
+  // where no action can execute). Keeps the pick-annotated click shape + its
+  // guardrails in front of Zo; absent otherwise, so the prompt (and its token
+  // cost) is byte-identical for everyone else.
+  if (opts && opts.jevAssist && wantJson) {
     push('sep', '');
     push('jev', '## Jev-Assisted Steps (active)');
-    push('jev', 'You may delegate an ambiguous click target to Jev, a fast decision model that sees this page\'s clickable elements: { "type": "click", "pick": { "question": "<one literal question naming which element to click>" } }. Use pick ONLY when you cannot confidently name a selector from the capture above (ambiguous or duplicated labels, wording-dependent targets). One judgment per question — ask WHICH element, never HOW (no fills, URLs, or values; Jev cannot write text). A confident answer executes automatically; a low-confidence one parks the step for the user.');
+    // #357: tightened 148→123 tokens — it rides every action turn for
+    // Jev-enabled users. Semantics preserved verbatim-in-meaning: only-when-
+    // ambiguous, ask WHICH not HOW, Jev cannot fill/navigate/write values,
+    // auto-execute vs park. The pick JSON shape + header are test-pinned.
+    push('jev', 'Delegate an ambiguous click target to Jev — a fast decision model that sees this page\'s clickable elements: { "type": "click", "pick": { "question": "<one literal question naming which element to click>" } }. Use pick ONLY when you cannot confidently name a selector from the capture above. Ask WHICH element — never HOW: Jev cannot fill, navigate, or write values. A confident answer executes automatically; a low-confidence one parks the step for the user.');
   }
 
   push('sep', '');

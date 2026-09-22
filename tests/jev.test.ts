@@ -244,11 +244,24 @@ describe("Lane J3 — the marriage", () => {
     const on = buildPrompt(cobrowse, ctx, "q", { effectiveTier: 2, jevAssist: true });
     expect(on).toContain("## Jev-Assisted Steps (active)");
     expect(on).toContain('"pick"');
+    // #357: the tightened block must keep every load-bearing guardrail.
+    expect(on).toContain("Use pick ONLY when you cannot confidently name a selector");
+    expect(on).toContain("Ask WHICH element");
+    expect(on).toContain("cannot fill, navigate, or write values");
+    expect(on).toContain("parks the step for the user");
     const off = buildPrompt(cobrowse, ctx, "q", { effectiveTier: 2 });
     expect(off).not.toContain("Jev-Assisted Steps");
     // Read modes never teach the vocabulary — Jev decides clicks, not prose.
     const readMode = buildPrompt(ask, ctx, "q", { effectiveTier: 1, jevAssist: true });
     expect(readMode).not.toContain("Jev-Assisted Steps");
+    // #355: a read-DOWNGRADED cobrowse turn (intent classified read-only, so
+    // the action envelope is off) must not teach the vocabulary either — the
+    // block used to ride it via a mode.expectJson gate.
+    const downgraded = buildPrompt(cobrowse, ctx, "Summarize what this page is about", { effectiveTier: 0, jevAssist: true });
+    expect(downgraded).not.toContain("Jev-Assisted Steps");
+    const dDown = describePrompt(cobrowse, ctx, "Summarize what this page is about", { effectiveTier: 0, jevAssist: true });
+    expect(dDown.downgradeApplied).toBe(true);
+    expect(dDown.sections.some((s: any) => s.id === "jev")).toBe(false);
     // The structured view tags the section for the inspector.
     const d = describePrompt(cobrowse, ctx, "q", { effectiveTier: 2, jevAssist: true });
     expect(d.prompt).toContain("Jev-Assisted Steps");

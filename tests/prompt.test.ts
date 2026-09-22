@@ -139,6 +139,20 @@ describe("buildPrompt — tier gating", () => {
     expect(noShot).not.toContain("## Screenshot");
   });
 
+  it("#356: visual tier-3 turns carry the screenshot but NOT the Elements/Forms selector lists", () => {
+    const p = buildPrompt(
+      BUILTIN_MODES.visual,
+      makeCtx({ screenshotDataUrl: "data:image/jpeg;base64,AAA", clickable: [{ text: "a", tag: "a", selector: "#a" }], formFields: [{ tag: "input", selector: "#i" }] }),
+      "describe",
+    );
+    expect(p).toContain("## Screenshot");
+    expect(p).not.toContain("## Elements");
+    expect(p).not.toContain("## Forms");
+    // The default (knob absent) keeps the full ladder — cobrowse is unaffected.
+    const c = buildPrompt(BUILTIN_MODES.cobrowse, makeCtx({ clickable: [{ text: "a", tag: "a", selector: "#a" }] }), "click it");
+    expect(c).toContain("## Elements");
+  });
+
   it("#69: screenshotOnly renders the screenshot at tier 0 with NO DOM sections", () => {
     const p = buildPrompt(
       BUILTIN_MODES.visual,

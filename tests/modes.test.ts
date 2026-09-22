@@ -93,9 +93,14 @@ describe("BUILTIN_MODES — tier invariants", () => {
     expect(BUILTIN_MODES.research).toBeUndefined();
   });
 
-  it("visual is SCREENSHOT tier (3) and does not expect JSON", () => {
+  it("visual is SCREENSHOT tier (3), does not expect JSON, and opts out of DOM sections (#356)", () => {
     expect(BUILTIN_MODES.visual.contextTier).toBe(TIER.SCREENSHOT);
     expect(BUILTIN_MODES.visual.expectJson).toBe(false);
+    expect(BUILTIN_MODES.visual.domSections).toBe(false);
+    // Every other built-in keeps the full context ladder.
+    for (const id of ["cobrowse", "ask", "extract", "lean"]) {
+      expect(BUILTIN_MODES[id].domSections ?? true).toBe(true);
+    }
   });
 
   it("ask does not expect JSON (plain markdown answer)", () => {

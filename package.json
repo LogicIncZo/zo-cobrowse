@@ -1,6 +1,6 @@
 {
   "name": "zo-cobrowse",
-  "version": "0.3.4.1",
+  "version": "0.3.4.2",
   "description": "Co-browsing extension powered by Zo \u2014 AI backend that sees your page and takes actions through it.",
   "private": true,
   "type": "module",

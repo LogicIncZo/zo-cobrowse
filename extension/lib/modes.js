@@ -113,6 +113,11 @@ export const BUILTIN_MODES = {
     instructions: 'Describe or analyze what is visible in the screenshot.',
     contextTier: TIER.SCREENSHOT,
     textBudget: 1000,
+    // #356: a read-only screenshot mode can't act, so the tier-2 Elements/
+    // Forms lists (selector targets for click/fill) are ~1.3k dead tokens on
+    // every turn — the composer omits them when this knob is false. Default
+    // (absent or true) keeps the ladder for every other mode.
+    domSections: false,
     expectJson: false,
     builtin: true,
   },
