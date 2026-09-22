@@ -1454,6 +1454,66 @@ describe("handoff resume (#164) — paused runs are resumable from the panel", (
     expect(ask.userQuery).toContain("[handoff-run continuation]");
     expect(bus.storage.session._store["cobrowse_handoff_runs"]["run-164-b"].status).toBe("running");
   }, 15000);
+
+  it("#369: a resumed run re-primes — full context even with the DOM toggle capped and the page unchanged", async () => {
+    // Close out any run a previous test left live — the panel ignores
+    // HANDOFF_UPDATE for a different run while activeHandoffRun is set.
+    const live = Object.values(bus.storage.session._store["cobrowse_handoff_runs"] || {}).find(
+      (r: any) => r.status === "running" || r.status === "priming",
+    ) as any;
+    if (live) {
+      await bus.runtime.sendMessage({ type: "HANDOFF_UPDATE", run: { ...live, status: "aborted", stopReason: "test cleanup" } });
+      await new Promise((r) => setTimeout(r, 30));
+    }
+    // Pause lines are plain system messages carrying a ▶ Resume button —
+    // earlier tests' lines linger in the DOM, and a stale button's run is
+    // long gone (resume would fail with "no such handoff run"). Clear them
+    // so the lookup below hits THIS test's line.
+    panelWin.document.querySelectorAll("#messages .msg-system").forEach((el) => {
+      if ((el.textContent || "").includes("Resume")) el.remove();
+    });
+    const chatId = Object.keys(bus.storage.local._store.cobrowse_convos || {})[0] || "conv-164-c";
+    seedPausedRun("run-369", chatId);
+    await bus.runtime.sendMessage({
+      type: "HANDOFF_UPDATE",
+      run: bus.storage.session._store["cobrowse_handoff_runs"]["run-369"],
+    });
+    await waitUntil(() => {
+      const btns = [...panelWin.document.querySelectorAll("#messages .msg-system button")];
+      return btns.some((b: any) => (b.textContent || "").includes("Resume"));
+    }, 5000);
+    // Deterministic worst case: the sticky DOM toggle OFF (the #351 scenario)
+    // and the page unchanged since the pause — decideTurn's follow-up dedup
+    // would hand the resumed turn a URL-only pointer.
+    const toggle = panelWin.document.querySelector("#dom-toggle") as any;
+    const toggleWasOn = bus.storage.sync._store.domContextEnabled !== false;
+    if (toggleWasOn) {
+      toggle.click();
+      await waitUntil(() => bus.storage.sync._store.domContextEnabled === false, 5000);
+    }
+    const askBase = askLog.length;
+    const btn = [...panelWin.document.querySelectorAll("#messages .msg-system button")]
+      .find((b: any) => (b.textContent || "").includes("Resume")) as any;
+    btn.click();
+    await waitUntil(() => askLog.length > askBase && askLog[askLog.length - 1].handoffRunId === "run-369", 10_000);
+    const ask = askLog[askLog.length - 1];
+    // Force-attached at the Mode's tier despite the cap + unchanged hash.
+    expect(ask.effectiveTier).toBe(2);
+    // Restore the toggle for the other describes.
+    if (toggleWasOn) {
+      toggle.click();
+      await waitUntil(() => bus.storage.sync._store.domContextEnabled === true, 5000);
+    }
+    // Stop the resumed run — a live activeHandoffRun would make the panel
+    // drop later tests' HANDOFF_UPDATE pushes as "another chat's run" — and
+    // clear the rendered pause line so later Resume-button lookups don't hit
+    // this test's stale button.
+    await bus.runtime.sendMessage({ type: "HANDOFF_STOP", runId: "run-369", reason: "test cleanup" });
+    await new Promise((r) => setTimeout(r, 50));
+    panelWin.document.querySelectorAll("#messages .msg-system").forEach((el) => {
+      if ((el.textContent || "").includes("Resume")) el.remove();
+    });
+  }, 20000);
 });
 
 
@@ -1547,8 +1607,11 @@ describe("handoff run-state isolation (#165) — the runId never leaves the run'
       return btns.some((b: any) => (b.textContent || "").includes("Resume"));
     }, 5000);
     const askBase = askLog.length;
+    // Target THIS run's line — earlier tests' stale pause lines also carry
+    // ▶ Resume buttons whose runs are long gone.
     ([...panelWin.document.querySelectorAll("#messages .msg-system button")] as any[])
-      .find((b: any) => (b.textContent || "").includes("Resume")).click();
+      .find((b: any) => (b.textContent || "").includes("Resume")
+        && (b.closest(".msg-system")?.textContent || "").includes("paused for the test")).click();
     await waitUntil(() => askLog.length > askBase && askLog[askLog.length - 1].handoffRunId === "run-165-leak", 10_000);
 
     // Manual send in a NEW chat B — must NOT be conscripted by the run.
