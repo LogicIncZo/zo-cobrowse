@@ -8,6 +8,8 @@
 
 > **2026-09-21 — v0.3.4.0 Jev + settings slate:** five lanes (#339–#343) through the zo-loop factory, one adversarial-reviewed cycle each, planned on a live comparative probe (`tests/test-prompts/probe-jev.ts`: Jev 40–74× per decision, 4/4 agreement). Two real defects caught pre-merge: CI's #309 hit-target sweep flagged the new Jev card's sub-24 controls, and the J3 review round closed the J2 raw re-execution bypass (resolved clicks now re-enter every rail). All gates green (verify 4/4, evals 24/24 cached, full local e2e 117 passed); findings queue empty. Stabilization ships as `0.3.4.N` on bug reports.
 
+> **2026-09-22 — v0.3.4.2 prompt-efficiency bug bash:** owner-directed audit of all `/zo/ask` prompt surfaces (`tests/test-prompts/probe-bloat-0342.ts`: 29 scenarios, per-section tokens). Four fixes, one zo-loop cycle each: #355 Jev block on read-downgraded turns (wrong gate), #356 visual mode's ~1.3k dead DOM tokens (`domSections` knob), #357 Jev block wording 148→123 (guardrails pinned), #358 triple-inlined workspace-write prompt deduped (anti-drift tested). Evals cache refreshed live post-#356 (24/24). All gates green; findings queue empty.
+
 > **2026-09-22 — v0.3.4.1 compose stabilization:** [#351](https://github.com/LogicIncZo/zo-cobrowse/issues/351) diagnosed from a real user compose run (storage-extracted conversation: 4.3-minute tier-0 turn, polluted skill read, double bubble). Fixed in PR [#352](https://github.com/LogicIncZo/zo-cobrowse/pull/352) — run-priming DOM-cap bypass, full action tail on compose turns, single bubble, tier-2 continuation clamp — with a committed e2e gate (DOM off + compose → `## Elements` in the ask). All gates green; findings queue empty.
 
 | Metric | Before this round | After this round |

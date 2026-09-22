@@ -4,6 +4,19 @@ The full, versioned history lives in the repo's
 [CHANGELOG.md](https://github.com/LogicIncZo/zo-cobrowse/blob/dev/CHANGELOG.md).
 This page mirrors everything **unreleased** on `dev`.
 
+## [0.3.4.2] — 2026-09-22
+
+### Fixed — prompt-efficiency bug bash (#355–#358, PRs #359–#362)
+
+Owner-directed bash over every prompt the extension sends to `/zo/ask` (evidence harness: `tests/test-prompts/probe-bloat-0342.ts`).
+
+- **Jev-Assisted block gated on the post-downgrade decision (#355, PR #359)** — no dead 148-token action block on read-downgraded Co-browse turns.
+- **Visual mode drops the tier-2 selector lists (#356, PR #360)** — `domSections` knob omits ~1.3k dead Elements/Forms tokens from read-only screenshot turns.
+- **Jev-Assisted block tightened 148→123 tokens (#357, PR #361)** — guardrails test-pinned.
+- **One-shot workspace-write prompt deduped (#358, PR #362)** — three inline copies → `buildWorkspaceWritePrompt()`; byte-identical, anti-drift tested.
+
+Evals: `visual-describe` cache refreshed live (PR #363); 24/24.
+
 ## [0.3.4.1] — 2026-09-22
 
 ### Fixed — compose creator stabilization 1 (#351, PR #352)
