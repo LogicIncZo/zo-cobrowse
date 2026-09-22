@@ -2748,7 +2748,13 @@ async function handoffGet({ runId, chatId } = {}) {
         if (res.ok) { runs[run.runId] = res.run; dirty = true; }
       }
     }
-    if (dirty) await handoffStore.save(runs);
+    if (dirty) {
+      await handoffStore.save(runs);
+      // #372: the sweep bypasses handoffPut (no update push — the panel's
+      // port died with the worker) but the BADGE persists across SW
+      // restarts: without this, a paused-by-restart run leaves a stale ▶.
+      handoffUpdateBadge(runs);
+    }
   }).catch(() => { /* storage unavailable — nothing to sweep */ });
 })();
 
