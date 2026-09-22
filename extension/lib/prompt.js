@@ -212,7 +212,11 @@ function _compose(mode, pageContext, userQuery, opts) {
     push('content', text);
     push('content', '```');
   }
-  if (tier >= 2) {
+  // #356: modes that can't act on the DOM (visual: read-only screenshot
+  // description) opt out of the selector lists via domSections:false — the
+  // Elements/Forms sections exist for click/fill targeting, which those modes
+  // can never do. Absent knob = default true (full ladder).
+  if (tier >= 2 && mode.domSections !== false) {
     const els = ctx.clickable;
     if (Array.isArray(els) && els.length) {
       push('sep', '');

@@ -15,6 +15,9 @@ export const ModeSchema = z.object({
   contextTier: z.number().int().min(0).max(3),
   textBudget: z.number().int().min(0),
   expectJson: z.boolean(),
+  // #356: false = the composer omits the tier-2 Elements/Forms selector lists
+  // (modes that can't act on the DOM, e.g. visual). Absent = default true.
+  domSections: z.boolean().optional(),
   builtin: z.boolean(),
 }).passthrough();
 
