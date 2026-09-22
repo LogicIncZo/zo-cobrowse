@@ -3,6 +3,25 @@
 New features in Zo Co-browse, newest first. Each entry explains what shipped;
 open **How to use it** for the hands-on steps.
 
+## Handoff runs you can trust <span class="badge-new">NEW</span> {#handoff-reliability}
+
+_2026-09-22 · [#368](https://github.com/LogicIncZo/zo-cobrowse/issues/368)–[#372](https://github.com/LogicIncZo/zo-cobrowse/issues/372) · v0.3.4.3_
+
+A reliability pass over `!handoff` closed five ways an unattended run could
+waste your time or tokens:
+
+- **No more stuck runs.** If a turn comes back as prose instead of actions
+  (a login wall, a question), the run now stops honestly and asks for you
+  with ▶ Resume — it used to sit "working" forever.
+- **Resumes see the page.** Resuming a paused run (or a compose park you just
+  resolved) re-attaches the full page — the run used to re-plan from the URL
+  alone and crawl.
+- **One run per chat.** A second `!handoff` in the same chat asks you to stop
+  the first instead of silently fighting it over the same tab.
+- **Read-only runs stay read-only, cheaply.** Delegate runs never spend Jev
+  fast-path calls on clicks they aren't allowed to make.
+- **Honest badge.** The toolbar ▶ clears when a restart pauses your run.
+
 ## Leaner prompts — cheaper, faster turns <span class="badge-new">NEW</span> {#leaner-prompts}
 
 _2026-09-22 · [#355](https://github.com/LogicIncZo/zo-cobrowse/issues/355)–[#358](https://github.com/LogicIncZo/zo-cobrowse/issues/358) · v0.3.4.2_
