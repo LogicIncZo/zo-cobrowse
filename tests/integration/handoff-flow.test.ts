@@ -300,6 +300,33 @@ describe("handoff run loop (Lane E)", () => {
     expect(note.opts.message).toContain("Digest the tabs");
   });
 
+  it("#371: a readonly run's turns carry no Jev block even with the fast path configured", async () => {
+    // Configure Jev the way the options card does (key + enable) — through
+    // the storage API so the background's onChanged refresh picks it up.
+    await bus.storage.local.set({ jevApiKey: "test-key" });
+    await bus.storage.sync.set({ jevEnabled: true });
+    await flush();
+    const run = await startRun({ goal: "Digest the release notes" });
+    fm.handle(() => sseResponse(zoSseText({ text: "ok" })));
+    const asksBefore = fm.to("/zo/ask").length;
+    port.postMessage({ sessionId: 970, type: "ASK_ZO", chatId: run.chatId, modeId: "cobrowse", userQuery: run.goal, handoffRunId: run.runId });
+    await waitUntil(() => fm.to("/zo/ask").length > asksBefore, 8000);
+    const turn = fm.to("/zo/ask").at(-1);
+    expect(String(turn.body.input)).toContain("Digest the release notes");
+    expect(String(turn.body.input)).not.toContain("Jev-Assisted Steps");
+    await bus.runtime.sendMessage({ type: "HANDOFF_STOP", runId: run.runId });
+    // Control: a plain chat ask with the same config still gets the block —
+    // the suppression is run-scoped (readonly boundary), not global.
+    fm.handle(() => sseResponse(zoSseText({ text: "ok" })));
+    const plainBefore = fm.to("/zo/ask").length;
+    port.postMessage({ sessionId: 971, type: "ASK_ZO", chatId: "chat-jev-control", modeId: "cobrowse", userQuery: "Click the first product" });
+    await waitUntil(() => fm.to("/zo/ask").length > plainBefore, 8000);
+    expect(String(fm.to("/zo/ask").at(-1).body.input)).toContain("Jev-Assisted Steps");
+    await bus.storage.local.remove("jevApiKey");
+    await bus.storage.sync.remove("jevEnabled");
+    await flush();
+  });
+
   it("blocks the run when a turn ends without actions — no strand, no chain (#368)", async () => {
     const run = await startRun();
     fm.handle(() => sseResponse(zoSseText({ text: "The page requires a login — which credentials should I use?" })));
