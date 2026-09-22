@@ -244,6 +244,11 @@ describe("Lane J3 — the marriage", () => {
     const on = buildPrompt(cobrowse, ctx, "q", { effectiveTier: 2, jevAssist: true });
     expect(on).toContain("## Jev-Assisted Steps (active)");
     expect(on).toContain('"pick"');
+    // #357: the tightened block must keep every load-bearing guardrail.
+    expect(on).toContain("Use pick ONLY when you cannot confidently name a selector");
+    expect(on).toContain("Ask WHICH element");
+    expect(on).toContain("cannot fill, navigate, or write values");
+    expect(on).toContain("parks the step for the user");
     const off = buildPrompt(cobrowse, ctx, "q", { effectiveTier: 2 });
     expect(off).not.toContain("Jev-Assisted Steps");
     // Read modes never teach the vocabulary — Jev decides clicks, not prose.

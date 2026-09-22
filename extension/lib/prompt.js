@@ -248,7 +248,11 @@ function _compose(mode, pageContext, userQuery, opts) {
   if (opts && opts.jevAssist && wantJson) {
     push('sep', '');
     push('jev', '## Jev-Assisted Steps (active)');
-    push('jev', 'You may delegate an ambiguous click target to Jev, a fast decision model that sees this page\'s clickable elements: { "type": "click", "pick": { "question": "<one literal question naming which element to click>" } }. Use pick ONLY when you cannot confidently name a selector from the capture above (ambiguous or duplicated labels, wording-dependent targets). One judgment per question — ask WHICH element, never HOW (no fills, URLs, or values; Jev cannot write text). A confident answer executes automatically; a low-confidence one parks the step for the user.');
+    // #357: tightened 148→123 tokens — it rides every action turn for
+    // Jev-enabled users. Semantics preserved verbatim-in-meaning: only-when-
+    // ambiguous, ask WHICH not HOW, Jev cannot fill/navigate/write values,
+    // auto-execute vs park. The pick JSON shape + header are test-pinned.
+    push('jev', 'Delegate an ambiguous click target to Jev — a fast decision model that sees this page\'s clickable elements: { "type": "click", "pick": { "question": "<one literal question naming which element to click>" } }. Use pick ONLY when you cannot confidently name a selector from the capture above. Ask WHICH element — never HOW: Jev cannot fill, navigate, or write values. A confident answer executes automatically; a low-confidence one parks the step for the user.');
   }
 
   push('sep', '');
