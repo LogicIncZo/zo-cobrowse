@@ -3,6 +3,23 @@
 New features in Zo Co-browse, newest first. Each entry explains what shipped;
 open **How to use it** for the hands-on steps.
 
+## Leaner prompts — cheaper, faster turns <span class="badge-new">NEW</span> {#leaner-prompts}
+
+_2026-09-22 · [#355](https://github.com/LogicIncZo/zo-cobrowse/issues/355)–[#358](https://github.com/LogicIncZo/zo-cobrowse/issues/358) · v0.3.4.2_
+
+A prompt-efficiency audit of everything the extension sends to Zo trimmed dead
+weight from several turn types — same behavior, smaller bills:
+
+- **Read-style questions in Co-browse** ("Summarize this page…") no longer
+  carry the Jev click-vocabulary block, which only makes sense on turns that
+  can act on the page.
+- **Visual mode turns** no longer attach the page's clickable-element and
+  form-field lists (~1.3k tokens per screenshot turn) — a screenshot mode
+  can't click anything, so the lists were pure cost.
+- **Jev users' action turns** carry a tighter instruction block (every
+  safeguard kept), and the internal save-page/save-conversation writes use
+  one shared prompt instead of three copies that could drift.
+
 ## Jev — a fast path for agentic browsing <span class="badge-new">NEW</span> {#jev}
 
 _2026-09-21 · [#341](https://github.com/LogicIncZo/zo-cobrowse/issues/341)–[#343](https://github.com/LogicIncZo/zo-cobrowse/issues/343) · v0.3.4.0_
