@@ -173,7 +173,13 @@ let pendingActions = null;
 let pendingActionsReasoning = '';   // reasoning to attach to the done-answer bubble
 // Lane E: the live handoff run started from THIS panel (null when none).
 // Cleared by HANDOFF_UPDATE on done/paused/aborted, or on HANDOFF_STOP.
+// #369: set by the resume paths (▶ Resume / compose park resolve) — the NEXT
+// sendQuery force-attaches full context. A resumed run paused on the current
+// page would otherwise re-plan from a URL-only pointer (decideTurn's
+// follow-up dedup: unchanged page hash → tier 0), the #351 crawl on the
+// resume path. Consumed (cleared) by sendQuery.
 let activeHandoffRun = null;
+let resumeAttach = false;
 // `<runId>:<status>` for every terminal line already rendered — a repeat
 // HANDOFF_UPDATE for a finished run must not append a second one (#160).
 const terminalHandoffLines = new Set();
@@ -1499,6 +1505,7 @@ async function resumeHandoffRun(runId) {
   renderChatTabs(); // the run's chat tab gets the 🤖 marker (#166)
   if (activeId !== run.chatId) await switchToConversation(run.chatId);
   input.value = safeText(res.continuationQuery) || `Resume the handoff run: ${safeText(run.goal)}`;
+  resumeAttach = true; // #369: re-priming — force full context (see the flag note)
   await sendQuery();
 }
 
@@ -1523,6 +1530,7 @@ async function resolveComposePark(runId, parkId, text) {
   if (activeId !== run.chatId) await switchToConversation(run.chatId);
   document.querySelectorAll('.recipe-compose-park').forEach((el) => el.remove());
   input.value = safeText(res.continuationQuery) || `Resume the compose session: ${safeText(run.goal)}`;
+  resumeAttach = true; // #369: the human just acted on the page — Zo re-plans with full context
   await sendQuery();
 }
 
@@ -2003,7 +2011,11 @@ async function renderPromptInspector() {
     state: contextState,
     pageHash,
     pageBlank: isBlankPage(currentContext?.url || ''),
-    domEnabled: domContextOn || runBang,
+    domEnabled: domContextOn || runBang || resumeAttach,
+    // #369 mirror: the resume flag is armed between the resume click and the
+    // send — while it is, preview the forced attach exactly as sendQuery will.
+    forceRefresh: resumeAttach,
+    forceReason: resumeAttach ? 'Handoff/compose resume · full context' : undefined,
   });
   // Mirror sendQuery's 📷-toggle force so the preview can't diverge from the
   // send: armed toggle = tier 3 this turn, same reason string. With the #69
@@ -6344,10 +6356,16 @@ sendQuery = async function() {
     pageBlank,
     hasThread: !!threadId,
     // Run-priming turns bypass the sticky DOM cap — a compose/handoff run
-    // cannot drive (or park) correctly from a URL-only pointer. The cap
-    // keeps winning for manual chats.
-    domEnabled: domContextOn || runPrimed,
+    // cannot drive (or park) correctly from a URL-only pointer. Resumed runs
+    // re-prime (#369), so the cap bypasses for them too. The cap keeps
+    // winning for manual chats.
+    domEnabled: domContextOn || runPrimed || resumeAttach,
+    // #369: a resumed run re-primes — force the attach (unchanged page hash
+    // would dedup the turn to a URL-only pointer) with its own chip reason.
+    forceRefresh: runPrimed || resumeAttach,
+    forceReason: resumeAttach ? 'Handoff/compose resume · full context' : undefined,
   });
+  resumeAttach = false;
   contextState = turnDecision.newState;
   saveConversationState(activeId, contextState);
   // #25 vision UX: an armed 📷 Image toggle forces tier 3 regardless of the

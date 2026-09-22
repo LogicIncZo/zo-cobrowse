@@ -107,7 +107,7 @@ export function stripToPointer(pageContext) {
  * @param {{ mode: object, query: string, bang?: object, state?: object, pageHash?: string, pageBlank?: boolean, forceRefresh?: boolean, hasThread?: boolean, domEnabled?: boolean }} args
  * @returns {{ effectiveTier: number, reason: string, attach: boolean, newState: object }}
  */
-export function decideTurn({ mode, query, bang, state, pageHash, pageBlank = false, forceRefresh = false, hasThread = true, domEnabled = true }) {
+export function decideTurn({ mode, query, bang, state, pageHash, pageBlank = false, forceRefresh = false, forceReason = undefined, hasThread = true, domEnabled = true }) {
   const st = state || createConversationState();
   const isAction = !!mode && !!mode.expectJson && !shouldDowngradeToJsonDisabled(mode, query);
   const contextRequested = !!bang && bang.kind === 'context';
@@ -126,7 +126,7 @@ export function decideTurn({ mode, query, bang, state, pageHash, pageBlank = fal
 
   let reason;
   if (pageBlank) reason = 'Blank page · no page context';
-  else if (forceRefresh) reason = 'Manual refresh · full context';
+  else if (forceRefresh) reason = forceReason || 'Manual refresh · full context';
   else if (contextRequested) reason = '!context · full context';
   else if (isAction && !hasCaptured) reason = 'First turn · action context';
   else if (isAction && pageChanged) reason = 'Page changed · re-attaching';
