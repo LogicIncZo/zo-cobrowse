@@ -60,6 +60,7 @@ import {
   buildCreateAutomationPrompt,
   buildListAutomationsPrompt,
   buildTestConnectionPrompt,
+  buildWorkspaceWritePrompt,
 } from './lib/zo-prompts.js';
 import {
   loadConversationState,
@@ -2369,7 +2370,7 @@ async function installProtocolSkill(extVersion) {
  * thread, no conversation id).
  */
 async function oneShotWorkspaceWrite(path, content) {
-  const prompt = `Write the following content to the file at path \`${path}\` in my workspace. Create the directory if it does not exist. Use write_file or equivalent. Do not respond with anything other than a confirmation with the file path.\n\n---CONTENT START---\n${content}\n---CONTENT END---`;
+  const prompt = buildWorkspaceWritePrompt(path, content);
   const resp = await fetch(config.zoApiUrl, {
     method: 'POST',
     headers: {
@@ -4760,7 +4761,7 @@ async function savePageToWorkspace(pageContext, savePath) {
   const markdown = `# ${(pageContext && pageContext.title) || 'Untitled'}\n\n> **Source:** ${url}\n\n> **Saved:** ${new Date().toISOString()}\n\n---\n\n${content}\n`;
 
   // Ask Zo to write the file
-  const prompt = `Write the following content to the file at path \`${path}\` in my workspace. Create the directory if it does not exist. Use write_file or equivalent. Do not respond with anything other than a confirmation with the file path.\n\n---CONTENT START---\n${markdown}\n---CONTENT END---`;
+  const prompt = buildWorkspaceWritePrompt(path, markdown);
 
   try {
     const resp = await fetch(config.zoApiUrl, {
@@ -4798,7 +4799,7 @@ async function saveConversationToWorkspace(conversation, savePath) {
   const path = (typeof savePath === 'string' && savePath.trim()) || `Documents/research/${slugifyTitle(title)}.md`;
   const markdown = conversationToMarkdown({ title, messages: Array.isArray(conv.messages) ? conv.messages : [] });
 
-  const prompt = `Write the following content to the file at path \`${path}\` in my workspace. Create the directory if it does not exist. Use write_file or equivalent. Do not respond with anything other than a confirmation with the file path.\n\n---CONTENT START---\n${markdown}\n---CONTENT END---`;
+  const prompt = buildWorkspaceWritePrompt(path, markdown);
 
   try {
     const resp = await fetch(config.zoApiUrl, {

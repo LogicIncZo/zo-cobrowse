@@ -60,3 +60,14 @@ export function buildListAutomationsPrompt() {
 export function buildTestConnectionPrompt() {
   return 'Reply with just: ZO_OK';
 }
+
+/**
+ * One-shot workspace write (#358) — the exact prompt save-page,
+ * save-conversation, and the agent-write fallback all send. Single source of
+ * truth: three background.js sites used to hand-inline this string and could
+ * drift. Content is interpolated verbatim between the CONTENT markers; the
+ * reply protocol is a bare path confirmation (no prose, no tools narration).
+ */
+export function buildWorkspaceWritePrompt(path, content) {
+  return `Write the following content to the file at path \`${path}\` in my workspace. Create the directory if it does not exist. Use write_file or equivalent. Do not respond with anything other than a confirmation with the file path.\n\n---CONTENT START---\n${content}\n---CONTENT END---`;
+}
