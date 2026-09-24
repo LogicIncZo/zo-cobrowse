@@ -3951,8 +3951,20 @@ async function recipeHeal(runId, step, missResult) {
     run.updatedAt = Date.now();
     run.status = 'running';
     const lib = await recipeLibrary.load();
-    lib[run.recipeId] = run.recipe; // healed copy cached under the recipe id
-    await recipeLibrary.save(lib);
+    // 0.3.5 round-2 (#383): healed cues patch the UNSUBSTITUTED library entry
+    // — the run's substituted copy must never persist (its concrete fill
+    // values would replay without a params card). No local entry, or one
+    // that diverged → cache nothing; workspace origins heal via the
+    // write-back offer instead.
+    const baseKey = Object.keys(lib).find((k) => lib[k]?.id === run.recipeId);
+    if (baseKey) {
+      const patched = patchHealedCues(lib[baseKey], run.healedSteps);
+      if (patched.ok) {
+        lib[baseKey] = { ...patched.recipe, version: run.version, updatedAt: Date.now() };
+        if (baseKey !== run.recipeId) delete lib[run.recipeId]; // legacy id-keyed phantom
+        await recipeLibrary.save(lib);
+      }
+    }
     await recipePut(run);
     recipePlayStep(run.runId).catch((e) => console.debug('recipePlayStep:', e));
   } catch (e) {
