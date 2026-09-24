@@ -540,7 +540,7 @@ export function generateRecipePrompt(draft) {
     '- Keep the flow linear (no branching or looping).',
     '',
     'Respond with ONLY a JSON object:',
-    '{"params": [{"name":"…","type":"string","required":true,"question":"…","default":"…"}], "steps": [ …same step shapes… ], "note": "one line"}',
+    '{"params": [{"name":"…","type":"string","required":true,"question":"…"}], "steps": [ …same step shapes… ], "note": "one line"}',
     '',
     'Current draft (param defaults redacted):',
     '```json',
@@ -913,6 +913,16 @@ export function recipeSaveTarget(name, pathInput, root = WORKSPACE_ROOT) {
 /** The exact bytes written to the workspace — and exactly what the loader parses back. */
 export function serializeRecipe(recipe) {
   return `${JSON.stringify(recipe, null, 2)}\n`;
+}
+
+/** Library rows are object-keyed by recipe name, and assignment to
+ *  `__proto__` hits the Object.prototype setter even on JSON.parse-produced
+ *  objects — silently dropping the entry and polluting lookups. Names that
+ *  are unusable as keys are refused at every library write (0.3.5 round-2).
+ * @returns {string|null} the trimmed key, or null when unusable */
+export function safeLibKey(name) {
+  const k = String(name ?? '').trim();
+  return !k || /^(?:__proto__|constructor|prototype)$/.test(k) ? null : k;
 }
 
 // Provenance fields change on every save/promotion (and composed-provenance

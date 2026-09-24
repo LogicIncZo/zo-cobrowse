@@ -195,11 +195,15 @@ export function recordObs(run, records) {
 }
 
 /** Park an action that crossed the boundary — the user performs it later from
- * the existing pendingActions review card. Pure. */
+ * the existing pendingActions review card. Pure.
+ * parkLog is a session-only audit trail: the refused fill's proposed value
+ * never needs to ride it (0.3.5 round-2), and the review card re-reads the
+ * live field when the user acts. */
 export function park(run, action, reason, url) {
+  const { value, ...logAction } = action || {};
   return {
     ...run,
-    parkLog: [...run.parkLog, { action, reason, url, ts: Date.now() }].slice(-50),
+    parkLog: [...run.parkLog, { action: logAction, reason, url, ts: Date.now() }].slice(-50),
     updatedAt: Date.now(),
   };
 }

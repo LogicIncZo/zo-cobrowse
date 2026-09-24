@@ -307,7 +307,7 @@ describe("healPrompt / parseRecipeHealResponse", () => {
 
 // ---- recorder pure halves (PR4) --------------------------------------------
 
-import { assembleDraftRecipe, generateRecipePrompt, parseGeneratedRecipe, recipeSaveTarget, serializeRecipe, driftedFromWorkspace, patchHealedCues, buildRecipeSkillExport } from "../extension/lib/recipes.js";
+import { assembleDraftRecipe, generateRecipePrompt, parseGeneratedRecipe, recipeSaveTarget, serializeRecipe, driftedFromWorkspace, patchHealedCues, buildRecipeSkillExport, safeLibKey } from "../extension/lib/recipes.js";
 
 describe("assembleDraftRecipe", () => {
   const T = 1757800000000;
@@ -654,6 +654,16 @@ describe("buildRecipeSkillExport", () => {
     expect(all).toContain("registration");
     // Masked literals show the redactValue form.
     expect(all).toContain("••••");
+  });
+
+  it("safeLibKey refuses prototype-dangerous names (0.3.5 round-2)", () => {
+    expect(safeLibKey("My Flow")).toBe("My Flow");
+    expect(safeLibKey("  spaced  ")).toBe("spaced");
+    expect(safeLibKey("__proto__")).toBe(null);
+    expect(safeLibKey("constructor")).toBe(null);
+    expect(safeLibKey("prototype")).toBe(null);
+    expect(safeLibKey("")).toBe(null);
+    expect(safeLibKey(undefined)).toBe(null);
   });
 
   it("refuses empty lists and recipes that do not validate", () => {

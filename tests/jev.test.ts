@@ -304,6 +304,23 @@ describe("redactStateForJev", () => {
     expect(redactStateForJev("plain")).toBe("plain");
     expect(redactStateForJev(null)).toBe(null);
   });
+
+  it("key strip matches the formfill sensitive set (0.3.5 round-2 composition parity)", () => {
+    const red = redactStateForJev({
+      ssn: "123-45-6789",
+      passportNo: "X1234567",
+      securityCode: "987",
+      expiryYear: "2029",
+      licence: "D-444",
+      label: "keep me",
+    });
+    expect(red.ssn).toBeUndefined();
+    expect(red.passportNo).toBeUndefined();
+    expect(red.securityCode).toBeUndefined();
+    expect(red.expiryYear).toBeUndefined();
+    expect(red.licence).toBeUndefined();
+    expect(red.label).toBe("keep me");
+  });
 });
 
 describe("JEV_TEST reply shape", () => {
