@@ -14,7 +14,7 @@
   // Sensitive-field detection — shared by captureContext (#243: captured form
   // context must never carry sensitive values) and the recipe recorder
   // (sensitive fields never emit values / collapse pages into checkpoints).
-  const REC_SENSITIVE_FIELD_RE = /password|card|cc[-_.\s]?num|ccv|cvc|cvv|expir|ssn|social|pin\b|passport|otp|captcha/i;
+  const REC_SENSITIVE_FIELD_RE = /password|card|cc[-_.\s]?num|cc[-_.\s]?exp|ccv|cvc|cvv|csc\b|expir|exp[_.\s-]?(year|month|date)|security[_.\s-]?code|valid[_.\s-]?thru|ssn|social|pin\b|passport|otp|captcha|routing|iban|sort[_.\s-]?code|(acct|account)[_.\s-]?num/i;
   const REC_SENSITIVE_URL_RE = /login|signin|sign-in|signup|sign-up|register|checkout|payment|billing|password|banking/i;
   const REC_SUBMITISH_RE = /submit|pay\b|checkout|order|place|buy|sign in|sign up|register|confirm purchase/i;
 
@@ -54,7 +54,7 @@
       if (el.type === 'hidden') return;
       const rect = el.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) return;
-      const surface = `${el.name || el.id || ''} ${el.placeholder || ''} ${nearestQuestion(el)}`;
+      const surface = fieldSurface(el);
       const sensitive = el.type === 'password' || REC_SENSITIVE_FIELD_RE.test(surface);
       formFields.push({
         tag: el.tagName.toLowerCase(),
@@ -205,6 +205,23 @@
       scope = scope.parentElement;
     }
     return '';
+  }
+
+  /** Full sensitivity surface for a field — machine attrs + every visible
+   *  label channel — shared by captureContext and the recipe recorder so ONE
+   *  rule decides value suppression for both (0.3.5 round-2: the recorder's
+   *  narrower surface missed label[for]/aria-labelledby/title/autocomplete
+   *  context and let sensitive typed values ride). */
+  function fieldSurface(el) {
+    let s = `${el.name || ''} ${el.id || ''} ${el.placeholder || ''} ${el.title || ''} ${el.getAttribute('autocomplete') || ''}`;
+    const labelledby = el.getAttribute('aria-labelledby');
+    if (labelledby) {
+      for (const id of labelledby.split(/\s+/)) {
+        const lab = id && document.getElementById(id);
+        if (lab) s += ` ${lab.textContent || ''}`;
+      }
+    }
+    return `${s} ${nearestQuestion(el)}`;
   }
 
   /** Resolve a fill_form target to a field element: CSS selector fallback
@@ -617,7 +634,7 @@
     const isTextField = el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' ||
       (el.tagName === 'INPUT' && !['hidden', 'submit', 'button', 'file'].includes(el.type));
     if (!isTextField) return;
-    const surface = `${el.name || ''} ${el.id || ''} ${el.placeholder || ''} ${el.getAttribute('aria-label') || ''}`;
+    const surface = fieldSurface(el);
     const sensitive = el.type === 'password' || REC_SENSITIVE_FIELD_RE.test(surface);
     recObserve('fill', el, sensitive ? { fieldSensitive: true } : { value: String(el.value == null ? '' : el.value) });
   }
