@@ -656,6 +656,23 @@ describe("buildRecipeSkillExport", () => {
     expect(all).toContain("••••");
   });
 
+  it("masks query strings on captured URLs (0.3.5 round-2: tokens-in-query never export)", () => {
+    const withQuery: any = {
+      ...rec,
+      steps: [
+        { type: "navigate", url: "https://gateway.example/callback?token=abc123&next=/x", expectUrl: "callback" },
+        { type: "waitFor", url: "https://gateway.example/done?status=paid" },
+        { type: "done" },
+      ],
+    };
+    const out: any = buildRecipeSkillExport([withQuery]);
+    expect(out.ok).toBe(true);
+    const all = out.files.map((f: any) => f.markdown).join("\n");
+    expect(all).toContain("https://gateway.example/callback?…");
+    expect(all).not.toContain("abc123");
+    expect(all).not.toContain("status=paid");
+  });
+
   it("refuses empty lists and recipes that do not validate", () => {
     expect(buildRecipeSkillExport([]).ok).toBe(false);
     const bad = buildRecipeSkillExport([{ ...rec, steps: [{ type: "click", submitish: true, cues: [] }] }]);
