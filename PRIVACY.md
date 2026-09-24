@@ -61,7 +61,10 @@ Zo Co-browse **does not**:
 
 ## Third-Party Services
 
-This extension communicates only with your Zo Computer instance. No third-party services are contacted.
+This extension communicates with your Zo Computer instance (AI inference, workspace tools). By default, no other service is contacted.
+
+**Optional — Jev fast path (off by default):** if you enable it and supply a TypeSafe AI API key, small, redacted page-state summaries (page URL/title, clickable-element labels, short text excerpts — never form-field values) are sent to TypeSafe AI's decision API to speed up navigation choices. You can turn this off any time in Settings; the deep story is in [`docs/qa/threat-model.md`](docs/qa/threat-model.md).
+
 
 ## Changes
 

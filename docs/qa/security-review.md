@@ -54,6 +54,10 @@
 
 ## 8. Prompt injection via captured page content — threat class (owner question, 2026-09-17)
 
+> Graduated into [`docs/qa/threat-model.md`](threat-model.md) — the living
+> per-surface containment map (0.3.5). This section is retained as the
+> round-1 record.
+
 The vector **exists by design**: the product feeds page content to Zo, and a hostile page controls that content — visible text, link/button labels, form placeholders and question text, even the `<title>`. The model cannot distinguish attacker-authored text from trusted UI, so an opened page can always *attempt* instruction injection. The security question is what a successful injection can then DO:
 
 **Contained by code (injection-proof, not prompt-hoping):**
@@ -80,3 +84,62 @@ The vector **exists by design**: the product feeds page content to Zo, and a hos
 | 5 | Medium (latent) | Capture carried field values up to 100 chars — incl. sensitive fields — into the context object | **Fixed** — capture-time redaction (§8); prompt paths were already value-free |
 
 `bun run verify` + e2e green (incl. the new adversarial spec); prompt evals untouched — no prompt changes in this round.
+
+---
+
+# Round 2 — 2026-09-25 (post-0.3.0 surface, 0.3.5 lane)
+
+**Scope:** everything shipped after the round-1 audit — Recipes workspace write-back (0.3.1), compose + recorder (0.3.2), the 0.3.3 UX bash, Jev + settings rationalization (0.3.4). Spec: `docs/superpowers/specs/2026-09-25-0.3.5-security-lane-design.md` · Ticket: [#383](https://github.com/LogicIncZo/zo-cobrowse/issues/383).
+**Method:** sink-inventory re-run + categorized diff; surface diffs (roster, listeners, manifest, relay, sensitive-key routing); three deep-dives where the new surface concentrated risk (Jev egress, workspace write-back, recorder/compose privacy); adversarial-e2e gap assessment.
+
+**Summary verdict: the trust boundary holds on the grown surface.** No P1/P2 beyond one recorder privacy gap (fixed in-round); every new transport and persisted payload audited; the threat class graduated into the living `threat-model.md`.
+
+## Surface diffs (vs the round-1 record)
+
+- **Message roster** — contract test green (`tests/message-contract.test.ts`); roster shape unchanged: background `onMessage` + 2 stream ports, panel listener + stream port, content port (`cobrowse-wa-stream`) + content router (3 types). New handlers (recipes/compose/Jev/settings) all live inside the background router — no new listener sites, no new content-INITIATED types beyond `RECIPE_OBS`/`RECIPE_RECORD_PEEK` (extension-internal).
+- **Listeners / page surface** — still zero `window` message listeners, no `externally_connectable`; recorder arming rides `chrome.runtime` only (`RECIPE_RECORD_STATE`/`RECIPE_RECORD_PEEK`). **No new page-observable surface → `e2e/25` needs no extension** and continues to cover the boundary.
+- **`manifest.json`** — `git diff v0.3.0.0..dev` = version bumps only. Permission surface identical (`<all_urls>` still load-bearing for tier-3 capture).
+- **`backend/relay.ts`** — still zero references from `extension/` (sole grep hit is the word "relay" in a `vision.js` comment). Dormant no-auth blocker unchanged (§7).
+- **Sensitive-key routing** — `jevApiKey`/`jevApiUrl` correctly pinned to `storage.local` (`SENSITIVE_KEYS`, background.js:374; mirrored in `lib/config.js`).
+- **Sink inventory** — the script previously scanned only top-level `extension/*.js`; it now scans `extension/lib/` too (#387 — the Jev transport lives there), so **the round-1 "134" figure and today's run are not directly comparable; the categorical diff below is the accounting**. Current run: 118 pattern sites + lib/ coverage. New-site categories, all audited: Jev transports, recipe save/heal/import/export MCP writes, compose obs/park sinks, 0.3.3 options/panel UI rows (escape-first `markdownToHtml`/`safeText`/`escapeHtml` discipline intact).
+
+## Deep-dive 1 — Jev egress: ✅ clean (2 nits fixed in-round)
+
+- Both transports (`lib/jev.js#jevDecideImpl`, `background.js#jevTest`) send `jevApiKey` **only** in the `Authorization` header; body is `{model, state, questions}`; no `credentials: include`; the sole debugLog push is metadata-only (`{reason}`), and `cleanExtra` drops objects.
+- State is **fixed-shape per hook**: pick/resolve = `{url, title, candidates}` where candidates carry tier-2 clickable labels only (≤60 chars; `contenteditable` is not in the clickable selector list); done gate = `{url, title, pageText(≤800)}`. Choice `criteria` are label maps by construction (`jev.js` builders). `cap.formFields` never enters Jev state.
+- `jevApiUrl` override: accepted-design user-config surface, **same posture as `zoApiUrl`** (round-1 §5) and stricter — `storage.local`, not exposed in the options UI. No page-derived data influences endpoint or headers.
+- Failure/low-confidence falls back to the pre-existing Zo continuation using the turn's already-captured `pageContext` — Jev adds no capture.
+- **Fixed in-round (#387):** `redactStateForJev`'s key regex was narrower than the formfill `SENSITIVE_FIELD_RE` set (latent — no live builder emits field-shaped objects); widened + pinned by test. Boundary comment added: `questions` bypass the strip (labels-only by construction).
+
+## Deep-dive 2 — Workspace write-back: ✅ confinement/backstops clean (2 P3s fixed in-round)
+
+- **Path confinement:** all 7 recipe MCP call sites (save write+probe, heal write-back write+probe, export ×2 files, import read) go through `safeWorkspacePath`; recipe NAMES reach paths only via `slugifyTitle` (`[^a-z0-9]+` → `-`) — traversal cannot survive; heal write-back refuses non-workspace origins. (Residual: lexical confinement can't see workspace-side symlinks — Zo-server concern, out of extension reach.)
+- **Overwrite discipline:** probe-then-confirm held (`exists && !confirm` → no write); content drift bumps patch; `patchHealedCues` refuses structurally diverged origins; the run's substituted copy never traveled in the write-back payload.
+- **No-model-authored values:** compose Zo fills → defaultless params; human fills → the only defaults; both adopt paths gate on `literalFillValueCount` + `withoutParamDefaults` + full re-validation; cleanup prompts receive defaults-stripped drafts.
+- **Fixed in-round (#386):** (a) `recipeHeal` cached the run's **substituted** recipe (real param values as literal fill values) into `storage.local` under the recipe id — values on disk, replay without a params card, phantom library row; now the healed cues patch the library's **unsubstituted** entry (matched by id) and legacy id-keyed phantoms are pruned. (b) `buildRecipeSkillExport` rendered recorded `navigate`/`waitFor` URLs **verbatim including query strings** — a tokens-in-query class escaping the module's own "no captured values leave" rule; the export table masks everything after `?` (workspace JSON keeps the full URL by design: confirm-gated, validated).
+- Accepted nits: `literalFillValueCount` covers only `fill.value` (a cleanup reply may persist a literal `attach.path` — workspace-scoped, same class as navigate-url authoring); `readWorkspaceFile` uncapped for imports (parse still guarded).
+
+## Deep-dive 3 — Recorder/compose privacy: 🔴 1 P2 fixed in-round (findings #6–#7)
+
+- **P2 (fixed, #385):** the recorder's sensitive-field surface was **narrower than the capture rule round 1 fixed** — it read only name/id/placeholder/aria-label, missing `label[for]` question text, `aria-labelledby`, `title`, `autocomplete` — and the regex missed common markups (`cc_exp`, `exp_year`, `csc`, "security code", routing, IBAN). A field visibly labeled "Credit card number" with framework-neutral machine attributes **emitted its typed value** into `RECIPE_OBS`, which becomes a param default persisted to `storage.local` and auto-replays. Fix: ONE shared `fieldSurface()` helper (capture + recorder), regex widened, pinned by tests. (Compensating layers that already held: `type=password` always suppressed; positively-identified sensitive fields collapse the whole page into a `human` checkpoint; sensitive-URL pages collapse regardless.)
+- **Contenteditable fields are fail-closed** — not a text input, so the recorder emits no record at all (functional recording gap, documented; no value path).
+- **Compose value-stripping holds end-to-end:** Zo sink records carry no `value` field (compose refuses fills in code, so none can exist); human values ride only non-sensitive fills; sensitive-span collapse runs before producer dispatch for both producers; boundary parks are value-free by construction; adopted drafts cannot carry model-authored defaults.
+- **`storage.session` audit:** run recipes (substituted — needed for SW-restart playback), human params, evidence, and generated fill values are session-scoped and extension-private; `parkLog` carried the refused fill's **proposed value** — now stripped (#387, defense-in-depth: it never reached prompts or artifacts).
+- Recorder arming is extension-internal (isolated-world closure + runtime messages); `e.isTrusted` unchecked — accepted (page-derived-data class, no capability, cannot flip arming).
+
+## Findings ledger (round 2)
+
+| # | Severity | Item | Disposition |
+|---|----------|------|-------------|
+| 6 | **P2** | Recorder sensitive-surface narrower than capture rule — sensitive typed values could become persisted param defaults (#385) | **Fixed** — shared `fieldSurface()` + regex widening + tests |
+| 7 | P3 | Heal cache stored the substituted recipe (literal values) under the recipe id — values on disk + phantom row (#386) | **Fixed** — cues patch the unsubstituted library entry; phantoms pruned |
+| 8 | P3 | SKILL.md export rendered recorded URL query strings verbatim (#386) | **Fixed** — export table masks post-`?` |
+| 9 | P3 (latent) | `redactStateForJev` key strip narrower than formfill set (#387) | **Fixed** — widened + test |
+| 10 | nit | `parkLog` retained refused fill values (session-only) (#387) | **Fixed** — value stripped |
+| 11 | nit | `__proto__`/`constructor`/`prototype` accepted as library keys (#387) | **Fixed** — `safeLibKey` at import/record/rename |
+| 12 | nit | `generateRecipePrompt` reply schema invited model-authored defaults (#387) | **Fixed** — default field removed from example |
+| 13 | Design | `jevApiUrl` unvalidated user-config endpoint | **Accepted** — `zoApiUrl` posture (§5), storage.local-only |
+| 14 | Design | Recorder ignores `e.isTrusted`; contenteditable fills not recorded | **Accepted/documented** — page-derived-data class; no capability |
+| 15 | nit | `attach.path` outside `literalFillValueCount`; `readWorkspaceFile` uncapped | **Accepted** — workspace-scoped, parse-guarded |
+
+No prompt-Mode content changed → evals cache untouched by the round (the `generateRecipePrompt` string is not an eval case). Adversarial e2e: no extension needed (no new page-observable surface).
