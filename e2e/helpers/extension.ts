@@ -9,7 +9,9 @@
 import { test as base, expect, chromium, type BrowserContext, type Page, type Worker } from "@playwright/test";
 
 export const E2E_BASE = process.env.E2E_BASE || "http://127.0.0.1:3179";
-const EXTENSION_DIR = new URL("../../extension/", import.meta.url).pathname;
+// ZO_E2E_EXT overrides the loaded extension dir — A/B probes against a
+// shipped build (e.g. reproduce a regression on the last release tag).
+const EXTENSION_DIR = process.env.ZO_E2E_EXT || new URL("../../extension/", import.meta.url).pathname;
 
 export interface ExtensionHarness {
   context: BrowserContext;

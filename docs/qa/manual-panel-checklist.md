@@ -153,3 +153,12 @@ Log results (pass/fail + commit SHA) in the release PR description.
       capture).
 - [ ] **Single-session rule** — while composing, `!recipe record` refuses
       with a clear error, and vice versa.
+
+## 0.3.4/0.3.5/0.3.6 additions (walked 2026-09-25 — docs/qa/usability-walkthrough-0.3.6.md)
+
+- [ ] **Connection pane (0.3.4)** — Zo Username + Token only; Advanced `<details>` shows derived space/web endpoints; a hand-edited Advanced value survives save; Test Connection works against the derived endpoint.
+- [ ] **⚡ Jev card (0.3.4)** — enable toggle → key Show/Hide (masked, announced) → **Test Jev** returns the probe result; thresholds persist; with Jev off, runs show no Jev vocabulary.
+- [ ] **ONE Save Settings (0.3.4/#340)** — exactly one submit (sticky bottom bar); dirty dot on edit, cleared on save; the toast announces Saved/errors (`role=status`); switching Modes in the Prompts editor auto-persists the outgoing draft.
+- [ ] **Prompts editor save honesty (#398)** — edit a Mode field → Save → "✅ Saved!" toast; a value like `1234` in Text Budget saves (no silent native-validation block).
+- [ ] **Threat-model surfaces (0.3.5)** — context-tier chip on assistant footers shows tier + reason tooltip; recipe library popup opens focused, Esc closes and refocuses the trigger (a11y round).
+- [ ] **Reduced motion (0.3.6)** — OS "reduce motion" on: the background-chat pulse, mic/tts pulses and spinners are still (no animation); panel usable as normal.
