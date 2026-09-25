@@ -3,6 +3,23 @@
 New features in Zo Co-browse, newest first. Each entry explains what shipped;
 open **How to use it** for the hands-on steps.
 
+## Everyone can drive it — accessibility round 1 <span class="badge-new">NEW</span> {#a11y-round-1}
+
+_2026-09-25 · [#392](https://github.com/LogicIncZo/zo-cobrowse/issues/392)–[#393](https://github.com/LogicIncZo/zo-cobrowse/issues/393) · v0.3.6.0_
+
+The first dedicated accessibility pass over the panel, Settings and the write-assist
+popover:
+
+- **Keyboard-complete.** Every control — history cards, chat-tab close, pickers,
+  popups, dialogs — is reachable and operable from the keyboard, with visible
+  focus rings and Esc where you expect it.
+- **Screen readers hear what happens.** Mode changes and saves announce; sections
+  are real tabs; toggles and Show/Hide buttons state themselves.
+- **Motion and contrast respect your settings.** "Reduce motion" stills every
+  animation; all text now meets WCAG AA contrast in all five themes.
+- **The usability walkthrough finally ran** (it had been waived since v0.3.0.0) —
+  verdicts in `docs/qa/usability-walkthrough-0.3.6.md`.
+
 ## A security pass you can read <span class="badge-new">NEW</span> {#security-round-2}
 
 _2026-09-25 · [#383](https://github.com/LogicIncZo/zo-cobrowse/issues/383)–[#384](https://github.com/LogicIncZo/zo-cobrowse/issues/384) · v0.3.5.0_

@@ -9,10 +9,14 @@
 | Lane | Last round | Due |
 |---|---|---|
 | Security | **round 2 DONE 2026-09-25** (v0.3.5.0: #383 audit, #385–#387 fixes, #388 docs; `security-review.md` § Round 2) | next: every-few-releases cadence |
-| UX / usability | #244 scaffolded, round OPEN (owner walkthrough pending) | next review slate |
-| Accessibility | **never run** | next review slate |
+| UX / usability | **#244 walkthrough RUN 2026-09-25** (`usability-walkthrough-0.3.6.md`; waiver discharged) | next: every-few-releases cadence |
+| Accessibility | **round 1 DONE 2026-09-25** (v0.3.6.0: #392 audit, #394–#397 fixes, #399 docs; `accessibility-review.md` ledger #1–#12) | next: every-few-releases cadence |
 
 After 0.3.5: charter **accessibility round 1 + UX round closure** as the following review slate, before 0.9.0 feature work (reviews audit finished surfaces — the 0.3.0 precedent).
+
+## 🎯 0.3.6 — shipped 2026-09-25 (accessibility round 1 + #244 walkthrough closure)
+
+Standing-cadence slate #2 (spec PR #391; tickets #392/#393, milestone `0.3.6`). A11Y1: four-lane audit (keyboard/focus, semantics/ARIA, visual/motion, platform/strings) → 2 keyboard P1s + 1 contrast P1 + systematic reduced-motion/contrast/focus gaps, all fixed in-round (#394 keyboard, #395 focus management, #396 semantics + live regions + census, #397 motion + five-theme contrast). UX1: the waived #244 walkthrough run with screenshot evidence (`usability-walkthrough-0.3.6.md`) — F1 resolved as a test-env chromium death (`setPanelMode()` helper), m2 native-validation save block fixed (#398). PRs #394–#400; living `accessibility-review.md`.
 
 ## 🎯 0.3.5 — shipped 2026-09-25 (security review round 2 + threat model)
 

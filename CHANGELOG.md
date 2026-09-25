@@ -6,6 +6,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.3.6.0] — 2026-09-25
+
+### Accessibility — review round 1 + the #244 usability walkthrough (#392/#393, PRs #394–#400; spec PR #391)
+
+Second slate under the standing review cadence: the first accessibility lane, plus
+the usability walkthrough waived at v0.3.0.0 finally run.
+
+- **Keyboard: everything operable (#394).** History cards and the chat-tab ✕ were
+  mouse-only (clickable div/span); the primary Save button's text sat at 2.03:1 on
+  its gradient. All fixed — real buttons, ≥24px targets, hover-reveals now also
+  reveal on keyboard focus, dark text on the gradient (8.74:1).
+- **Focus management everywhere (#395).** Theme popover, Create-Mode overlay,
+  recipe library dialog, history view and the write-assist popover now move focus
+  in on open, close on Esc, and restore focus on close — including preserving
+  keyboard focus across the write-assist streaming re-renders.
+- **Real semantics + announcements (#396).** Options sections are a real
+  tablist/tab/tabpanel with arrow keys; the save toast and inline statuses are
+  `role=status` (saves/errors announce); secret Show/Hide buttons are unambiguous
+  with pressed state; form fields carry accessible names; the i18n census now
+  counts aria-label strings (42 pinned).
+- **Motion + contrast (#397).** `prefers-reduced-motion` honored (five infinite
+  animations, ~30 transitions and 11 smooth scrolls gated); `--text-faint` lifted
+  to ≥4.5:1 in all five themes; light/sepia status colors, widget note and icon
+  borders recomputed and passing. Computed before→after ratios in the PR.
+- **The #244 walkthrough ran (#393/#399).** Log: `docs/qa/usability-walkthrough-0.3.6.md`.
+  Headline catch: Playwright `selectOption` on the panel's shimmed selects kills
+  new-headless Chromium (test-env bug, A/B-verified on v0.3.5.0 + dev; the product
+  path verified healthy — `setPanelMode()` harness helper added). Also fixed en
+  route: the prompts-editor save silently blocked by native validation (#398).
+- Living records: `docs/qa/accessibility-review.md` (round 1, ledger #1–#12) joins
+  the threat model and security review as a per-release doc.
+
+Tests: 1531 unit/integration across 65 files (0 fail); findings queue empty;
+prompt evals 24/24 (no Mode-prompt changes).
+
 ## [0.3.5.0] — 2026-09-25
 
 ### Security — review round 2 + threat model (#383/#384, PRs #385–#388; spec PR #382)
