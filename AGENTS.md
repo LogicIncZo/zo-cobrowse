@@ -91,7 +91,7 @@ bun run package       # zip extension/ → zo-cobrowse.zip
 - **Not started / backlog (#10, #11, #14, #15):** multi-tab context, web store listing, page monitoring, shared sessions. `backend/relay.ts` exists for #15 but extension integration is undone.
 - **Streaming architecture:** hardened end-to-end this round (see `QA_REPORT.md` § "Streaming support").
 
-**Authoritative, current status lives in `BACKLOG.md` (feature roadmap) and `QA_REPORT.md` (audit/remediation log).** Per-ticket specs are in `tickets/`. This file is a quick index — update those two docs when status changes rather than maintaining tables here.
+**Authoritative, current status lives in `BACKLOG.md` (feature roadmap) and `QA_REPORT.md` (audit/remediation log).** Per-ticket specs are in `tickets/`. This file is a quick index — update those two docs when status changes rather than maintaining tables here. **Security posture lives in `docs/qa/security-review.md` (round audits + findings ledger) and `docs/qa/threat-model.md` (the living per-surface containment map — updated every release and whenever a PR ships a new security-relevant surface; standing review cadence: security/accessibility/UX lanes run every few feature releases, tracked in BACKLOG.md).**
 
 > Note: older revisions of this file referenced `brainstorming/ZO_AFFINITY_RANKING.md`; that file does not exist in this repo. The Zo-affinity analysis is summarized in `BACKLOG.md`'s tier table instead.
 
