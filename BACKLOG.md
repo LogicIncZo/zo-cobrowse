@@ -2,6 +2,22 @@
 
 > Updated 2026-09-15 — **0.2.8 = STABILIZATION BASH underway** (owner decision: verify everything shipped in 0.2.0–0.2.7, ship each verified fix as its own `0.2.8.N` point release; versioning is now 4-segment `MAJOR.MINOR.PATCH.STAB` — see 🎯 0.2.8 below, spec PR #132). The enabler release **v0.2.8.0** shipped the conversation-id debug tooling (`lib/zo-links.js`, Zo Web Origin setting, `#con_…` copy chip + ↗ Open-in-Zo on assistant footers + history cards) — the triage tool for the rest of the bash. **v0.2.7.1 stabilization round** shipped earlier today (`fix/0.2.7.1-stabilization` → `dev`): fixes for #133/#135/#138/#139 + regression specs (#137) + drift re-pin (#136); #140/#141/#142 (header-select truncation, popup theme/contrast, emoji tofu) = 0.2.7.2 polish candidates; #134 (＋ button cancels stream) awaits an owner A/B call. **v0.2.6 + v0.2.7 TAGGED & RELEASED** earlier (see 🎯 0.2.7 below); Tier-1 carry-overs (#19/#10/#29) + #46–#54 stay in **0.9.0** planning; #11 store listing its own milestone. **Prompt-optimization lane filed into 0.9.0 (2026-09-14), moved to its own 0.3.0 train (2026-09-15) with the security-review ([#243](https://github.com/LogicIncZo/zo-cobrowse/issues/243)) + usability-review ([#244](https://github.com/LogicIncZo/zo-cobrowse/issues/244)) rounds chartered alongside:** [#235](https://github.com/LogicIncZo/zo-cobrowse/issues/235)–[#239](https://github.com/LogicIncZo/zo-cobrowse/issues/239) — versioned cobrowse-protocol Zo skill (flagship: workspace install + slim prompt tail), static-tail trim round 2, established-thread minimal tail (spike-first), prompt-budget CI gate, persona_id spike.
 
+## Standing review cadence (owner rule, 2026-09-25)
+
+**Security, Accessibility, and UX review lanes run periodically — every few feature releases** — as audit rounds on the frozen post-release surface (the 0.3.0 #243/#244 pattern, generalized). Lane status:
+
+| Lane | Last round | Due |
+|---|---|---|
+| Security | **round 2 DONE 2026-09-25** (v0.3.5.0: #383 audit, #385–#387 fixes, #388 docs; `security-review.md` § Round 2) | next: every-few-releases cadence |
+| UX / usability | #244 scaffolded, round OPEN (owner walkthrough pending) | next review slate |
+| Accessibility | **never run** | next review slate |
+
+After 0.3.5: charter **accessibility round 1 + UX round closure** as the following review slate, before 0.9.0 feature work (reviews audit finished surfaces — the 0.3.0 precedent).
+
+## 🎯 0.3.5 — shipped 2026-09-25 (security review round 2 + threat model)
+
+Owner-called security lane (spec PR #382, plan + tickets #383/#384 in milestone `0.3.5`). Round-2 audit of the post-0.3.0 surface (Jev egress, workspace write-back, recorder/compose) + living `docs/qa/threat-model.md`. Findings: 1×P2 (#385 recorder sensitive-surface — now one shared rule with capture), 2×P3 (#386 heal-cache parameterization + export URL masking), nit bundle (#387: Jev key-strip parity, value-free parkLog, safeLibKey, generate schema, inventory lib scan). Deep-dives clean on Jev egress + write-back confinement/backstops; ledger #6–#15 in `security-review.md` § Round 2; #265 drift re-pin rode release prep. PRs #385–#388.
+
 ## Current state
 
 - **Branches:** git-flow (`dev` integration, `main` releases); local branch tree pruned 2026-08-28 after v0.2.0 (15 merged/stale branches deleted)

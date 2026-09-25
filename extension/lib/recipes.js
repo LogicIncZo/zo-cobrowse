@@ -540,7 +540,7 @@ export function generateRecipePrompt(draft) {
     '- Keep the flow linear (no branching or looping).',
     '',
     'Respond with ONLY a JSON object:',
-    '{"params": [{"name":"…","type":"string","required":true,"question":"…","default":"…"}], "steps": [ …same step shapes… ], "note": "one line"}',
+    '{"params": [{"name":"…","type":"string","required":true,"question":"…"}], "steps": [ …same step shapes… ], "note": "one line"}',
     '',
     'Current draft (param defaults redacted):',
     '```json',
@@ -915,6 +915,16 @@ export function serializeRecipe(recipe) {
   return `${JSON.stringify(recipe, null, 2)}\n`;
 }
 
+/** Library rows are object-keyed by recipe name, and assignment to
+ *  `__proto__` hits the Object.prototype setter even on JSON.parse-produced
+ *  objects — silently dropping the entry and polluting lookups. Names that
+ *  are unusable as keys are refused at every library write (0.3.5 round-2).
+ * @returns {string|null} the trimmed key, or null when unusable */
+export function safeLibKey(name) {
+  const k = String(name ?? '').trim();
+  return !k || /^(?:__proto__|constructor|prototype)$/.test(k) ? null : k;
+}
+
 // Provenance fields change on every save/promotion (and composed-provenance
 // stamps — composedBy/verified/goal — flip without the flow changing);
 // content drift is what bumps the version.
@@ -981,11 +991,21 @@ function exportValueRef(value) {
   return /\{\{[^}]+\}\}/.test(v) ? v : redactValue(v);
 }
 
+// Captured URLs ride their full query strings (location.href at record
+// time) — queries can carry tokens/session ids, so the export table masks
+// everything after '?'. The workspace JSON keeps the full URL by design
+// (confirm-gated write, validated artifact); SKILL.md is documentation.
+function exportUrl(u) {
+  const s = String(u ?? '');
+  const q = s.indexOf('?');
+  return q === -1 ? s : `${s.slice(0, q)}?…`;
+}
+
 function exportStepRow(step, i) {
   const n = i + 1;
   const cues = (step.cues || []).map((c) => `${c.strategy}=${/\{\{[^}]+\}\}/.test(String(c.value ?? '')) ? String(c.value) : String(c.value ?? '')}`).join(' · ');
   let detail = '';
-  if (step.type === 'navigate') detail = `\`${step.url}\` (expect: ${step.expectUrl || '—'})`;
+  if (step.type === 'navigate') detail = `\`${exportUrl(step.url)}\` (expect: ${exportUrl(step.expectUrl) || '—'})`;
   else if (step.type === 'fill' || step.type === 'attach') {
     detail = `${cues || '—'} → ${exportValueRef(step.value) || '—'}`;
     if (step.generate) {
@@ -996,7 +1016,7 @@ function exportStepRow(step, i) {
   } else if (step.type === 'click') detail = `${cues || '—'}${step.submitish ? ' · SUBMITISH' : ''}`;
   else if (step.type === 'check') detail = `${cues || '—'} → ${step.checked ? 'checked' : 'unchecked'}`;
   else if (step.type === 'extract') detail = `${cues || '—'} → evidence \`${step.evidenceKey}\`${step.label ? ` (${step.label})` : ''}`;
-  else if (step.type === 'waitFor') detail = `${step.expectUrl || step.expect || '—'}`;
+  else if (step.type === 'waitFor') detail = `${exportUrl(step.url || step.expectUrl || step.expect) || '—'}`;
   else if (step.type === 'human') detail = `${step.title || 'checkpoint'} — ${step.instructions || ''} (resume on ${JSON.stringify(step.resumeOn || {})})`;
   else if (step.type === 'done') detail = String(step.message || '');
   return `| ${n} | ${step.type} | ${detail} |`;

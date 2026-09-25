@@ -6,6 +6,54 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.3.5.0] — 2026-09-25
+
+### Security — review round 2 + threat model (#383/#384, PRs #385–#388; spec PR #382)
+
+Owner-called security lane over everything shipped since the round-1 audit's
+0.3.0 surface: Recipes workspace write-back, compose + recorder, the 0.3.3 UX
+bash, and Jev + settings rationalization.
+
+- **The recorder and capture now share ONE sensitive-field rule (#385, P2).**
+  The recipe recorder's suppression test read only name/id/placeholder/
+  aria-label — a field visibly labeled "Credit card number" with neutral
+  machine attributes emitted its typed value into the recording, where it
+  became a replayed param default persisted to disk. A shared `fieldSurface()`
+  (adds label[for] question text, aria-labelledby, title, autocomplete) now
+  feeds both capture and the recorder, and the regex gained cc-exp, csc,
+  security-code, expiry-year/month/date, routing, IBAN and sort-code patterns.
+- **Healed recipes stay parameterized (#386, P3).** A mid-run heal used to
+  cache the run's substituted copy — your real typed values baked in as
+  literals — into the local library under an unreachable id key. Healed cues
+  now patch the library's own entry, and legacy phantom rows are pruned.
+- **URL query strings no longer export (#386, P3).** SKILL.md export rendered
+  recorded navigate/waitFor URLs verbatim; a token-in-query could ride the
+  documentation bundle. The export table now masks everything after `?`
+  (workspace JSON keeps the full URL: confirm-gated, validated).
+- **Nit bundle (#387).** Jev's state key-strip widened to the formfill
+  sensitive set; the handoff park log no longer stores a refused fill's
+  proposed value; `__proto__`-class names are refused as library keys; the
+  generate-fill reply schema stops showing the model a `default` field; the
+  security sink inventory scans `extension/lib/` (the Jev transport lives
+  there).
+- **Jev egress + workspace write-back audited clean.** Key header-only at both
+  transports, state fixed-shape and label-only; all 7 recipe MCP call sites
+  path-confined, overwrite probe-then-confirm held, no-model-authored-value
+  backstops effective. Verdicts with file:line evidence:
+  `docs/qa/security-review.md` § Round 2.
+- **New living threat model (#384).** `docs/qa/threat-model.md` — the vector
+  class (page text reaches the model by design; the question is what a
+  successful injection can DO), per-surface containment maps, residual
+  accepted risks, updated every release. PRIVACY.md stops claiming "no
+  third-party services" and documents the opt-in Jev processor.
+- **Standing review cadence (owner rule):** security/accessibility/UX lanes
+  run every few feature releases on the frozen surface — next due:
+  accessibility round 1 + UX #244 closure, before 0.9.0.
+- Chore: zo-drift baselines re-pinned (#265).
+
+Tests: 1531 unit/integration across 65 files (0 fail); findings queue empty;
+prompt evals 24/24 (no Mode-prompt changes).
+
 ## [0.3.4.3] — 2026-09-22
 
 ### Fixed — !handoff bug bash (#368–#372, PRs #373–#377)

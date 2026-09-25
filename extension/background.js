@@ -110,6 +110,7 @@ import {
   driftedFromWorkspace,
   patchHealedCues,
   buildRecipeSkillExport,
+  safeLibKey,
 } from './lib/recipes.js';
 import { createSessionCache } from './lib/sw-cache.js';
 import { createDebugLog } from './lib/debug-log.js';
@@ -2565,6 +2566,10 @@ async function jevDecide(state, questions) {
       apiKey: config.jevApiKey,
       model: config.jevModel || DEFAULT_JEV_MODEL,
     },
+    // state passes the structural redaction boundary; questions carry only
+    // label-shaped criteria by construction (jev.js builders) — if a future
+    // builder ever embeds state-derived objects there, route them through
+    // redactStateForJev too.
     redactStateForJev(state),
     questions,
   );
@@ -3817,7 +3822,7 @@ async function recipeRename({ name, newName } = {}) {
   const next = safeText(newName).trim();
   const recipe = lib[key];
   if (!recipe) return { ok: false, error: `no local recipe named "${key}"` };
-  if (!next || /[/\\:]/.test(next)) return { ok: false, error: 'new name must be non-empty (no slashes/colons)' };
+  if (!next || /[/\\:]/.test(next) || !safeLibKey(next)) return { ok: false, error: 'new name must be non-empty (no slashes/colons)' };
   if (next === key) return { ok: true, name: next };
   if (lib[next]) return { ok: false, error: `"${next}" already exists in the library` };
   const verdict = validateRecipe(recipe);
@@ -3853,9 +3858,11 @@ async function recipeImport({ path } = {}) {
   }
   const verdict = validateRecipe(recipe);
   if (!verdict.ok) return { ok: false, error: `invalid recipe: ${verdict.errors[0]}`, errors: verdict.errors };
+  const libKey = safeLibKey(recipe.name);
+  if (!libKey) return { ok: false, error: 'recipe name is not usable as a library key' };
   const stamped = { ...recipe, origin: target, updatedAt: Date.now() };
   const lib = await recipeLibrary.load();
-  lib[recipe.name] = stamped;
+  lib[libKey] = stamped;
   await recipeLibrary.save(lib);
   return { ok: true, name: stamped.name, version: stamped.version, path: target };
 }
@@ -3944,8 +3951,20 @@ async function recipeHeal(runId, step, missResult) {
     run.updatedAt = Date.now();
     run.status = 'running';
     const lib = await recipeLibrary.load();
-    lib[run.recipeId] = run.recipe; // healed copy cached under the recipe id
-    await recipeLibrary.save(lib);
+    // 0.3.5 round-2 (#383): healed cues patch the UNSUBSTITUTED library entry
+    // — the run's substituted copy must never persist (its concrete fill
+    // values would replay without a params card). No local entry, or one
+    // that diverged → cache nothing; workspace origins heal via the
+    // write-back offer instead.
+    const baseKey = Object.keys(lib).find((k) => lib[k]?.id === run.recipeId);
+    if (baseKey) {
+      const patched = patchHealedCues(lib[baseKey], run.healedSteps);
+      if (patched.ok) {
+        lib[baseKey] = { ...patched.recipe, version: run.version, updatedAt: Date.now() };
+        if (baseKey !== run.recipeId) delete lib[run.recipeId]; // legacy id-keyed phantom
+        await recipeLibrary.save(lib);
+      }
+    }
     await recipePut(run);
     recipePlayStep(run.runId).catch((e) => console.debug('recipePlayStep:', e));
   } catch (e) {
@@ -4093,7 +4112,9 @@ async function recipeRecordStop() {
   }
 
   const lib = await recipeLibrary.load();
-  lib[s.name] = recipe;
+  const libKey = safeLibKey(s.name);
+  if (!libKey) return { ok: false, error: 'recorded name is not usable as a library key' };
+  lib[libKey] = recipe;
   await recipeLibrary.save(lib);
   return {
     ok: true,

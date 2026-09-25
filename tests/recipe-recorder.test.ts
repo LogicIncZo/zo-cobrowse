@@ -37,6 +37,7 @@ function extractDecl(prefix: string): string {
 const FN_NAMES = [
   "buildSelector",
   "nearestQuestion",
+  "fieldSurface",
   "normCue",
   "resolveByQuestion",
   "pickVisible",
@@ -86,7 +87,7 @@ describe("content.js recipe recorder (#220)", () => {
     const code =
       decls + "\n" +
       FN_NAMES.map((n) => extractFn(n)).join("\n") +
-      "\nself.__capture = { recCueSnapshot, recObserve, recArm, recOnClick, recOnChange };";
+      "\nself.__capture = { fieldSurface, recCueSnapshot, recObserve, recArm, recOnClick, recOnChange };";
     runInSandbox(code, sandbox);
     (globalThis as any).__rec = sandbox.__capture;
   });
@@ -127,6 +128,52 @@ describe("content.js recipe recorder (#220)", () => {
     doc.querySelector("#go")!.dispatchEvent(new win.Event("click", { bubbles: true }));
     const click = sends.find((s) => s.type === "RECIPE_OBS" && s.obs.op === "click");
     expect(click?.obs.submitish).toBe(true);
+  });
+
+  it("sensitive surface parity: label/aria-labelledby/autocomplete context suppresses values (0.3.5 round-2)", () => {
+    // Builder-style markup: neutral machine attrs, sensitive VISIBLE label —
+    // the exact divergence the round-2 audit found (recOnChange used a
+    // narrower surface than captureContext and emitted the typed value).
+    doc.body.insertAdjacentHTML(
+      "beforeend",
+      `
+      <form id="extra">
+        <label for="q4">Credit card number</label>
+        <input id="q4" name="field_7" type="text">
+        <label for="q5">Delivery instructions</label>
+        <input id="q5" name="field_8" type="text">
+        <input id="q6" name="field_9" type="text" autocomplete="cc-csc">
+        <input id="q7" name="field_10" type="text" placeholder="Security code">
+        <input id="q8" name="field_11" type="text" aria-labelledby="q8lab">
+        <span id="q8lab">Expiry year</span>
+      </form>
+    `,
+    );
+    // The shared helper surfaces the visible label context…
+    const surface = rec().fieldSurface(doc.querySelector("#q4")!);
+    expect(surface).toContain("Credit card number");
+    // …and both suppression paths agree on it.
+    const cases: Array<[string, boolean]> = [
+      ["#q4", true], // label[for] says "Credit card number"
+      ["#q5", false], // control — non-sensitive label keeps values flowing
+      ["#q6", true], // autocomplete="cc-csc"
+      ["#q7", true], // placeholder "Security code"
+      ["#q8", true], // aria-labelledby "Expiry year"
+    ];
+    rec().recArm();
+    for (const [sel, sensitive] of cases) {
+      const before = sends.filter((s) => s.type === "RECIPE_OBS" && s.obs.op === "fill").length;
+      changeEvent(doc.querySelector(sel)!);
+      const fills = sends.filter((s) => s.type === "RECIPE_OBS" && s.obs.op === "fill");
+      expect(fills.length).toBe(before + 1);
+      const last = fills[fills.length - 1];
+      if (sensitive) {
+        expect(last.obs.fieldSensitive).toBe(true);
+        expect("value" in last.obs).toBe(false);
+      } else {
+        expect("value" in last.obs).toBe(true);
+      }
+    }
   });
 
   it("listeners stay inert until armed", () => {

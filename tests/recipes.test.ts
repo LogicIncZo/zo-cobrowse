@@ -307,7 +307,7 @@ describe("healPrompt / parseRecipeHealResponse", () => {
 
 // ---- recorder pure halves (PR4) --------------------------------------------
 
-import { assembleDraftRecipe, generateRecipePrompt, parseGeneratedRecipe, recipeSaveTarget, serializeRecipe, driftedFromWorkspace, patchHealedCues, buildRecipeSkillExport } from "../extension/lib/recipes.js";
+import { assembleDraftRecipe, generateRecipePrompt, parseGeneratedRecipe, recipeSaveTarget, serializeRecipe, driftedFromWorkspace, patchHealedCues, buildRecipeSkillExport, safeLibKey } from "../extension/lib/recipes.js";
 
 describe("assembleDraftRecipe", () => {
   const T = 1757800000000;
@@ -654,6 +654,33 @@ describe("buildRecipeSkillExport", () => {
     expect(all).toContain("registration");
     // Masked literals show the redactValue form.
     expect(all).toContain("••••");
+  });
+
+  it("safeLibKey refuses prototype-dangerous names (0.3.5 round-2)", () => {
+    expect(safeLibKey("My Flow")).toBe("My Flow");
+    expect(safeLibKey("  spaced  ")).toBe("spaced");
+    expect(safeLibKey("__proto__")).toBe(null);
+    expect(safeLibKey("constructor")).toBe(null);
+    expect(safeLibKey("prototype")).toBe(null);
+    expect(safeLibKey("")).toBe(null);
+    expect(safeLibKey(undefined)).toBe(null);
+  });
+
+  it("masks query strings on captured URLs (0.3.5 round-2: tokens-in-query never export)", () => {
+    const withQuery: any = {
+      ...rec,
+      steps: [
+        { type: "navigate", url: "https://gateway.example/callback?token=abc123&next=/x", expectUrl: "callback" },
+        { type: "waitFor", url: "https://gateway.example/done?status=paid" },
+        { type: "done" },
+      ],
+    };
+    const out: any = buildRecipeSkillExport([withQuery]);
+    expect(out.ok).toBe(true);
+    const all = out.files.map((f: any) => f.markdown).join("\n");
+    expect(all).toContain("https://gateway.example/callback?…");
+    expect(all).not.toContain("abc123");
+    expect(all).not.toContain("status=paid");
   });
 
   it("refuses empty lists and recipes that do not validate", () => {

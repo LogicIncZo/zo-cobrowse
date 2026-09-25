@@ -425,9 +425,13 @@ describe("recipes player (#220)", () => {
     const retried = executedSteps.filter((s) => s.type === "fill");
     expect(retried.length).toBe(2);
     expect(retried[1].cues.map((c: any) => c.value)).toContain("#fullname");
-    // The healed copy is cached in the local library under the recipe id.
-    const cached = bus.storage.local._store.cobrowse_recipes["rcp-healx"];
+    // 0.3.5 round-2 (#383): healed cues patch the UNSUBSTITUTED library
+    // entry under its name key — the run's substituted copy (concrete fill
+    // values baked in) must not persist, so no id-keyed phantom row lands.
+    const cached = bus.storage.local._store.cobrowse_recipes["healx"];
     expect(cached?.steps[0].cues.map((c: any) => c.value)).toContain("#fullname");
+    expect(cached?.id).toBe("rcp-healx");
+    expect(bus.storage.local._store.cobrowse_recipes["rcp-healx"]).toBeUndefined();
     // Redaction: the healer prompt carried field structure, never values.
     const asks = fm.to("/zo/ask");
     const healAsk = [...fm.to("/zo/ask")].reverse().find((a: any) => String(a.body?.input || "").includes('Recipe "Heal me"'));

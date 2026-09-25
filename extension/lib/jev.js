@@ -172,13 +172,16 @@ export async function jevDecideImpl(fetchImpl, cfg, state, questions) {
 /** Redaction boundary for Jev-bound state (#342 consumes this): strip form
  *  field values entirely and drop secret-looking keys. Page text and element
  *  labels are fine; VALUES never are. This is the cheap structural half —
- *  the sensitivity heuristics live in lib/formfill.js with the executor. */
+ *  the sensitivity heuristics live in lib/formfill.js with the executor.
+ *  The key regex is the formfill SENSITIVE_FIELD_RE set plus the generic
+ *  value/secret/token classes (0.3.5 round-2 composition parity), so a
+ *  future state builder emitting field-shaped objects still strips. */
 export function redactStateForJev(state) {
   if (!state || typeof state !== 'object') return state;
   if (Array.isArray(state)) return state.map(redactStateForJev);
   const out = {};
   for (const [k, v] of Object.entries(state)) {
-    if (/value|secret|password|token|cvv|card/i.test(k)) continue;
+    if (/value|secret|password|token|cvv|card|cc[-_.\s]?num|cvc|expir|exp[-_.\s]?(date|month|mo|year|yr)|ssn|social|security|tax|pin\b|passport|licen[cs]e/i.test(k)) continue;
     out[k] = v && typeof v === 'object' ? redactStateForJev(v) : v;
   }
   return out;

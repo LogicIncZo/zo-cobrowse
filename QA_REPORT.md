@@ -1,5 +1,7 @@
 # Zo Co-browse — QA Report
 
+> **2026-09-25 — security review round 2 shipped** (v0.3.5.0): verdicts + findings ledger #6–#15 in `docs/qa/security-review.md` § Round 2; living threat model at `docs/qa/threat-model.md` (#383/#384).
+
 **Round:** 2026-08-08 · **Branch:** `Rewritet` · **Scope:** Full codebase audit (extension, backend, tests, manifest) + remediation of all findings.
 
 ## Headline status (after remediation)
