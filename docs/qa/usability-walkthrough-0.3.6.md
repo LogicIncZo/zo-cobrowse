@@ -41,16 +41,19 @@ checklist's own standing gate.
 
 ## Findings
 
-**F1 — P2 — panel Mode switch kills the page (automation-reproducible on v0.3.5.0 AND
-current dev).** `selectOption` on the panel's `#mode-select` (any index) closes the
-panel page mid-change: no console output, no pageerror — a renderer-level death.
-Filed: `docs/qa/findings/qa-mode-switch-page-death.md` (blocks release per the
-standing qa-gate until fixed or owner-waived). Notes: no e2e spec has EVER switched
-the panel's Mode (only the options-page `#prompt-mode-select`), so this path was
-never automation-covered; the owner uses Mode switching daily in the real shell
-without visible breakage, so a headless-specific trigger is plausible — owner shell
-confirmation requested in the finding. Repro: `ZO_E2E_EXT` A/B probe instructions in
-the finding (the harness gained the override in this round).
+**F1 — RESOLVED as a test-environment bug, not a product bug (2026-09-25, same day).**
+Playwright's `selectOption` on the panel's Mode select killed the whole headless
+Chromium window (both tabs, no new tabs possible — reproducible on v0.3.5.0 AND dev).
+Bisection: (1) dispatching the change from the page (the exact user-visible path) is
+**completely healthy** — the Mode applies, the system message renders, the page
+survives; (2) `selectOption` on ANY panel select dies (Model too), while the same
+call on options-page and site selects is fine — the panel's selects are the ones
+hidden behind the #304/#62 shim (`.select-shim-native` = display:none data store),
+and `selectOption` against a hidden select deterministically crashes new-headless
+Chromium. Disposition: harness now exports `setPanelMode()` (page-side dispatch) for
+all future panel-Mode coverage; the product needs no change (Mode switching verified
+working end-to-end). No e2e spec had ever switched the panel's Mode, which is why
+this surfaced only in the walkthrough.
 
 **F2 — P3 — unidentified stray glyph, panel message canvas.** A small tilted-pencil
 icon renders at the viewport's right-middle (≈x1010, y228 @1280×720) in EVERY panel
