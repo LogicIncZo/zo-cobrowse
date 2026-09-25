@@ -8,11 +8,15 @@
 
 | Lane | Last round | Due |
 |---|---|---|
-| Security | #243 (0.3.0 surface, 2026-09-16); round 2 = **0.3.5** in flight | ✅ this train |
+| Security | **round 2 DONE 2026-09-25** (v0.3.5.0: #383 audit, #385–#387 fixes, #388 docs; `security-review.md` § Round 2) | next: every-few-releases cadence |
 | UX / usability | #244 scaffolded, round OPEN (owner walkthrough pending) | next review slate |
 | Accessibility | **never run** | next review slate |
 
 After 0.3.5: charter **accessibility round 1 + UX round closure** as the following review slate, before 0.9.0 feature work (reviews audit finished surfaces — the 0.3.0 precedent).
+
+## 🎯 0.3.5 — shipped 2026-09-25 (security review round 2 + threat model)
+
+Owner-called security lane (spec PR #382, plan + tickets #383/#384 in milestone `0.3.5`). Round-2 audit of the post-0.3.0 surface (Jev egress, workspace write-back, recorder/compose) + living `docs/qa/threat-model.md`. Findings: 1×P2 (#385 recorder sensitive-surface — now one shared rule with capture), 2×P3 (#386 heal-cache parameterization + export URL masking), nit bundle (#387: Jev key-strip parity, value-free parkLog, safeLibKey, generate schema, inventory lib scan). Deep-dives clean on Jev egress + write-back confinement/backstops; ledger #6–#15 in `security-review.md` § Round 2; #265 drift re-pin rode release prep. PRs #385–#388.
 
 ## Current state
 
