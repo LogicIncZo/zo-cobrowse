@@ -728,12 +728,19 @@
       background: var(--wa-bg); cursor: pointer; font: inherit; font-size: 12px; color: var(--wa-btn-text); }
     .zo-wa-chip:hover { background: var(--wa-hover); }
     .zo-wa-follow { flex: 1; min-width: 110px; margin: 0; width: auto; }
+    /* #392: live-region announcer — visually hidden, lives on the shadow root
+       (waRender clears waPop's children, so a node inside it can't persist). */
+    .zo-wa-sr-status {
+      position: fixed; width: 1px; height: 1px; margin: -1px; overflow: hidden;
+      clip: rect(0 0 0 0); white-space: nowrap;
+    }
   `;
 
   let waEnabled = true;      // enableWriteAssist setting (default on)
   let waTheme = '';          // cobrowse_theme mirror ('' = follow system, #65)
   let waReady = false;       // widget DOM built
   let waHost = null, waRoot = null, waIcon = null, waPop = null;
+  let waStatus = null;       // #392 role=status announcer ("Draft ready")
   let waActiveEl = null;     // textarea the icon/popover is anchored to
   let waReqId = 0;           // stale-response guard
   let waHideTimer = null;
@@ -813,8 +820,18 @@
 
     waPop = document.createElement('div');
     waPop.className = 'zo-wa-pop';
+    waPop.setAttribute('role', 'dialog');
+    waPop.setAttribute('aria-label', 'Enhance with Zo');
     waPop.hidden = true;
     waRoot.appendChild(waPop);
+
+    // #392: the announcer sits OUTSIDE waPop — waRender wipes waPop's
+    // children on every delta, so a live region inside it could neither
+    // persist nor announce reliably. The stream itself stays silent; only
+    // the terminal "Draft ready" lands here.
+    waStatus = waEl('div', 'zo-wa-sr-status');
+    waStatus.setAttribute('role', 'status');
+    waRoot.appendChild(waStatus);
 
     (document.documentElement || document.body).appendChild(waHost);
     waReady = true;
@@ -868,21 +885,43 @@
     if (!waReady || !waActiveEl) return;
     if (waHideTimer) { clearTimeout(waHideTimer); waHideTimer = null; }
     waView = { mode: 'compose', result: '', error: '', instruction: waView.instruction || '', streaming: false };
+    if (waStatus) waStatus.textContent = '';
     waPop.hidden = false; // shown before render so waRender can measure + position
     waRender();
+    // #392: keyboard users land in the instruction field, not on <body>.
+    const instr = waPop.querySelector('.zo-wa-instr');
+    if (instr) instr.focus();
   }
 
   function waClose() {
+    const anchor = waActiveEl;
     waReqId++; // invalidate any in-flight response
     if (waPort) { try { waPort.disconnect(); } catch { /* already dead */ } waPort = null; }
     waThread = ''; // the thread is short-lived per popover session (#53)
+    // #392: focus inside the popover would drop to <body> once it hides —
+    // hand it back to the field. Focus that moved on its own (the
+    // focusin-close path when the user tabs/clicks into another field) stays.
+    const popFocused = !!(waPop && waRoot && waPop.contains(waRoot.activeElement));
     if (waPop) waPop.hidden = true;
     waView = { mode: 'compose', result: '', error: '', instruction: '', streaming: false };
+    if (waStatus) waStatus.textContent = '';
+    if (popFocused && anchor && anchor.isConnected) anchor.focus();
     if (waEligible(document.activeElement)) { waActiveEl = document.activeElement; waShowIcon(); }
     else waHideIcon();
   }
 
+  /** #392: identifies a focusable control across waRender rebuilds — the
+   *  same tag + class + label reappears each pass. */
+  function waFocusKey(el) {
+    return `${el.tagName}|${el.className}|${el.textContent || ''}`;
+  }
+
   function waRender() {
+    // #392: every WA_DELTA rebuilds this DOM mid-stream — carry focus across
+    // the swap so keyboard focus doesn't drop to <body>. Nothing focused in
+    // the popover → leave focus alone.
+    const prev = waRoot ? waRoot.activeElement : null;
+    const prevKey = (prev && waPop.contains(prev)) ? waFocusKey(prev) : null;
     waPop.textContent = '';
     const head = waEl('div', 'zo-wa-head');
     const title = waEl('div', 'zo-wa-title');
@@ -896,6 +935,7 @@
     close.type = 'button';
     close.textContent = '\u2715';
     close.title = 'Close';
+    close.setAttribute('aria-label', 'Close');
     close.addEventListener('click', () => waClose());
     head.appendChild(title);
     head.appendChild(close);
@@ -912,6 +952,7 @@
       instr.type = 'text';
       instr.className = 'zo-wa-instr';
       instr.placeholder = 'Optional instruction \u2014 tone, length, focus\u2026';
+      instr.setAttribute('aria-label', 'Instruction for Zo (optional)');
       instr.value = waView.instruction || '';
       waPop.appendChild(instr);
       const foot = waEl('div', 'zo-wa-foot');
@@ -962,6 +1003,8 @@
       // #53 follow-up iteration chips: re-work the result on the popover's
       // short-lived thread. Custom instruction rides the same path.
       const chips = waEl('div', 'zo-wa-chips');
+      chips.setAttribute('role', 'group');
+      chips.setAttribute('aria-label', 'Follow-up actions');
       const mkChip = (label, instr) => {
         const c = waEl('button', 'zo-wa-chip');
         c.type = 'button';
@@ -975,6 +1018,7 @@
       custom.type = 'text';
       custom.className = 'zo-wa-instr zo-wa-follow';
       custom.placeholder = 'Follow-up instruction \u2014 iterate on the draft\u2026';
+      custom.setAttribute('aria-label', 'Follow-up instruction');
       custom.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && custom.value.trim()) {
           waView.instruction = custom.value.trim();
@@ -1006,6 +1050,10 @@
       foot.appendChild(retry);
       waPop.appendChild(foot);
     }
+    if (prevKey) {
+      const again = [...waPop.querySelectorAll('button, input')].find((el) => waFocusKey(el) === prevKey);
+      if (again) again.focus();
+    }
     // State renders change the popover's height (compose → loading → result) —
     // re-anchor so it stays inside the field.
     if (!waPop.hidden) waPositionPop();
@@ -1032,6 +1080,7 @@
     const priorResult = waView.result;
     waView.mode = 'loading';
     waView.streaming = false;
+    if (waStatus) waStatus.textContent = ''; // a fresh pass re-announces when it lands
     waRender();
     // #53: preferred path — a streaming port. Cancel is port.disconnect()
     // (waClose does this); the reqId guard supersedes stale callbacks.
@@ -1060,6 +1109,7 @@
           waView.streaming = false;
           waView.result = String(m.text || '');
           waRender();
+          if (waStatus) waStatus.textContent = 'Draft ready'; // announce; the stream itself stays silent
         } else if (m.type === 'WA_ERROR') {
           finish();
           waView.mode = 'error';
@@ -1125,6 +1175,7 @@
         waView.error = (resp && resp.error) || 'Enhance failed.';
       }
       waRender();
+      if (resp && resp.ok && waStatus) waStatus.textContent = 'Draft ready';
     }).catch(() => {
       if (reqId !== waReqId) return;
       waView.mode = 'error';

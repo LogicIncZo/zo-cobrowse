@@ -112,7 +112,9 @@ function applyTheme(theme, skipPersist) {
 }
 
 function showThemePopover() {
-  let popover = document.getElementById('theme-popover');
+  const open = document.getElementById('theme-popover');
+  if (open && open.classList.contains('open')) { closeThemePopover(true); return; } // the toggle is a toggle
+  let popover = open;
   if (!popover) {
     popover = document.createElement('div');
     popover.id = 'theme-popover';
@@ -130,27 +132,46 @@ function showThemePopover() {
       opt.addEventListener('click', (e) => {
         e.stopPropagation();
         applyTheme(key);
-        closeThemePopover();
+        closeThemePopover(true);
       });
       popover.appendChild(opt);
     }
     document.getElementById('theme-toggle').parentElement.appendChild(popover);
   }
   popover.classList.add('open');
+  const toggleBtn = document.getElementById('theme-toggle');
+  if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'true');
   document.addEventListener('click', closeThemePopoverOutside, true);
+  document.addEventListener('keydown', onThemePopoverKeydown, true);
+  // #392: keyboard users land on the first option, not an unnamed popover.
+  const first = popover.querySelector('button');
+  if (first) first.focus();
 }
 
-function closeThemePopover() {
+function closeThemePopover(refocus) {
   const popover = document.getElementById('theme-popover');
   if (popover) popover.classList.remove('open');
+  const btn = document.getElementById('theme-toggle');
+  if (btn) btn.setAttribute('aria-expanded', 'false');
   document.removeEventListener('click', closeThemePopoverOutside, true);
+  document.removeEventListener('keydown', onThemePopoverKeydown, true);
+  // Refocus on pick/Esc closes only — an outside click already aimed focus
+  // where the user pointed.
+  if (refocus && btn) btn.focus();
+}
+
+function onThemePopoverKeydown(e) {
+  const popover = document.getElementById('theme-popover');
+  if (!popover || !popover.classList.contains('open') || e.key !== 'Escape') return;
+  e.preventDefault(); // consumed — the panel-level Esc-to-stop (#133) must not also fire
+  closeThemePopover(true);
 }
 
 function closeThemePopoverOutside(e) {
   const popover = document.getElementById('theme-popover');
   const btn = document.getElementById('theme-toggle');
   if (popover && !popover.contains(e.target) && e.target !== btn) {
-    closeThemePopover();
+    closeThemePopover(false);
   }
 }
 
@@ -865,12 +886,20 @@ function renderChatView() {
 
 function toggleHistoryView() {
   // If switching to history, save current conversation first
-  if (!isHistoryView) {
+  const opening = !isHistoryView;
+  if (opening) {
     saveCurrentConversation();
     if (historySearch) historySearch.value = ''; // fresh list each visit
   }
   isHistoryView = !isHistoryView;
   renderView();
+  // #392: focus follows the view — the search box on open, the ☰ trigger on
+  // close (Back button included — it shares this toggle).
+  if (opening) {
+    if (historySearch) historySearch.focus();
+  } else {
+    historyBtn.focus();
+  }
 }
 
 // ---- Multi-conversation storage ----
@@ -1395,12 +1424,15 @@ async function closeChatTabById(id) {
 // ---- Chat-tab context menu (#54) — Pin/Unpin + Export Markdown ----
 
 let tabContextMenuEl = null;
+let tabContextMenuAnchor = null; // #392: control the menu opened from — Esc hands focus back
 
-function closeTabContextMenu() {
+function closeTabContextMenu(refocus) {
   if (tabContextMenuEl) {
     tabContextMenuEl.remove();
     tabContextMenuEl = null;
+    if (refocus && tabContextMenuAnchor) tabContextMenuAnchor.focus();
   }
+  tabContextMenuAnchor = null;
 }
 
 /** #314: per-row overflow menu for library rows — the tab-strip context-menu
@@ -1432,11 +1464,13 @@ function openRowMenu(anchorBtn, items) {
   menu.style.left = Math.max(4, px) + 'px';
   menu.style.top = Math.max(4, py) + 'px';
   tabContextMenuEl = menu;
+  openContextMenuFocus(menu, anchorBtn);
 }
 
 function openTabContextMenu(e, chatId) {
   e.preventDefault();
   closeTabContextMenu();
+  const anchorBtn = e.currentTarget; // the chat-tab button — valid during dispatch
   const menu = document.createElement('div');
   menu.className = 'chat-tab-menu';
   menu.setAttribute('role', 'menu');
@@ -1465,6 +1499,15 @@ function openTabContextMenu(e, chatId) {
   menu.style.left = Math.max(4, px) + 'px';
   menu.style.top = Math.max(4, py) + 'px';
   tabContextMenuEl = menu;
+  openContextMenuFocus(menu, anchorBtn);
+}
+
+/** #392: menus open with focus on their first item — ArrowUp/Down then walk
+ *  the items (document keydown below) and Esc restores the anchor. */
+function openContextMenuFocus(menu, anchor) {
+  tabContextMenuAnchor = anchor || null;
+  const first = menu.querySelector('button[role="menuitem"]');
+  if (first) first.focus();
 }
 
 // Dismissal: any click outside the open menu, or Escape. One set of
@@ -1474,7 +1517,19 @@ document.addEventListener('click', (e) => {
   if (tabContextMenuEl && !tabContextMenuEl.contains(e.target)) closeTabContextMenu();
 });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeTabContextMenu();
+  if (!tabContextMenuEl) return;
+  const items = [...tabContextMenuEl.querySelectorAll('button[role="menuitem"]')];
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const idx = items.indexOf(document.activeElement);
+    const next = idx === -1
+      ? (e.key === 'ArrowDown' ? 0 : items.length - 1)
+      : (idx + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length;
+    if (items[next]) items[next].focus();
+  } else if (e.key === 'Escape') {
+    e.preventDefault(); // consumed — the panel-level Esc-to-stop (#133) must not also fire
+    closeTabContextMenu(true);
+  }
 });
 
 /** Flip a conversation's pin, persist, re-render. The pin lives on the
@@ -3113,15 +3168,17 @@ function initRecipeLibraryButton() {
   const btn = document.getElementById('recipe-lib-btn');
   if (!btn) return;
   btn.addEventListener('click', () => toggleRecipeLibrary());
-  const input = document.getElementById('query-input');
-  input?.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
+  // #392: document-level + capture so Esc works with focus anywhere (the old
+  // composer binding only covered the textarea). The inline rename input keeps
+  // its own Esc (cancel-rename leaves the popup open).
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || e.defaultPrevented) return;
     const pop = document.getElementById('recipe-library');
-    if (pop && !pop.classList.contains('hidden')) {
-      e.preventDefault();
-      closeRecipeLibrary();
-    }
-  });
+    if (!pop || pop.classList.contains('hidden')) return;
+    if (e.target instanceof Element && e.target.closest('.recipe-lib-rename')) return;
+    e.preventDefault(); // consumed — the panel-level Esc-to-stop (#133) must not also fire
+    closeRecipeLibrary(true);
+  }, true);
 }
 
 function renderDomToggle() {
@@ -4268,7 +4325,7 @@ async function startModeCreation() {
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:999;';
   overlay.innerHTML = `
-    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:16px;width:280px;">
+    <div role="dialog" aria-modal="true" aria-label="Create Mode with Zo" style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:16px;width:280px;">
       <h3 style="font-size:14px;margin:0 0 8px;color:var(--text);">Create Mode with Zo</h3>
       <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px;">Describe what you want this Mode to do:</p>
       <textarea id="mode-desc-input" style="width:100%;height:80px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:6px;font-size:13px;resize:none;font-family:var(--font);" placeholder="e.g. Extract all product prices and availability from shopping pages"></textarea>
@@ -4282,11 +4339,29 @@ async function startModeCreation() {
   const descInput = overlay.querySelector('#mode-desc-input');
   descInput.focus();
 
-  overlay.querySelector('#generate-mode-cancel').addEventListener('click', () => overlay.remove());
+  // #392: one close path for Cancel / backdrop / Esc — always tears down the
+  // document keydown listener and hands focus back to the ✦ trigger.
+  const trigger = document.getElementById('create-mode-btn');
+  const onOverlayKeydown = (e) => {
+    if (e.key !== 'Escape') return;
+    e.preventDefault(); // consumed — the panel-level Esc-to-stop (#133) must not also fire
+    closeOverlay();
+  };
+  const closeOverlay = () => {
+    document.removeEventListener('keydown', onOverlayKeydown, true);
+    overlay.remove();
+    if (trigger) trigger.focus();
+  };
+  document.addEventListener('keydown', onOverlayKeydown, true);
+  // Backdrop cancels; mousedown (not click) so dragging text off the card
+  // doesn't dismiss it.
+  overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) closeOverlay(); });
+
+  overlay.querySelector('#generate-mode-cancel').addEventListener('click', closeOverlay);
   overlay.querySelector('#generate-mode-confirm').addEventListener('click', async () => {
     const desc = descInput.value.trim();
     if (!desc) return;
-    overlay.remove();
+    closeOverlay();
 
     addSystemMessage(`🤖 Generating Mode for: "${desc}"...`);
     const resp = await chrome.runtime.sendMessage({
@@ -5597,15 +5672,20 @@ async function startRecipeRun(source) {
   return start.run;
 }
 
-function closeRecipeLibrary() {
+function closeRecipeLibrary(refocusTrigger) {
   const pop = document.getElementById('recipe-library');
   if (pop) pop.classList.add('hidden');
+  const btn = document.getElementById('recipe-lib-btn');
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+  // Refocus on explicit closes (toggle / Esc) only — send-time and
+  // run-start closes hand focus to whatever came next.
+  if (refocusTrigger && btn) btn.focus();
 }
 
 async function toggleRecipeLibrary() {
   const pop = document.getElementById('recipe-library');
   if (pop && !pop.classList.contains('hidden')) {
-    closeRecipeLibrary();
+    closeRecipeLibrary(true);
     return;
   }
   closeAllPickerPopups();
@@ -5618,10 +5698,13 @@ async function renderRecipeLibrary() {
   pop.replaceChildren();
   pop.appendChild(pickerNoteItem('Loading recipes…'));
   pop.classList.remove('hidden');
+  const libBtn = document.getElementById('recipe-lib-btn');
+  if (libBtn) libBtn.setAttribute('aria-expanded', 'true');
   const resp = await chrome.runtime.sendMessage({ type: 'RECIPE_LIST' }).catch(() => null);
   pop.replaceChildren();
   if (!resp?.ok) {
     pop.appendChild(pickerNoteItem(resp?.error || 'Recipes unavailable — check your Zo token.'));
+    focusRecipeLibraryFirstControl(pop);
     return;
   }
   const recipes = resp.recipes || [];
@@ -5671,6 +5754,13 @@ async function renderRecipeLibrary() {
   guide.title = 'The recipes user guide — record, run, checkpoints, export';
   importBar.appendChild(guide);
   pop.appendChild(importBar);
+  focusRecipeLibraryFirstControl(pop);
+}
+
+/** #392: keyboard users land on the popup's first control, not <body>. */
+function focusRecipeLibraryFirstControl(pop) {
+  const first = pop.querySelector('button, input, [href]');
+  if (first) first.focus();
 }
 
 /** One library row: header (name/version/steps/source), params, actions. */
