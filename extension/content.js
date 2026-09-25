@@ -18,6 +18,10 @@
   const REC_SENSITIVE_URL_RE = /login|signin|sign-in|signup|sign-up|register|checkout|payment|billing|password|banking/i;
   const REC_SUBMITISH_RE = /submit|pay\b|checkout|order|place|buy|sign in|sign up|register|confirm purchase/i;
 
+  // #392: honor prefers-reduced-motion — programmatic scrolls jump, not glide.
+  // (Read off `window` so the test harness's source slices resolve it too.)
+  const smoothBehavior = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+
   function isAlive() {
     return !PAGE_DEAD.test(location.protocol);
   }
@@ -451,7 +455,7 @@
             return { ok: false, type: 'click', refused: 'sensitive-submit', probeText: pText.slice(0, 80) };
           }
         }
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.scrollIntoView({ behavior: smoothBehavior(), block: 'center' });
         await sleep(300);
         el.click();
         return { ok: true, type: 'click' };
@@ -496,7 +500,7 @@
           isValidCssSelector(action.selector) ? action.selector : ''
         );
         if (!el) throw new Error(`Element not found: ${action.selector}`);
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.scrollIntoView({ behavior: smoothBehavior(), block: 'center' });
         await sleep(300);
         el.click();
         return { ok: true, type: 'click' };
@@ -672,17 +676,20 @@
       --wa-bg: #fff; --wa-text: #101828; --wa-border: #d0d5dd; --wa-border-soft: #eaecf0;
       --wa-head-bg: #f8fafc; --wa-muted: #475467; --wa-hover: #f2f4f7; --wa-icon-bg: #fff;
       --wa-btn-text: #344054; --wa-error: #b42318;
+      /* #392: AA fixes — icon boundary >=3:1 (non-text), note text >=4.5:1 */
+      --wa-icon-border: #667085; --wa-note: #b54708;
     }
     :host(.zo-wa-dark) {
       --wa-bg: #1c212b; --wa-text: #e6e8ee; --wa-border: #3a4150; --wa-border-soft: #2a3140;
       --wa-head-bg: #232936; --wa-muted: #98a2b3; --wa-hover: #2a3140; --wa-icon-bg: #1c212b;
       --wa-btn-text: #cbd2dc; --wa-error: #f97066;
+      --wa-note: #fdb022; /* 8.8:1 on --wa-bg (light's #b54708 is 3.0:1 here) */
     }
     [hidden] { display: none !important; }
     .zo-wa-icon {
       position: fixed; display: none; width: ${WA_ICON_BOX}px; height: ${WA_ICON_BOX}px;
       padding: 2px; box-sizing: border-box; align-items: center; justify-content: center;
-      background: var(--wa-icon-bg); border: 1px solid var(--wa-border); border-radius: 6px;
+      background: var(--wa-icon-bg); border: 1px solid var(--wa-icon-border); border-radius: 6px;
       box-shadow: 0 1px 4px rgba(16,24,40,.25); cursor: pointer;
       pointer-events: auto; z-index: 2147483647;
     }
@@ -713,8 +720,17 @@
     .zo-wa-spin { width: 14px; height: 14px; border: 2px solid var(--wa-border);
       border-top-color: #2962b8; border-radius: 50%; animation: zo-wa-rot .8s linear infinite; }
     @keyframes zo-wa-rot { to { transform: rotate(360deg); } }
+    /* #392: reduced motion — same kill-switch the panel ships. */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
     .zo-wa-error { color: var(--wa-error); }
-    .zo-wa-note { padding: 0 10px 6px; color: #b54708; font-size: 12px; }
+    .zo-wa-note { padding: 0 10px 6px; color: var(--wa-note); font-size: 12px; }
     .zo-wa-foot { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
       border-top: 1px solid var(--wa-border-soft); }
     .zo-wa-spacer { flex: 1; }
