@@ -819,6 +819,22 @@ function bindEvents() {
     micBtn.addEventListener('click', () => { startRecording(); });
   }
 
+  // #392: Left/Right arrows move focus AND activate among the chat tabs
+  // (wraps at the ends; activation reuses the tab's click handler).
+  if (chatTabsEl) {
+    chatTabsEl.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      const tabs = [...chatTabsEl.querySelectorAll('[role="tab"]')];
+      const cur = tabs.indexOf(document.activeElement);
+      if (cur === -1) return;
+      const delta = e.key === 'ArrowRight' ? 1 : -1;
+      const next = tabs[(cur + delta + tabs.length) % tabs.length];
+      next.focus();
+      next.click();
+      e.preventDefault();
+    });
+  }
+
   // Chips (event delegation for dynamically rendered chips). Sends the chip's
   // stored prompt — the readable label is display-only (this used to send the
   // label text and ignore `prompt` entirely).
@@ -1344,6 +1360,8 @@ function renderChatTabs() {
     tab.className = 'chat-tab' + (id === activeId ? ' chat-tab-active' : '');
     tab.setAttribute('role', 'tab');
     tab.setAttribute('aria-selected', String(id === activeId));
+    // Single shared panel — switching a tab swaps #messages in place.
+    tab.setAttribute('aria-controls', 'messages');
     tab.title = labelText + (id === streamingId ? ' — generating…' : '');
     if (convo.pinned) {
       // 📌 glyph marks a pinned chat (exempt from LRU eviction).
@@ -3265,6 +3283,7 @@ function initTabStrip() {
   if (collapseBtn) {
     collapseBtn.addEventListener('click', () => {
       tabStripCollapsed = !tabStripCollapsed;
+      collapseBtn.setAttribute('aria-expanded', String(!tabStripCollapsed));
       const caret = collapseBtn.querySelector('.tab-strip-caret');
       if (caret) caret.textContent = tabStripCollapsed ? '▸' : '▾';
       renderTabStrip();
@@ -4009,12 +4028,12 @@ function addReasoningBubble(parentMsgEl, reasoning, inlineMax = INLINE_REASONING
     // Inline muted prose, no collapse.
     block.innerHTML = markdownToHtml(text);
   } else {
-    // Collapsible trace header.
+    // Collapsible trace header. No aria-label override — the accessible name
+    // is the visible "💭 Thought — <gist>" text (#392).
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.className = 'reasoning-toggle';
     toggle.setAttribute('aria-expanded', 'false');
-    toggle.setAttribute('aria-label', 'Show reasoning');
     const caret = document.createElement('span');
     caret.className = 'reasoning-caret';
     caret.textContent = '▸';
@@ -4040,7 +4059,6 @@ function addReasoningBubble(parentMsgEl, reasoning, inlineMax = INLINE_REASONING
     toggle.addEventListener('click', () => {
       const expanded = toggle.getAttribute('aria-expanded') === 'true';
       toggle.setAttribute('aria-expanded', String(!expanded));
-      toggle.setAttribute('aria-label', expanded ? 'Show reasoning' : 'Hide reasoning');
       caret.textContent = expanded ? '▸' : '▾';
       content.hidden = expanded;
     });
@@ -4489,6 +4507,8 @@ function startRecording() {
         micBtn.classList.add('recording');
         micBtn.textContent = '🔴';
         micBtn.title = 'Stop recording';
+        micBtn.setAttribute('aria-pressed', 'true');
+        micBtn.setAttribute('aria-label', 'Stop voice input');
       } catch (err) {
         addMessageDOM('error', `🎤 STT error: ${err.message}`);
       }
@@ -4507,6 +4527,8 @@ function stopRecording() {
   micBtn.classList.remove('recording');
   micBtn.textContent = '🎤';
   micBtn.title = 'Voice input (STT)';
+  micBtn.setAttribute('aria-pressed', 'false');
+  micBtn.setAttribute('aria-label', 'Voice input');
   if (sttInterim) {
     input.value = (input.value + ' ' + sttInterim).trim();
     sttInterim = '';

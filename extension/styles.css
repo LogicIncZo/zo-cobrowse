@@ -2433,9 +2433,6 @@ body.options-page {
   display: inline-flex;
   gap: 2px;
 }
-.msg-footer-fb { font-size: 12px; opacity: 0.6; }
-.msg-footer-fb:hover { opacity: 1; }
-.msg-footer-fb.selected { opacity: 1; outline: 1px solid var(--zo-border-primary); border-radius: 4px; }
 
 /* Action message in chat (role=action) */
 .msg-action {
