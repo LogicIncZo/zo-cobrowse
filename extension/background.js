@@ -110,6 +110,7 @@ import {
   driftedFromWorkspace,
   patchHealedCues,
   buildRecipeSkillExport,
+  safeLibKey,
 } from './lib/recipes.js';
 import { createSessionCache } from './lib/sw-cache.js';
 import { createDebugLog } from './lib/debug-log.js';
@@ -2565,6 +2566,10 @@ async function jevDecide(state, questions) {
       apiKey: config.jevApiKey,
       model: config.jevModel || DEFAULT_JEV_MODEL,
     },
+    // state passes the structural redaction boundary; questions carry only
+    // label-shaped criteria by construction (jev.js builders) — if a future
+    // builder ever embeds state-derived objects there, route them through
+    // redactStateForJev too.
     redactStateForJev(state),
     questions,
   );
@@ -3817,7 +3822,7 @@ async function recipeRename({ name, newName } = {}) {
   const next = safeText(newName).trim();
   const recipe = lib[key];
   if (!recipe) return { ok: false, error: `no local recipe named "${key}"` };
-  if (!next || /[/\\:]/.test(next)) return { ok: false, error: 'new name must be non-empty (no slashes/colons)' };
+  if (!next || /[/\\:]/.test(next) || !safeLibKey(next)) return { ok: false, error: 'new name must be non-empty (no slashes/colons)' };
   if (next === key) return { ok: true, name: next };
   if (lib[next]) return { ok: false, error: `"${next}" already exists in the library` };
   const verdict = validateRecipe(recipe);
@@ -3853,9 +3858,11 @@ async function recipeImport({ path } = {}) {
   }
   const verdict = validateRecipe(recipe);
   if (!verdict.ok) return { ok: false, error: `invalid recipe: ${verdict.errors[0]}`, errors: verdict.errors };
+  const libKey = safeLibKey(recipe.name);
+  if (!libKey) return { ok: false, error: 'recipe name is not usable as a library key' };
   const stamped = { ...recipe, origin: target, updatedAt: Date.now() };
   const lib = await recipeLibrary.load();
-  lib[recipe.name] = stamped;
+  lib[libKey] = stamped;
   await recipeLibrary.save(lib);
   return { ok: true, name: stamped.name, version: stamped.version, path: target };
 }
@@ -4105,7 +4112,9 @@ async function recipeRecordStop() {
   }
 
   const lib = await recipeLibrary.load();
-  lib[s.name] = recipe;
+  const libKey = safeLibKey(s.name);
+  if (!libKey) return { ok: false, error: 'recorded name is not usable as a library key' };
+  lib[libKey] = recipe;
   await recipeLibrary.save(lib);
   return {
     ok: true,

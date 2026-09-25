@@ -11,7 +11,13 @@
 
 import { readFileSync, readdirSync } from "node:fs";
 
-const files = readdirSync(new URL("../../extension/", import.meta.url)).filter((f) => f.endsWith(".js"));
+const topFiles = readdirSync(new URL("../../extension/", import.meta.url)).filter((f) => f.endsWith(".js"));
+// 0.3.5 round-2: lib/ modules carry real transports now (jevDecideImpl's
+// fetch) — the inventory must see them or the roster undercounts by design.
+const libFiles = readdirSync(new URL("../../extension/lib/", import.meta.url))
+  .filter((f) => f.endsWith(".js"))
+  .map((f) => `lib/${f}`);
+const files = [...topFiles, ...libFiles];
 const src = (f: string) => readFileSync(new URL(`../../extension/${f}`, import.meta.url), "utf-8");
 
 type Hit = { file: string; line: number; text: string };

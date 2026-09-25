@@ -246,6 +246,15 @@ describe("handoff — tally / recordVisit / park", () => {
     for (let i = 0; i < 60; i++) r = park(r, { type: "click", selector: `#s${i}` }, "x");
     expect(r.parkLog.length).toBe(50);
   });
+
+  it("park log strips the refused fill's proposed value (0.3.5 round-2: session-only trail stays value-free)", () => {
+    let r = mkRun();
+    r = park(r, { type: "fill", selector: "#cc", value: "4111111111111111" }, "no-submit handoff", "https://shop.example/checkout");
+    expect(r.parkLog[0].action.type).toBe("fill");
+    expect(r.parkLog[0].action.selector).toBe("#cc");
+    expect(r.parkLog[0].action.value).toBeUndefined();
+    expect(JSON.stringify(r.parkLog)).not.toContain("4111");
+  });
 });
 
 describe("handoff — prompt assembly", () => {
