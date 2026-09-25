@@ -147,6 +147,21 @@
             "type": "string",
             "title": "Label",
             "description": "Human-readable label, e.g. 'High reasoning'"
+          },
+          "api_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Value",
+            "description": "Provider value sent as reasoning in POST /ask; not the display position. Older catalogs may omit it."
           }
         },
         "type": "object",
@@ -155,7 +170,7 @@
           "label"
         ],
         "title": "CatalogReasoningLevel",
-        "description": "One selectable reasoning level in a model's reasoning slider."
+        "description": "One selectable reasoning level and its provider API value."
       },
       "CatalogReasoningLevels": {
         "properties": {
