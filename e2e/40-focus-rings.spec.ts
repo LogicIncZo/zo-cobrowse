@@ -12,10 +12,12 @@ test.describe("focus ring (#310)", () => {
       const panel = h.panel;
 
       // Tab through the header + controls into the composer: each stop must
-      // carry a ≥2px outline (the global :focus-visible ring).
+      // carry a ≥2px outline (the global :focus-visible ring). The bound is
+      // headroom, not a count — the panel's real sequence is ~25 stops deep
+      // (header, selects, chips, composer toggles) and grows with new controls.
       await panel.keyboard.press("Tab");
       const stops: { tag: string; id: string; fv: boolean; style: string }[] = [];
-      for (let i = 0; i < 24; i++) {
+      for (let i = 0; i < 32; i++) {
         const stop = await panel.evaluate(() => {
           const el = document.activeElement as HTMLElement | null;
           if (!el || el === document.body) return null;

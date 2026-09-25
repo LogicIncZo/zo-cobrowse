@@ -9,7 +9,9 @@
 import { test as base, expect, chromium, type BrowserContext, type Page, type Worker } from "@playwright/test";
 
 export const E2E_BASE = process.env.E2E_BASE || "http://127.0.0.1:3179";
-const EXTENSION_DIR = new URL("../../extension/", import.meta.url).pathname;
+// ZO_E2E_EXT overrides the loaded extension dir — A/B probes against a
+// shipped build (e.g. reproduce a regression on the last release tag).
+const EXTENSION_DIR = process.env.ZO_E2E_EXT || new URL("../../extension/", import.meta.url).pathname;
 
 export interface ExtensionHarness {
   context: BrowserContext;
@@ -198,4 +200,24 @@ export async function waitForTurnComplete(panel: Page, timeout = 20_000): Promis
 export async function lastAskBody(): Promise<any> {
   const asks = await recordedAsks();
   return asks[asks.length - 1]?.body ?? null;
+}
+
+/**
+ * Switch the panel's Mode WITHOUT Playwright selectOption: the panel's
+ * native <select> is hidden behind the #304/#62 shim, and selectOption on a
+ * hidden select deterministically kills new-headless Chromium (whole window:
+ * qa finding qa-mode-switch-page-death, A/B-verified on v0.3.5.0 + dev).
+ * Dispatch the change from the page instead — the exact user-visible path.
+ */
+export async function setPanelMode(panel: Page, modeId: string): Promise<void> {
+  await panel.evaluate((id: string) => {
+    const s = document.getElementById("mode-select") as HTMLSelectElement | null;
+    if (!s) throw new Error("no #mode-select");
+    const opt = [...s.options].find((o) => o.value === id);
+    if (!opt) throw new Error(`no such mode: ${id}`);
+    s.value = opt.value;
+    s.dispatchEvent(new Event("input", { bubbles: true }));
+    s.dispatchEvent(new Event("change", { bubbles: true }));
+  }, modeId);
+  await panel.waitForTimeout(300);
 }

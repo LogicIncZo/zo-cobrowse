@@ -37,6 +37,9 @@ import {
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
+// #392: honor prefers-reduced-motion — programmatic scrolls jump, not glide.
+const smoothBehavior = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+
 // ---- Constants ----
 const MAX_HISTORY = 50;
 const OLD_STORAGE_KEY = 'cobrowse_history';
@@ -112,7 +115,9 @@ function applyTheme(theme, skipPersist) {
 }
 
 function showThemePopover() {
-  let popover = document.getElementById('theme-popover');
+  const open = document.getElementById('theme-popover');
+  if (open && open.classList.contains('open')) { closeThemePopover(true); return; } // the toggle is a toggle
+  let popover = open;
   if (!popover) {
     popover = document.createElement('div');
     popover.id = 'theme-popover';
@@ -130,27 +135,46 @@ function showThemePopover() {
       opt.addEventListener('click', (e) => {
         e.stopPropagation();
         applyTheme(key);
-        closeThemePopover();
+        closeThemePopover(true);
       });
       popover.appendChild(opt);
     }
     document.getElementById('theme-toggle').parentElement.appendChild(popover);
   }
   popover.classList.add('open');
+  const toggleBtn = document.getElementById('theme-toggle');
+  if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'true');
   document.addEventListener('click', closeThemePopoverOutside, true);
+  document.addEventListener('keydown', onThemePopoverKeydown, true);
+  // #392: keyboard users land on the first option, not an unnamed popover.
+  const first = popover.querySelector('button');
+  if (first) first.focus();
 }
 
-function closeThemePopover() {
+function closeThemePopover(refocus) {
   const popover = document.getElementById('theme-popover');
   if (popover) popover.classList.remove('open');
+  const btn = document.getElementById('theme-toggle');
+  if (btn) btn.setAttribute('aria-expanded', 'false');
   document.removeEventListener('click', closeThemePopoverOutside, true);
+  document.removeEventListener('keydown', onThemePopoverKeydown, true);
+  // Refocus on pick/Esc closes only — an outside click already aimed focus
+  // where the user pointed.
+  if (refocus && btn) btn.focus();
+}
+
+function onThemePopoverKeydown(e) {
+  const popover = document.getElementById('theme-popover');
+  if (!popover || !popover.classList.contains('open') || e.key !== 'Escape') return;
+  e.preventDefault(); // consumed — the panel-level Esc-to-stop (#133) must not also fire
+  closeThemePopover(true);
 }
 
 function closeThemePopoverOutside(e) {
   const popover = document.getElementById('theme-popover');
   const btn = document.getElementById('theme-toggle');
   if (popover && !popover.contains(e.target) && e.target !== btn) {
-    closeThemePopover();
+    closeThemePopover(false);
   }
 }
 
@@ -798,6 +822,22 @@ function bindEvents() {
     micBtn.addEventListener('click', () => { startRecording(); });
   }
 
+  // #392: Left/Right arrows move focus AND activate among the chat tabs
+  // (wraps at the ends; activation reuses the tab's click handler).
+  if (chatTabsEl) {
+    chatTabsEl.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      const tabs = [...chatTabsEl.querySelectorAll('[role="tab"]')];
+      const cur = tabs.indexOf(document.activeElement);
+      if (cur === -1) return;
+      const delta = e.key === 'ArrowRight' ? 1 : -1;
+      const next = tabs[(cur + delta + tabs.length) % tabs.length];
+      next.focus();
+      next.click();
+      e.preventDefault();
+    });
+  }
+
   // Chips (event delegation for dynamically rendered chips). Sends the chip's
   // stored prompt — the readable label is display-only (this used to send the
   // label text and ignore `prompt` entirely).
@@ -865,12 +905,20 @@ function renderChatView() {
 
 function toggleHistoryView() {
   // If switching to history, save current conversation first
-  if (!isHistoryView) {
+  const opening = !isHistoryView;
+  if (opening) {
     saveCurrentConversation();
     if (historySearch) historySearch.value = ''; // fresh list each visit
   }
   isHistoryView = !isHistoryView;
   renderView();
+  // #392: focus follows the view — the search box on open, the ☰ trigger on
+  // close (Back button included — it shares this toggle).
+  if (opening) {
+    if (historySearch) historySearch.focus();
+  } else {
+    historyBtn.focus();
+  }
 }
 
 // ---- Multi-conversation storage ----
@@ -1315,6 +1363,8 @@ function renderChatTabs() {
     tab.className = 'chat-tab' + (id === activeId ? ' chat-tab-active' : '');
     tab.setAttribute('role', 'tab');
     tab.setAttribute('aria-selected', String(id === activeId));
+    // Single shared panel — switching a tab swaps #messages in place.
+    tab.setAttribute('aria-controls', 'messages');
     tab.title = labelText + (id === streamingId ? ' — generating…' : '');
     if (convo.pinned) {
       // 📌 glyph marks a pinned chat (exempt from LRU eviction).
@@ -1335,10 +1385,14 @@ function renderChatTabs() {
     label.className = 'chat-tab-label';
     label.textContent = labelText;
     tab.appendChild(label);
-    const close = document.createElement('span');
+    // #392: a real button so keyboard users can close tabs (the ✕ stopPropagation
+    // keeps the activation off the tab's switch handler).
+    const close = document.createElement('button');
+    close.type = 'button';
     close.className = 'chat-tab-close';
     close.textContent = '✕';
     close.title = 'Close tab';
+    close.setAttribute('aria-label', 'Close tab');
     close.addEventListener('click', (e) => {
       e.stopPropagation();
       closeChatTabById(id);
@@ -1391,12 +1445,15 @@ async function closeChatTabById(id) {
 // ---- Chat-tab context menu (#54) — Pin/Unpin + Export Markdown ----
 
 let tabContextMenuEl = null;
+let tabContextMenuAnchor = null; // #392: control the menu opened from — Esc hands focus back
 
-function closeTabContextMenu() {
+function closeTabContextMenu(refocus) {
   if (tabContextMenuEl) {
     tabContextMenuEl.remove();
     tabContextMenuEl = null;
+    if (refocus && tabContextMenuAnchor) tabContextMenuAnchor.focus();
   }
+  tabContextMenuAnchor = null;
 }
 
 /** #314: per-row overflow menu for library rows — the tab-strip context-menu
@@ -1428,11 +1485,13 @@ function openRowMenu(anchorBtn, items) {
   menu.style.left = Math.max(4, px) + 'px';
   menu.style.top = Math.max(4, py) + 'px';
   tabContextMenuEl = menu;
+  openContextMenuFocus(menu, anchorBtn);
 }
 
 function openTabContextMenu(e, chatId) {
   e.preventDefault();
   closeTabContextMenu();
+  const anchorBtn = e.currentTarget; // the chat-tab button — valid during dispatch
   const menu = document.createElement('div');
   menu.className = 'chat-tab-menu';
   menu.setAttribute('role', 'menu');
@@ -1461,6 +1520,15 @@ function openTabContextMenu(e, chatId) {
   menu.style.left = Math.max(4, px) + 'px';
   menu.style.top = Math.max(4, py) + 'px';
   tabContextMenuEl = menu;
+  openContextMenuFocus(menu, anchorBtn);
+}
+
+/** #392: menus open with focus on their first item — ArrowUp/Down then walk
+ *  the items (document keydown below) and Esc restores the anchor. */
+function openContextMenuFocus(menu, anchor) {
+  tabContextMenuAnchor = anchor || null;
+  const first = menu.querySelector('button[role="menuitem"]');
+  if (first) first.focus();
 }
 
 // Dismissal: any click outside the open menu, or Escape. One set of
@@ -1470,7 +1538,19 @@ document.addEventListener('click', (e) => {
   if (tabContextMenuEl && !tabContextMenuEl.contains(e.target)) closeTabContextMenu();
 });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeTabContextMenu();
+  if (!tabContextMenuEl) return;
+  const items = [...tabContextMenuEl.querySelectorAll('button[role="menuitem"]')];
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const idx = items.indexOf(document.activeElement);
+    const next = idx === -1
+      ? (e.key === 'ArrowDown' ? 0 : items.length - 1)
+      : (idx + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length;
+    if (items[next]) items[next].focus();
+  } else if (e.key === 'Escape') {
+    e.preventDefault(); // consumed — the panel-level Esc-to-stop (#133) must not also fire
+    closeTabContextMenu(true);
+  }
 });
 
 /** Flip a conversation's pin, persist, re-render. The pin lives on the
@@ -1576,7 +1656,7 @@ function renderComposeParkCards(run) {
     }
     host.appendChild(bar);
     msgsEl?.appendChild(host);
-    host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    host.scrollIntoView({ behavior: smoothBehavior(), block: 'nearest' });
   }
 }
 
@@ -1725,9 +1805,18 @@ function renderHistoryView() {
       card.className = `history-card${item.isActive ? ' history-card-active' : ''}`;
       card.dataset.convId = item.id;
 
-      const titleEl = document.createElement('div');
-      titleEl.className = 'history-card-title';
+      // The title row is the card's keyboard activation path (#392): a real
+      // button (Enter/Space → click) that opens the conversation. The nested
+      // action buttons below stopPropagation, so they never double-fire.
+      const titleEl = document.createElement('button');
+      titleEl.type = 'button';
+      titleEl.className = 'history-card-title history-card-open';
+      titleEl.title = 'Open conversation';
       appendHighlighted(titleEl, item.title, query);
+      titleEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        switchToConversation(item.id);
+      });
 
       // Main column: title + one-line preview of the opening ask (identifying
       // a chat without opening it). No snippet → title-only, layout unchanged.
@@ -3100,15 +3189,17 @@ function initRecipeLibraryButton() {
   const btn = document.getElementById('recipe-lib-btn');
   if (!btn) return;
   btn.addEventListener('click', () => toggleRecipeLibrary());
-  const input = document.getElementById('query-input');
-  input?.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
+  // #392: document-level + capture so Esc works with focus anywhere (the old
+  // composer binding only covered the textarea). The inline rename input keeps
+  // its own Esc (cancel-rename leaves the popup open).
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || e.defaultPrevented) return;
     const pop = document.getElementById('recipe-library');
-    if (pop && !pop.classList.contains('hidden')) {
-      e.preventDefault();
-      closeRecipeLibrary();
-    }
-  });
+    if (!pop || pop.classList.contains('hidden')) return;
+    if (e.target instanceof Element && e.target.closest('.recipe-lib-rename')) return;
+    e.preventDefault(); // consumed — the panel-level Esc-to-stop (#133) must not also fire
+    closeRecipeLibrary(true);
+  }, true);
 }
 
 function renderDomToggle() {
@@ -3195,6 +3286,7 @@ function initTabStrip() {
   if (collapseBtn) {
     collapseBtn.addEventListener('click', () => {
       tabStripCollapsed = !tabStripCollapsed;
+      collapseBtn.setAttribute('aria-expanded', String(!tabStripCollapsed));
       const caret = collapseBtn.querySelector('.tab-strip-caret');
       if (caret) caret.textContent = tabStripCollapsed ? '▸' : '▾';
       renderTabStrip();
@@ -3457,6 +3549,9 @@ function renderTabAutocomplete(filterText) {
     }
     item.title = safeText(t.title || t.url) + (t.url ? `\n${safeText(t.url)}` : '');
     item.addEventListener('mousedown', (e) => { e.preventDefault(); selectTabAutocomplete(i); });
+    // #392: mousedown keeps composer focus; keyboard/AT activation arrives as
+    // a click with detail 0 — honor it so a focused row's Enter isn't a no-op.
+    item.addEventListener('click', (e) => { if (e.detail === 0) selectTabAutocomplete(i); });
     popup.appendChild(item);
   });
   popup.setAttribute('aria-activedescendant', 'tab-ac-opt-0'); // #304
@@ -3608,6 +3703,7 @@ function renderSkillPopup(filterText) {
     }
     item.title = `${s.name}\n${s.description || ''}`;
     item.addEventListener('mousedown', (e) => { e.preventDefault(); selectSkill(i); });
+    item.addEventListener('click', (e) => { if (e.detail === 0) selectSkill(i); }); // keyboard (see tab rows)
     popup.appendChild(item);
   });
   // #73 loudness: the workspace holds more skill folders than the listing
@@ -3696,18 +3792,23 @@ function renderFilePopup(filterText, keepFilter) {
     // folder; ＋ arms it as a context chip (Zo lists/recurses server-side).
     if (e.kind === 'dir') {
       item.classList.add('has-add');
-      const add = document.createElement('span');
+      const add = document.createElement('button');
+      add.type = 'button';
       add.className = 'picker-item-add';
       add.textContent = '＋';
       add.title = `${e.path} — add this FOLDER as context (click the row to browse into it)`;
-      add.addEventListener('mousedown', (ev) => {
+      add.setAttribute('aria-label', 'Add folder as context');
+      const armFolder = (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
         armPickedFile(e, true);
-      });
+      };
+      add.addEventListener('mousedown', armFolder); // beats the row's mousedown navigate
+      add.addEventListener('click', armFolder); // keyboard/AT activation
       item.appendChild(add);
     }
     item.addEventListener('mousedown', (ev) => { ev.preventDefault(); selectFileRow(i); });
+    item.addEventListener('click', (ev) => { if (ev.detail === 0) selectFileRow(i); }); // keyboard (see tab rows)
     popup.appendChild(item);
   });
   popup.setAttribute('aria-activedescendant', 'file-ac-opt-0'); // #304
@@ -3930,12 +4031,12 @@ function addReasoningBubble(parentMsgEl, reasoning, inlineMax = INLINE_REASONING
     // Inline muted prose, no collapse.
     block.innerHTML = markdownToHtml(text);
   } else {
-    // Collapsible trace header.
+    // Collapsible trace header. No aria-label override — the accessible name
+    // is the visible "💭 Thought — <gist>" text (#392).
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.className = 'reasoning-toggle';
     toggle.setAttribute('aria-expanded', 'false');
-    toggle.setAttribute('aria-label', 'Show reasoning');
     const caret = document.createElement('span');
     caret.className = 'reasoning-caret';
     caret.textContent = '▸';
@@ -3961,7 +4062,6 @@ function addReasoningBubble(parentMsgEl, reasoning, inlineMax = INLINE_REASONING
     toggle.addEventListener('click', () => {
       const expanded = toggle.getAttribute('aria-expanded') === 'true';
       toggle.setAttribute('aria-expanded', String(!expanded));
-      toggle.setAttribute('aria-label', expanded ? 'Show reasoning' : 'Hide reasoning');
       caret.textContent = expanded ? '▸' : '▾';
       content.hidden = expanded;
     });
@@ -4246,7 +4346,7 @@ async function startModeCreation() {
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:999;';
   overlay.innerHTML = `
-    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:16px;width:280px;">
+    <div role="dialog" aria-modal="true" aria-label="Create Mode with Zo" style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:16px;width:280px;">
       <h3 style="font-size:14px;margin:0 0 8px;color:var(--text);">Create Mode with Zo</h3>
       <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px;">Describe what you want this Mode to do:</p>
       <textarea id="mode-desc-input" style="width:100%;height:80px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:6px;font-size:13px;resize:none;font-family:var(--font);" placeholder="e.g. Extract all product prices and availability from shopping pages"></textarea>
@@ -4260,11 +4360,29 @@ async function startModeCreation() {
   const descInput = overlay.querySelector('#mode-desc-input');
   descInput.focus();
 
-  overlay.querySelector('#generate-mode-cancel').addEventListener('click', () => overlay.remove());
+  // #392: one close path for Cancel / backdrop / Esc — always tears down the
+  // document keydown listener and hands focus back to the ✦ trigger.
+  const trigger = document.getElementById('create-mode-btn');
+  const onOverlayKeydown = (e) => {
+    if (e.key !== 'Escape') return;
+    e.preventDefault(); // consumed — the panel-level Esc-to-stop (#133) must not also fire
+    closeOverlay();
+  };
+  const closeOverlay = () => {
+    document.removeEventListener('keydown', onOverlayKeydown, true);
+    overlay.remove();
+    if (trigger) trigger.focus();
+  };
+  document.addEventListener('keydown', onOverlayKeydown, true);
+  // Backdrop cancels; mousedown (not click) so dragging text off the card
+  // doesn't dismiss it.
+  overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) closeOverlay(); });
+
+  overlay.querySelector('#generate-mode-cancel').addEventListener('click', closeOverlay);
   overlay.querySelector('#generate-mode-confirm').addEventListener('click', async () => {
     const desc = descInput.value.trim();
     if (!desc) return;
-    overlay.remove();
+    closeOverlay();
 
     addSystemMessage(`🤖 Generating Mode for: "${desc}"...`);
     const resp = await chrome.runtime.sendMessage({
@@ -4392,6 +4510,8 @@ function startRecording() {
         micBtn.classList.add('recording');
         micBtn.textContent = '🔴';
         micBtn.title = 'Stop recording';
+        micBtn.setAttribute('aria-pressed', 'true');
+        micBtn.setAttribute('aria-label', 'Stop voice input');
       } catch (err) {
         addMessageDOM('error', `🎤 STT error: ${err.message}`);
       }
@@ -4410,6 +4530,8 @@ function stopRecording() {
   micBtn.classList.remove('recording');
   micBtn.textContent = '🎤';
   micBtn.title = 'Voice input (STT)';
+  micBtn.setAttribute('aria-pressed', 'false');
+  micBtn.setAttribute('aria-label', 'Voice input');
   if (sttInterim) {
     input.value = (input.value + ' ' + sttInterim).trim();
     sttInterim = '';
@@ -5139,7 +5261,7 @@ function handleStreamMessage(msg) {
         msgsEl.appendChild(reconn);
       }
       reconn.querySelector('.msg-body').textContent = '➳ Reconnecting... attempt ' + msg.attempt + ' of ' + msg.maxRetries;
-      reconn.scrollIntoView({ behavior: 'smooth' });
+      reconn.scrollIntoView({ behavior: smoothBehavior() });
       break;
     }
     case 'STREAM_DIAGNOSTIC': {
@@ -5217,7 +5339,7 @@ function renderHandoffLine(run) {
     Object.assign(document.createElement('span'), { textContent: `🤖 Handoff — ${runProgress(run)} · ${safeText(run.goal).slice(0, 60)}` }),
     stopBtn,
   );
-  line.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  line.scrollIntoView({ behavior: smoothBehavior(), block: 'nearest' });
 }
 
 function removeHandoffLine() {
@@ -5254,7 +5376,7 @@ function renderRecipeLine(run, phase) {
     Object.assign(document.createElement('span'), { textContent: label }),
     stopBtn,
   );
-  line.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  line.scrollIntoView({ behavior: smoothBehavior(), block: 'nearest' });
 }
 
 function removeRecipeLine() {
@@ -5307,7 +5429,7 @@ function recipeActionCard(title, bodyText) {
     host.appendChild(body);
   }
   msgsEl?.appendChild(host);
-  host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  host.scrollIntoView({ behavior: smoothBehavior(), block: 'nearest' });
   return host;
 }
 
@@ -5450,7 +5572,7 @@ function renderRecipeRecordLine(name) {
     stopBtn,
   );
   msgsEl.appendChild(line);
-  line.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  line.scrollIntoView({ behavior: smoothBehavior(), block: 'nearest' });
 }
 
 function removeRecipeRecordLine() {
@@ -5498,7 +5620,7 @@ function renderRecipeCheckpoint(run) {
   host.appendChild(bar);
   msgsEl?.appendChild(host);
   recipeCheckpointEl = host;
-  host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  host.scrollIntoView({ behavior: smoothBehavior(), block: 'nearest' });
 }
 
 function removeRecipeCheckpoint() {
@@ -5536,7 +5658,7 @@ function renderRecipeReviewCard(run) {
   host.appendChild(bar);
   msgsEl?.appendChild(host);
   recipeCheckpointEl = host;
-  host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  host.scrollIntoView({ behavior: smoothBehavior(), block: 'nearest' });
 }
 
 // ---- Recipe library popup (R3 #257) ----------------------------------------
@@ -5575,15 +5697,20 @@ async function startRecipeRun(source) {
   return start.run;
 }
 
-function closeRecipeLibrary() {
+function closeRecipeLibrary(refocusTrigger) {
   const pop = document.getElementById('recipe-library');
   if (pop) pop.classList.add('hidden');
+  const btn = document.getElementById('recipe-lib-btn');
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+  // Refocus on explicit closes (toggle / Esc) only — send-time and
+  // run-start closes hand focus to whatever came next.
+  if (refocusTrigger && btn) btn.focus();
 }
 
 async function toggleRecipeLibrary() {
   const pop = document.getElementById('recipe-library');
   if (pop && !pop.classList.contains('hidden')) {
-    closeRecipeLibrary();
+    closeRecipeLibrary(true);
     return;
   }
   closeAllPickerPopups();
@@ -5596,10 +5723,13 @@ async function renderRecipeLibrary() {
   pop.replaceChildren();
   pop.appendChild(pickerNoteItem('Loading recipes…'));
   pop.classList.remove('hidden');
+  const libBtn = document.getElementById('recipe-lib-btn');
+  if (libBtn) libBtn.setAttribute('aria-expanded', 'true');
   const resp = await chrome.runtime.sendMessage({ type: 'RECIPE_LIST' }).catch(() => null);
   pop.replaceChildren();
   if (!resp?.ok) {
     pop.appendChild(pickerNoteItem(resp?.error || 'Recipes unavailable — check your Zo token.'));
+    focusRecipeLibraryFirstControl(pop);
     return;
   }
   const recipes = resp.recipes || [];
@@ -5649,6 +5779,13 @@ async function renderRecipeLibrary() {
   guide.title = 'The recipes user guide — record, run, checkpoints, export';
   importBar.appendChild(guide);
   pop.appendChild(importBar);
+  focusRecipeLibraryFirstControl(pop);
+}
+
+/** #392: keyboard users land on the popup's first control, not <body>. */
+function focusRecipeLibraryFirstControl(pop) {
+  const first = pop.querySelector('button, input, [href]');
+  if (first) first.focus();
 }
 
 /** One library row: header (name/version/steps/source), params, actions. */
@@ -5824,7 +5961,7 @@ function renderRecipeParamsCard(params) {
     bar.append(start, cancel);
     host.appendChild(bar);
     msgsEl?.appendChild(host);
-    host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    host.scrollIntoView({ behavior: smoothBehavior(), block: 'nearest' });
     start.addEventListener('click', () => {
       host.remove();
       const out = {};

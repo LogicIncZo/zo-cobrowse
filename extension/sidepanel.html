@@ -23,10 +23,11 @@
         <span id="page-url">— no page —</span>
       </div>
       <div class="header-actions">
-        <button id="theme-toggle" class="icon-btn theme-toggle" aria-label="Toggle theme" data-i18n-title="sidepanelThemeToggle">☀</button>
+        <button id="theme-toggle" class="icon-btn theme-toggle" aria-label="Toggle theme" aria-expanded="false" data-i18n-title="sidepanelThemeToggle">☀</button>
         <div class="status-dot-wrap">
-          <span id="status-dot" class="dot dot-disconnected" role="img" aria-label="Connection status: not configured" title="Not configured"></span>
-          <!-- #308: visually-hidden text twin — magnifier/BR users get the status too -->
+          <button id="status-dot" type="button" class="dot dot-disconnected" aria-label="Connection status — open settings" title="Not configured"></button>
+          <!-- #308: visually-hidden text twin — magnifier/BR users get the status too.
+               updateStatus keeps the dot's aria-label on the live state. -->
           <span id="status-text" class="sr-only" aria-live="polite">Connection status: not configured</span>
         </div>
         <button id="help-btn" class="icon-btn" aria-label="Help" data-i18n-title="sidepanelHelp">?</button>
@@ -116,10 +117,10 @@
            @ autocomplete). Toggled tabs ride along as a compact manifest +
            excerpt; Zo can pull full content via read_tab. -->
       <div id="tab-contexts" class="tab-contexts hidden">
-        <button id="tab-strip-collapse" class="tab-strip-collapse" type="button" title="Show/hide open tabs">
+        <button id="tab-strip-collapse" class="tab-strip-collapse" type="button" title="Show/hide open tabs" aria-expanded="true">
           📎 Tabs <span id="tab-strip-count"></span> <span class="tab-strip-caret">▾</span>
         </button>
-        <div id="tab-strip" class="tab-strip" role="listbox" aria-label="Open tabs — click to reference as context"></div>
+        <div id="tab-strip" class="tab-strip" role="group" aria-label="Open tabs — click to reference as context"></div>
         <!-- #25 vision UX: send-once screenshot toggle — arms ONE turn (the
              next send) with a tier-3 screenshot + flips the Mode to Visual;
              auto-clears after that send, like the picker chips. -->
@@ -131,7 +132,7 @@
                 title="Page DOM attached to messages — OFF sends the URL/title pointer only (privacy / token cap)">🧩 DOM ✓</button>
         <!-- R3 (#257): the recipe library popup — browse/run/rename/delete/
              import saved flows, export them as a Zo skill. -->
-        <button id="recipe-lib-btn" class="shot-toggle" type="button"
+        <button id="recipe-lib-btn" class="shot-toggle" type="button" aria-haspopup="dialog" aria-expanded="false"
                 title="Recipe library — saved flows (run, rename, delete, import, export)">🧾 Recipes</button>
       </div>
       <div id="tab-autocomplete" class="tab-autocomplete hidden" role="listbox" aria-label="Open tabs — reference as context"></div>
@@ -145,9 +146,9 @@
 
       <!-- Input area -->
       <div class="input-area">
-        <button id="mic-btn" class="btn btn-ghost btn-icon mic-btn" aria-label="Voice input" title="Voice input">🎤</button>
+        <button id="mic-btn" class="btn btn-ghost btn-icon mic-btn" aria-label="Voice input" aria-pressed="false" title="Voice input">🎤</button>
         <div class="input-wrap">
-          <textarea id="query-input" rows="1" data-i18n-placeholder="sidepanelComposerPlaceholder" autofocus></textarea>
+          <textarea id="query-input" rows="1" data-i18n-placeholder="sidepanelComposerPlaceholder" aria-label="Ask Zo about this page…" autofocus></textarea>
         </div>
         <button id="send-btn" class="btn btn-primary btn-icon" aria-label="Send" aria-keyshortcuts="Enter" title="Send">→</button>
       </div>
@@ -160,7 +161,7 @@
         <span class="history-title">Conversations</span>
       </div>
       <div class="history-search-wrap">
-        <input id="history-search" class="history-search" type="search"
+        <input id="history-search" class="history-search" type="search" aria-label="Search chats…"
                placeholder="Search chats…" autocomplete="off" spellcheck="false" />
       </div>
       <div id="history-list"></div>

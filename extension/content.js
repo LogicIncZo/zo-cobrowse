@@ -18,6 +18,10 @@
   const REC_SENSITIVE_URL_RE = /login|signin|sign-in|signup|sign-up|register|checkout|payment|billing|password|banking/i;
   const REC_SUBMITISH_RE = /submit|pay\b|checkout|order|place|buy|sign in|sign up|register|confirm purchase/i;
 
+  // #392: honor prefers-reduced-motion — programmatic scrolls jump, not glide.
+  // (Read off `window` so the test harness's source slices resolve it too.)
+  const smoothBehavior = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+
   function isAlive() {
     return !PAGE_DEAD.test(location.protocol);
   }
@@ -451,7 +455,7 @@
             return { ok: false, type: 'click', refused: 'sensitive-submit', probeText: pText.slice(0, 80) };
           }
         }
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.scrollIntoView({ behavior: smoothBehavior(), block: 'center' });
         await sleep(300);
         el.click();
         return { ok: true, type: 'click' };
@@ -496,7 +500,7 @@
           isValidCssSelector(action.selector) ? action.selector : ''
         );
         if (!el) throw new Error(`Element not found: ${action.selector}`);
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.scrollIntoView({ behavior: smoothBehavior(), block: 'center' });
         await sleep(300);
         el.click();
         return { ok: true, type: 'click' };
@@ -672,17 +676,20 @@
       --wa-bg: #fff; --wa-text: #101828; --wa-border: #d0d5dd; --wa-border-soft: #eaecf0;
       --wa-head-bg: #f8fafc; --wa-muted: #475467; --wa-hover: #f2f4f7; --wa-icon-bg: #fff;
       --wa-btn-text: #344054; --wa-error: #b42318;
+      /* #392: AA fixes — icon boundary >=3:1 (non-text), note text >=4.5:1 */
+      --wa-icon-border: #667085; --wa-note: #b54708;
     }
     :host(.zo-wa-dark) {
       --wa-bg: #1c212b; --wa-text: #e6e8ee; --wa-border: #3a4150; --wa-border-soft: #2a3140;
       --wa-head-bg: #232936; --wa-muted: #98a2b3; --wa-hover: #2a3140; --wa-icon-bg: #1c212b;
       --wa-btn-text: #cbd2dc; --wa-error: #f97066;
+      --wa-note: #fdb022; /* 8.8:1 on --wa-bg (light's #b54708 is 3.0:1 here) */
     }
     [hidden] { display: none !important; }
     .zo-wa-icon {
       position: fixed; display: none; width: ${WA_ICON_BOX}px; height: ${WA_ICON_BOX}px;
       padding: 2px; box-sizing: border-box; align-items: center; justify-content: center;
-      background: var(--wa-icon-bg); border: 1px solid var(--wa-border); border-radius: 6px;
+      background: var(--wa-icon-bg); border: 1px solid var(--wa-icon-border); border-radius: 6px;
       box-shadow: 0 1px 4px rgba(16,24,40,.25); cursor: pointer;
       pointer-events: auto; z-index: 2147483647;
     }
@@ -713,8 +720,17 @@
     .zo-wa-spin { width: 14px; height: 14px; border: 2px solid var(--wa-border);
       border-top-color: #2962b8; border-radius: 50%; animation: zo-wa-rot .8s linear infinite; }
     @keyframes zo-wa-rot { to { transform: rotate(360deg); } }
+    /* #392: reduced motion — same kill-switch the panel ships. */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
     .zo-wa-error { color: var(--wa-error); }
-    .zo-wa-note { padding: 0 10px 6px; color: #b54708; font-size: 12px; }
+    .zo-wa-note { padding: 0 10px 6px; color: var(--wa-note); font-size: 12px; }
     .zo-wa-foot { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
       border-top: 1px solid var(--wa-border-soft); }
     .zo-wa-spacer { flex: 1; }
@@ -728,12 +744,19 @@
       background: var(--wa-bg); cursor: pointer; font: inherit; font-size: 12px; color: var(--wa-btn-text); }
     .zo-wa-chip:hover { background: var(--wa-hover); }
     .zo-wa-follow { flex: 1; min-width: 110px; margin: 0; width: auto; }
+    /* #392: live-region announcer — visually hidden, lives on the shadow root
+       (waRender clears waPop's children, so a node inside it can't persist). */
+    .zo-wa-sr-status {
+      position: fixed; width: 1px; height: 1px; margin: -1px; overflow: hidden;
+      clip: rect(0 0 0 0); white-space: nowrap;
+    }
   `;
 
   let waEnabled = true;      // enableWriteAssist setting (default on)
   let waTheme = '';          // cobrowse_theme mirror ('' = follow system, #65)
   let waReady = false;       // widget DOM built
   let waHost = null, waRoot = null, waIcon = null, waPop = null;
+  let waStatus = null;       // #392 role=status announcer ("Draft ready")
   let waActiveEl = null;     // textarea the icon/popover is anchored to
   let waReqId = 0;           // stale-response guard
   let waHideTimer = null;
@@ -813,8 +836,18 @@
 
     waPop = document.createElement('div');
     waPop.className = 'zo-wa-pop';
+    waPop.setAttribute('role', 'dialog');
+    waPop.setAttribute('aria-label', 'Enhance with Zo');
     waPop.hidden = true;
     waRoot.appendChild(waPop);
+
+    // #392: the announcer sits OUTSIDE waPop — waRender wipes waPop's
+    // children on every delta, so a live region inside it could neither
+    // persist nor announce reliably. The stream itself stays silent; only
+    // the terminal "Draft ready" lands here.
+    waStatus = waEl('div', 'zo-wa-sr-status');
+    waStatus.setAttribute('role', 'status');
+    waRoot.appendChild(waStatus);
 
     (document.documentElement || document.body).appendChild(waHost);
     waReady = true;
@@ -868,21 +901,43 @@
     if (!waReady || !waActiveEl) return;
     if (waHideTimer) { clearTimeout(waHideTimer); waHideTimer = null; }
     waView = { mode: 'compose', result: '', error: '', instruction: waView.instruction || '', streaming: false };
+    if (waStatus) waStatus.textContent = '';
     waPop.hidden = false; // shown before render so waRender can measure + position
     waRender();
+    // #392: keyboard users land in the instruction field, not on <body>.
+    const instr = waPop.querySelector('.zo-wa-instr');
+    if (instr) instr.focus();
   }
 
   function waClose() {
+    const anchor = waActiveEl;
     waReqId++; // invalidate any in-flight response
     if (waPort) { try { waPort.disconnect(); } catch { /* already dead */ } waPort = null; }
     waThread = ''; // the thread is short-lived per popover session (#53)
+    // #392: focus inside the popover would drop to <body> once it hides —
+    // hand it back to the field. Focus that moved on its own (the
+    // focusin-close path when the user tabs/clicks into another field) stays.
+    const popFocused = !!(waPop && waRoot && waPop.contains(waRoot.activeElement));
     if (waPop) waPop.hidden = true;
     waView = { mode: 'compose', result: '', error: '', instruction: '', streaming: false };
+    if (waStatus) waStatus.textContent = '';
+    if (popFocused && anchor && anchor.isConnected) anchor.focus();
     if (waEligible(document.activeElement)) { waActiveEl = document.activeElement; waShowIcon(); }
     else waHideIcon();
   }
 
+  /** #392: identifies a focusable control across waRender rebuilds — the
+   *  same tag + class + label reappears each pass. */
+  function waFocusKey(el) {
+    return `${el.tagName}|${el.className}|${el.textContent || ''}`;
+  }
+
   function waRender() {
+    // #392: every WA_DELTA rebuilds this DOM mid-stream — carry focus across
+    // the swap so keyboard focus doesn't drop to <body>. Nothing focused in
+    // the popover → leave focus alone.
+    const prev = waRoot ? waRoot.activeElement : null;
+    const prevKey = (prev && waPop.contains(prev)) ? waFocusKey(prev) : null;
     waPop.textContent = '';
     const head = waEl('div', 'zo-wa-head');
     const title = waEl('div', 'zo-wa-title');
@@ -896,6 +951,7 @@
     close.type = 'button';
     close.textContent = '\u2715';
     close.title = 'Close';
+    close.setAttribute('aria-label', 'Close');
     close.addEventListener('click', () => waClose());
     head.appendChild(title);
     head.appendChild(close);
@@ -912,6 +968,7 @@
       instr.type = 'text';
       instr.className = 'zo-wa-instr';
       instr.placeholder = 'Optional instruction \u2014 tone, length, focus\u2026';
+      instr.setAttribute('aria-label', 'Instruction for Zo (optional)');
       instr.value = waView.instruction || '';
       waPop.appendChild(instr);
       const foot = waEl('div', 'zo-wa-foot');
@@ -962,6 +1019,8 @@
       // #53 follow-up iteration chips: re-work the result on the popover's
       // short-lived thread. Custom instruction rides the same path.
       const chips = waEl('div', 'zo-wa-chips');
+      chips.setAttribute('role', 'group');
+      chips.setAttribute('aria-label', 'Follow-up actions');
       const mkChip = (label, instr) => {
         const c = waEl('button', 'zo-wa-chip');
         c.type = 'button';
@@ -975,6 +1034,7 @@
       custom.type = 'text';
       custom.className = 'zo-wa-instr zo-wa-follow';
       custom.placeholder = 'Follow-up instruction \u2014 iterate on the draft\u2026';
+      custom.setAttribute('aria-label', 'Follow-up instruction');
       custom.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && custom.value.trim()) {
           waView.instruction = custom.value.trim();
@@ -1006,6 +1066,10 @@
       foot.appendChild(retry);
       waPop.appendChild(foot);
     }
+    if (prevKey) {
+      const again = [...waPop.querySelectorAll('button, input')].find((el) => waFocusKey(el) === prevKey);
+      if (again) again.focus();
+    }
     // State renders change the popover's height (compose → loading → result) —
     // re-anchor so it stays inside the field.
     if (!waPop.hidden) waPositionPop();
@@ -1032,6 +1096,7 @@
     const priorResult = waView.result;
     waView.mode = 'loading';
     waView.streaming = false;
+    if (waStatus) waStatus.textContent = ''; // a fresh pass re-announces when it lands
     waRender();
     // #53: preferred path — a streaming port. Cancel is port.disconnect()
     // (waClose does this); the reqId guard supersedes stale callbacks.
@@ -1060,6 +1125,7 @@
           waView.streaming = false;
           waView.result = String(m.text || '');
           waRender();
+          if (waStatus) waStatus.textContent = 'Draft ready'; // announce; the stream itself stays silent
         } else if (m.type === 'WA_ERROR') {
           finish();
           waView.mode = 'error';
@@ -1125,6 +1191,7 @@
         waView.error = (resp && resp.error) || 'Enhance failed.';
       }
       waRender();
+      if (resp && resp.ok && waStatus) waStatus.textContent = 'Draft ready';
     }).catch(() => {
       if (reqId !== waReqId) return;
       waView.mode = 'error';
