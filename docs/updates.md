@@ -3,6 +3,29 @@
 New features in Zo Co-browse, newest first. Each entry explains what shipped;
 open **How to use it** for the hands-on steps.
 
+## A security pass you can read <span class="badge-new">NEW</span> {#security-round-2}
+
+_2026-09-25 · [#383](https://github.com/LogicIncZo/zo-cobrowse/issues/383)–[#384](https://github.com/LogicIncZo/zo-cobrowse/issues/384) · v0.3.5.0_
+
+Everything shipped since the last security audit got the same treatment, plus
+a document you can hold us to:
+
+- **One secret-rule for capture and recording.** The recipe recorder now uses
+  the same sensitive-field detection as page capture — a field labeled
+  "Credit card number" never records what you typed, even when the page gives
+  the field a meaningless name. More patterns count as sensitive (card
+  expiry, security code, IBAN, routing number…).
+- **Healed recipes keep their placeholders.** Fixing a step's targeting mid-run
+  no longer saves a copy of the recipe with your real typed values baked in.
+- **Exported playbooks mask URLs.** The SKILL.md export no longer prints full
+  recorded URLs — anything after `?` (where tokens live) is masked.
+- **A threat model in the repo.** [docs/qa/threat-model.md](./qa/threat-model.md)
+  maps, surface by surface, what a hostile page can and cannot make the
+  extension do — and what we accept as residual risk. Updated every release.
+- **Privacy page is honest about Jev.** The optional Jev fast path sends small
+  redacted page-state to TypeSafe AI; PRIVACY.md now says so (it is off by
+  default and never carries form values).
+
 ## Handoff runs you can trust <span class="badge-new">NEW</span> {#handoff-reliability}
 
 _2026-09-22 · [#368](https://github.com/LogicIncZo/zo-cobrowse/issues/368)–[#372](https://github.com/LogicIncZo/zo-cobrowse/issues/372) · v0.3.4.3_
