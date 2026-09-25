@@ -141,7 +141,9 @@
     .btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .btn-primary {
       background: linear-gradient(135deg, var(--amber), var(--indigo));
-      color: white;
+      /* #392: white failed AA on the amber stop (2.03:1 dark / 3.28:1 light);
+         this ink clears 4.5:1 on every theme's amber. */
+      color: #1a1814;
       border: none;
     }
     .btn-primary:hover { opacity: 0.9; box-shadow: 0 0 16px var(--amber-glow); }

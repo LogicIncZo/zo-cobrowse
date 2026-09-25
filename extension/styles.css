@@ -592,8 +592,11 @@ input, textarea, select {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
+  /* #392: 24px hit floor; the negative margin refunds the tab's layout box
+     so the ✕ glyph sits exactly where the old 14px span was. */
+  min-width: 24px;
+  min-height: 24px;
+  margin: -5px;
   border: none;
   border-radius: 50%;
   background: transparent;
@@ -605,6 +608,8 @@ input, textarea, select {
   transition: all 120ms ease;
 }
 .chat-tab:hover .chat-tab-close,
+.chat-tab:focus-within .chat-tab-close,
+.chat-tab:focus-visible .chat-tab-close,
 .chat-tab-active .chat-tab-close { opacity: 1; }
 .chat-tab-close:hover { background: rgba(248, 113, 113, 0.2); color: var(--red); }
 .chat-tab-pin {
@@ -690,18 +695,31 @@ input, textarea, select {
   width: 30px;
   height: 30px;
 }
+/* #392: the dot is a real button now — the control box is a 24px hit floor
+   while ::before keeps the visible dot at its 8px size. */
 .dot {
-  width: 8px;
-  height: 8px;
+  position: relative;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
   border-radius: 50%;
+  background: transparent;
   transition: all 0.3s ease;
   cursor: pointer;
 }
-.dot-connected {
+.dot::before {
+  content: '';
+  position: absolute;
+  inset: 8px; /* (24 − 8) / 2 — the glyph stays 8px */
+  border-radius: 50%;
+  transition: inherit;
+}
+.dot-connected::before {
   background: var(--green);
   box-shadow: 0 0 8px rgba(52, 211, 153, 0.4);
 }
-.dot-disconnected {
+.dot-disconnected::before {
   background: var(--red);
   box-shadow: 0 0 8px rgba(248, 113, 113, 0.3);
 }
@@ -1673,6 +1691,16 @@ input, textarea, select {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* #392: the title is the card's keyboard-open control — strip the button
+   chrome so it lays out exactly like the row it replaced. */
+button.history-card-open {
+  display: block;
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  text-align: left;
+}
 
 .history-card-meta {
   font-size: 11px;
@@ -1683,8 +1711,8 @@ input, textarea, select {
 
 .history-card-delete {
   flex-shrink: 0;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border: none;
   border-radius: 50%;
   background: transparent;
@@ -1697,7 +1725,8 @@ input, textarea, select {
   transition: all 0.15s ease;
   opacity: 0;
 }
-.history-card:hover .history-card-delete {
+.history-card:hover .history-card-delete,
+.history-card:focus-within .history-card-delete {
   opacity: 1;
 }
 .history-card-delete:hover {
@@ -1735,8 +1764,8 @@ input, textarea, select {
 
 .history-card-rename {
   flex-shrink: 0;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border: none;
   border-radius: 50%;
   background: transparent;
@@ -1749,7 +1778,8 @@ input, textarea, select {
   transition: all 0.15s ease;
   opacity: 0;
 }
-.history-card:hover .history-card-rename { opacity: 1; }
+.history-card:hover .history-card-rename,
+.history-card:focus-within .history-card-rename { opacity: 1; }
 .history-card-rename:hover {
   background: var(--amber-glow);
   color: var(--amber);
@@ -2735,6 +2765,8 @@ body.options-page {
   top: 50%;
   transform: translateY(-50%);
   padding: 2px 8px;
+  background: transparent;
+  font-family: inherit;
   border: 1px solid var(--border, #3a4150);
   border-radius: 6px;
   color: var(--amber, #f0a832);
@@ -2924,6 +2956,10 @@ body.options-page {
   right: 6px;
   font-size: 10.5px;
   padding: 2px 8px;
+  /* #392: 24px hit floor — the box grows, the 10.5px glyph does not. */
+  min-width: 24px;
+  min-height: 24px;
+  box-sizing: border-box;
   border-radius: 6px;
   border: 1px solid var(--zo-border);
   background: var(--zo-accent);
@@ -3023,6 +3059,8 @@ body.options-page {
   border-radius: 4px;
   font-size: 11px;
   padding: 2px 10px;
+  min-height: 24px; /* #392 hit floor */
+  box-sizing: border-box;
   cursor: pointer;
 }
 
