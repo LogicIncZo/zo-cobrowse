@@ -61,7 +61,7 @@
 
   --text: #e8e6f0;
   --text-muted: #8884a8;
-  --text-faint: #5a5680;
+  --text-faint: #7d799e; /* #392: 4.51:1 on surface (was #5a5680 @ 2.72) */
   --text-soft: #a29ebc; /* #298 readable floor */
   --text-inverse: #070914;
 
@@ -90,6 +90,12 @@
   --green: #34d399;
   --red: #f87171;
   --orange: #fb923c;
+
+  /* #392: AA text variants for tinted status pills + inline links (audit row 9) */
+  --status-ok: var(--green);
+  --status-err: var(--red);
+  --status-pending: #868af6; /* 5.0:1 on its 15% tint */
+  --link: var(--amber);
 
   --border: #25284a;
   --border-soft: #1a1d3a;
@@ -121,7 +127,7 @@
 
     --text: #1a1814;
     --text-muted: #706b62; /* #298: 4.69:1 on --bg-deep (was 4.06, sub-AA) */
-    --text-faint: #a8a298;
+    --text-faint: #7b766d; /* #392: 4.51:1 on surface (was #a8a298 @ 2.53) */
   --text-soft: #5f5a52; /* #298 readable floor */
     --text-inverse: #f4f1ea;
 
@@ -132,6 +138,12 @@
 
     --indigo: #5254cc;
     --indigo-muted: #6e70d6;
+
+    /* #392: AA status/link text on tinted surfaces (audit row 9) */
+    --status-ok: #0d6b4b;
+    --status-err: #a53030;
+    --status-pending: #4245c8;
+    --link: #96620f;
 
     --border: #ddd8ce;
     --border-soft: #e8e4dc;
@@ -165,7 +177,7 @@
   --bg-glass: rgba(15, 17, 40, 0.72);
   --text: #e8e6f0;
   --text-muted: #8884a8;
-  --text-faint: #5a5680;
+  --text-faint: #7d799e; /* #392: 4.51:1 on surface (was #5a5680 @ 2.72) */
   --text-soft: #a29ebc; /* #298 readable floor */
   --text-inverse: #070914;
   --amber: #f0a832;
@@ -177,6 +189,11 @@
   --green: #34d399;
   --red: #f87171;
   --orange: #fb923c;
+  /* #392: AA text variants for tinted status pills + inline links (audit row 9) */
+  --status-ok: var(--green);
+  --status-err: var(--red);
+  --status-pending: #868af6; /* 5.0:1 on its 15% tint */
+  --link: var(--amber);
   --border: #25284a;
   --border-soft: #1a1d3a;
   --zo-sidebar: var(--bg-surface);
@@ -209,7 +226,7 @@
   --bg-glass: rgba(255, 255, 255, 0.85);
   --text: #1a1814;
   --text-muted: #706b62; /* #298: 4.69:1 on --bg-deep (was 4.06, sub-AA) */
-  --text-faint: #a8a298;
+  --text-faint: #7b766d; /* #392: 4.51:1 on surface (was #a8a298 @ 2.53) */
   --text-soft: #5f5a52; /* #298 readable floor */
   --text-inverse: #f4f1ea;
   --amber: #c47f20;
@@ -221,6 +238,11 @@
   --green: #2ea97c;
   --red: #dc4444;
   --orange: #d97706;
+  /* #392: AA status/link text on tinted surfaces (audit row 9) */
+  --status-ok: #0d6b4b;
+  --status-err: #a53030;
+  --status-pending: #4245c8;
+  --link: #96620f;
   --border: #ddd8ce;
   --border-soft: #e8e4dc;
   --zo-sidebar: var(--bg-surface);
@@ -249,7 +271,7 @@
   --bg-glass: rgba(246, 236, 218, 0.88);
   --text: #3d3024;
   --text-muted: #6f6050; /* #297/#298: 4.76:1 on --bg-deep, floor with margin */  /* #297: 4.66:1 on --bg-surface (was 4.40, sub-AA) */
-  --text-faint: #a89880;
+  --text-faint: #786958; /* #392: 4.53:1 on surface (was #a89880 @ 2.53) */
   --text-soft: #5f5142; /* #298 readable floor */
   --text-inverse: #f6ecda;
   --amber: #a0592a;
@@ -261,6 +283,11 @@
   --green: #5a8a5a;
   --red: #b8433a;
   --orange: #b86a2a;
+  /* #392: AA status/link text on tinted surfaces (audit row 9) */
+  --status-ok: #325a39;
+  --status-err: #9c322c;
+  --status-pending: #5142b5;
+  --link: #8f5024;
   --border: #d4c8b0;
   --border-soft: #e0d6c2;
   --zo-sidebar: var(--bg-surface);
@@ -289,7 +316,7 @@
   --bg-glass: rgba(20, 33, 24, 0.80);
   --text: #dce8d4;
   --text-muted: #8a9e82;
-  --text-faint: #5a7052;
+  --text-faint: #768b6e; /* #392: 4.51:1 on surface (was #5a7052 @ 3.17) */
   --text-soft: #a4b89b; /* #298 readable floor */
   --text-inverse: #0f1a14;
   --amber: #c9a84c;
@@ -301,6 +328,11 @@
   --green: #4ade80;
   --red: #f87171;
   --orange: #d9a040;
+  /* #392: AA text variants for tinted status pills + inline links (audit row 9) */
+  --status-ok: var(--green);
+  --status-err: var(--red);
+  --status-pending: #8aaa90; /* 5.0:1 on its 15% tint (theme indigo fails at 3.7) */
+  --link: var(--amber);
   --border: #2a4032;
   --border-soft: #1e3026;
   --zo-sidebar: var(--bg-surface);
@@ -329,7 +361,7 @@
   --bg-glass: rgba(15, 31, 42, 0.82);
   --text: #d8eaf0;
   --text-muted: #7a9aaa;
-  --text-faint: #4a7080;
+  --text-faint: #678a9a; /* #392: 4.54:1 on surface (was #4a7080 @ 3.24) */
   --text-soft: #96b2c2; /* #298 readable floor */
   --text-inverse: #0a1820;
   --amber: #e06b5a;
@@ -341,6 +373,11 @@
   --green: #4ae0c0;
   --red: #f87171;
   --orange: #e88a50;
+  /* #392: AA text variants for tinted status pills + inline links (audit row 9) */
+  --status-ok: var(--green);
+  --status-err: var(--red);
+  --status-pending: var(--indigo);
+  --link: var(--amber);
   --border: #1a3850;
   --border-soft: #122838;
   --zo-sidebar: var(--bg-surface);
@@ -460,7 +497,7 @@ html, body {
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }
-a { color: var(--amber); text-decoration: none; }
+a { color: var(--link); text-decoration: none; }
 a:hover { text-decoration: underline; }
 button { font-family: inherit; }
 input, textarea, select {
@@ -471,6 +508,17 @@ input, textarea, select {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
+
+/* ── #392: reduced motion — collapse animations/transitions and jump
+   scrolls for users whose OS asks for less motion. ── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 
 /* ── Screen-reader-only utility (#308) — visually hidden in every theme,
    rendered for AT/magnifier users. ── */
@@ -600,7 +648,9 @@ input, textarea, select {
   border: none;
   border-radius: 50%;
   background: transparent;
-  color: var(--text-faint);
+  /* #392: --text-soft — the glyph shows over the tab's --bg-hover on hover,
+     where --text-faint sits at ~3.5:1 (10px text needs 4.5). */
+  color: var(--text-soft);
   font-size: 10px;
   line-height: 1;
   cursor: pointer;

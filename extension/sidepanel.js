@@ -37,6 +37,9 @@ import {
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
+// #392: honor prefers-reduced-motion — programmatic scrolls jump, not glide.
+const smoothBehavior = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+
 // ---- Constants ----
 const MAX_HISTORY = 50;
 const OLD_STORAGE_KEY = 'cobrowse_history';
@@ -1653,7 +1656,7 @@ function renderComposeParkCards(run) {
     }
     host.appendChild(bar);
     msgsEl?.appendChild(host);
-    host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    host.scrollIntoView({ behavior: smoothBehavior(), block: 'nearest' });
   }
 }
 
@@ -5258,7 +5261,7 @@ function handleStreamMessage(msg) {
         msgsEl.appendChild(reconn);
       }
       reconn.querySelector('.msg-body').textContent = '➳ Reconnecting... attempt ' + msg.attempt + ' of ' + msg.maxRetries;
-      reconn.scrollIntoView({ behavior: 'smooth' });
+      reconn.scrollIntoView({ behavior: smoothBehavior() });
       break;
     }
     case 'STREAM_DIAGNOSTIC': {
@@ -5336,7 +5339,7 @@ function renderHandoffLine(run) {
     Object.assign(document.createElement('span'), { textContent: `🤖 Handoff — ${runProgress(run)} · ${safeText(run.goal).slice(0, 60)}` }),
     stopBtn,
   );
-  line.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  line.scrollIntoView({ behavior: smoothBehavior(), block: 'nearest' });
 }
 
 function removeHandoffLine() {
@@ -5373,7 +5376,7 @@ function renderRecipeLine(run, phase) {
     Object.assign(document.createElement('span'), { textContent: label }),
     stopBtn,
   );
-  line.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  line.scrollIntoView({ behavior: smoothBehavior(), block: 'nearest' });
 }
 
 function removeRecipeLine() {
@@ -5426,7 +5429,7 @@ function recipeActionCard(title, bodyText) {
     host.appendChild(body);
   }
   msgsEl?.appendChild(host);
-  host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  host.scrollIntoView({ behavior: smoothBehavior(), block: 'nearest' });
   return host;
 }
 
@@ -5569,7 +5572,7 @@ function renderRecipeRecordLine(name) {
     stopBtn,
   );
   msgsEl.appendChild(line);
-  line.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  line.scrollIntoView({ behavior: smoothBehavior(), block: 'nearest' });
 }
 
 function removeRecipeRecordLine() {
@@ -5617,7 +5620,7 @@ function renderRecipeCheckpoint(run) {
   host.appendChild(bar);
   msgsEl?.appendChild(host);
   recipeCheckpointEl = host;
-  host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  host.scrollIntoView({ behavior: smoothBehavior(), block: 'nearest' });
 }
 
 function removeRecipeCheckpoint() {
@@ -5655,7 +5658,7 @@ function renderRecipeReviewCard(run) {
   host.appendChild(bar);
   msgsEl?.appendChild(host);
   recipeCheckpointEl = host;
-  host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  host.scrollIntoView({ behavior: smoothBehavior(), block: 'nearest' });
 }
 
 // ---- Recipe library popup (R3 #257) ----------------------------------------
@@ -5958,7 +5961,7 @@ function renderRecipeParamsCard(params) {
     bar.append(start, cancel);
     host.appendChild(bar);
     msgsEl?.appendChild(host);
-    host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    host.scrollIntoView({ behavior: smoothBehavior(), block: 'nearest' });
     start.addEventListener('click', () => {
       host.remove();
       const out = {};

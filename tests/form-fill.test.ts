@@ -56,7 +56,9 @@ function loadRealRunner(win: Window): { executeAction: Exe; waitForElement: (sel
   };
   sandbox.self = sandbox;
   const prologue =
-    "const sleep = (ms) => new Promise(r => setTimeout(r, ms));\n";
+    "const sleep = (ms) => new Promise(r => setTimeout(r, ms));\n" +
+    // #392: executeAction's scroll-into-view gate — same helper content.js defines.
+    "const smoothBehavior = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';\n";
   runInSandbox(
     prologue +
     extractFn("isValidCssSelector") + "\n" +

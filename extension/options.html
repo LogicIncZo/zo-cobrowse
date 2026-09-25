@@ -171,9 +171,11 @@
       padding: 5px 10px;
       border-radius: var(--radius-sm);
     }
-    .inline-status.ok { background: color-mix(in srgb, var(--amber) 15%, transparent); color: var(--amber); }
-    .inline-status.err { background: color-mix(in srgb, var(--red) 15%, transparent); color: var(--red); }
-    .inline-status.pending { background: color-mix(in srgb, var(--indigo) 15%, transparent); color: var(--indigo); }
+    /* #392: --status-* are the per-theme AA text variants (>=4.5:1 on their
+       15% tints); the raw accents failed in light/sepia and pending in dark. */
+    .inline-status.ok { background: color-mix(in srgb, var(--status-ok) 15%, transparent); color: var(--status-ok); }
+    .inline-status.err { background: color-mix(in srgb, var(--status-err) 15%, transparent); color: var(--status-err); }
+    .inline-status.pending { background: color-mix(in srgb, var(--status-pending) 15%, transparent); color: var(--status-pending); }
 
     /* ── Quick actions editor ── */
     .qa-row {
