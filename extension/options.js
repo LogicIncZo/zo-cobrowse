@@ -484,16 +484,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Save
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    // #340: editor draft first — an invalid draft (empty system/instructions)
-    // aborts the whole save with the editor's honest error.
-    if (persistPromptEditor) {
-      const res = await persistPromptEditor();
-      if (!res.ok) {
-        statusMsg.textContent = res.error;
-        statusMsg.className = 'inline-status err';
-        return;
-      }
-    }
+    // Validate everything BEFORE persisting anything — the editor draft, the
+    // token and the host fields save as one unit, so a failed validation must
+    // not leave half the form saved under an error message.
     const token = tokenInput.value.trim();
     if (!token) {
       statusMsg.textContent = 'Access token is required.';
@@ -520,6 +513,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       } catch { /* not a URL */ }
       if (!originOk) {
         statusMsg.textContent = 'Zo Web Origin must be a valid http(s) URL (e.g. https://your-slug.zo.computer), or empty to disable.';
+        statusMsg.className = 'inline-status err';
+        return;
+      }
+    }
+    // #340: editor draft — an invalid draft (empty system/instructions)
+    // aborts the whole save with the editor's honest error.
+    if (persistPromptEditor) {
+      const res = await persistPromptEditor();
+      if (!res.ok) {
+        statusMsg.textContent = res.error;
         statusMsg.className = 'inline-status err';
         return;
       }

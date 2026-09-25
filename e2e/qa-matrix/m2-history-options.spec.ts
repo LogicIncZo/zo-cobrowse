@@ -50,6 +50,13 @@ test("options pane switching and #card-write deep link land correctly", async ()
 test("prompts editor override persists; Reset deletes it", async () => {
   const opts = await h.panel.evaluate(() => chrome.runtime.getURL("options.html"));
   await h.panel.goto(opts);
+  // The one global save validates the token first (finding
+  // qa-m2-prompts-editor-status-stuck: a failed validation must not
+  // half-save) — seed one so this test exercises the real success path.
+  // The last-visited-tab persistence may open ANY pane; the token field
+  // lives on the connection pane, so land there explicitly first.
+  await h.panel.locator('#settings-nav .settings-tab[data-pane="pane-connection"]').click();
+  await h.panel.locator("#access-token").fill("e2e-token");
   await h.panel.locator('#settings-nav .settings-tab[data-pane="pane-prompts"]').click();
   await h.panel.locator("#prompt-mode-select").selectOption({ index: 4 }); // 🪶 Lean
   await h.panel.locator("#prompt-budget").fill("1234");
