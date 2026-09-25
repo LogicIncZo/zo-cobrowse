@@ -117,10 +117,10 @@
            @ autocomplete). Toggled tabs ride along as a compact manifest +
            excerpt; Zo can pull full content via read_tab. -->
       <div id="tab-contexts" class="tab-contexts hidden">
-        <button id="tab-strip-collapse" class="tab-strip-collapse" type="button" title="Show/hide open tabs">
+        <button id="tab-strip-collapse" class="tab-strip-collapse" type="button" title="Show/hide open tabs" aria-expanded="true">
           📎 Tabs <span id="tab-strip-count"></span> <span class="tab-strip-caret">▾</span>
         </button>
-        <div id="tab-strip" class="tab-strip" role="listbox" aria-label="Open tabs — click to reference as context"></div>
+        <div id="tab-strip" class="tab-strip" role="group" aria-label="Open tabs — click to reference as context"></div>
         <!-- #25 vision UX: send-once screenshot toggle — arms ONE turn (the
              next send) with a tier-3 screenshot + flips the Mode to Visual;
              auto-clears after that send, like the picker chips. -->
@@ -146,9 +146,9 @@
 
       <!-- Input area -->
       <div class="input-area">
-        <button id="mic-btn" class="btn btn-ghost btn-icon mic-btn" aria-label="Voice input" title="Voice input">🎤</button>
+        <button id="mic-btn" class="btn btn-ghost btn-icon mic-btn" aria-label="Voice input" aria-pressed="false" title="Voice input">🎤</button>
         <div class="input-wrap">
-          <textarea id="query-input" rows="1" data-i18n-placeholder="sidepanelComposerPlaceholder" autofocus></textarea>
+          <textarea id="query-input" rows="1" data-i18n-placeholder="sidepanelComposerPlaceholder" aria-label="Ask Zo about this page…" autofocus></textarea>
         </div>
         <button id="send-btn" class="btn btn-primary btn-icon" aria-label="Send" aria-keyshortcuts="Enter" title="Send">→</button>
       </div>
@@ -161,7 +161,7 @@
         <span class="history-title">Conversations</span>
       </div>
       <div class="history-search-wrap">
-        <input id="history-search" class="history-search" type="search"
+        <input id="history-search" class="history-search" type="search" aria-label="Search chats…"
                placeholder="Search chats…" autocomplete="off" spellcheck="false" />
       </div>
       <div id="history-list"></div>

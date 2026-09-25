@@ -191,6 +191,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       tokenInput.type = show ? 'text' : 'password';
       tokenToggle.textContent = show ? 'Hide' : 'Show';
       tokenToggle.title = show ? 'Hide token' : 'Show token';
+      tokenToggle.setAttribute('aria-label', show ? 'Hide Zo access token' : 'Show Zo access token');
+      tokenToggle.setAttribute('aria-pressed', String(show));
     });
   }
 
@@ -202,6 +204,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       jevKeyInput.type = show ? 'text' : 'password';
       jevKeyToggle.textContent = show ? 'Hide' : 'Show';
       jevKeyToggle.title = show ? 'Hide key' : 'Show key';
+      jevKeyToggle.setAttribute('aria-label', show ? 'Hide Jev API key' : 'Show Jev API key');
+      jevKeyToggle.setAttribute('aria-pressed', String(show));
     });
   }
 
@@ -276,12 +280,28 @@ document.addEventListener('DOMContentLoaded', async () => {
     const activate = (paneId, save = true) => {
       const pane = document.getElementById(paneId);
       if (!pane) return false;
-      for (const t of tabs) t.classList.toggle('active', t.dataset.pane === paneId);
+      for (const t of tabs) {
+        const on = t.dataset.pane === paneId;
+        t.classList.toggle('active', on);
+        t.setAttribute('aria-selected', String(on));
+      }
       for (const p of document.querySelectorAll('.tab-pane')) p.hidden = p.id !== paneId;
       if (save) { try { localStorage.setItem('cobrowse_settings_tab', paneId); } catch { /* storage unavailable */ } }
       return true;
     };
     for (const t of tabs) t.addEventListener('click', () => activate(t.dataset.pane));
+    // #392: Left/Right arrows move focus AND activate (the panes swap with the
+    // focus, so the visible content always follows the keyboard).
+    nav.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      const cur = tabs.findIndex((t) => t.classList.contains('active'));
+      const delta = e.key === 'ArrowRight' ? 1 : -1;
+      const next = tabs[(cur + delta + tabs.length) % tabs.length];
+      if (!next) return;
+      next.focus();
+      activate(next.dataset.pane);
+      e.preventDefault();
+    });
     // Same-document #card-* navigations (hash clicks/updates after load).
     window.addEventListener('hashchange', () => {
       if (!location.hash.startsWith('#card-')) return;
@@ -322,8 +342,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       const row = document.createElement('div');
       row.className = 'qa-row';
       row.innerHTML = `
-        <input type="text" class="qa-label" placeholder="Label" value="${escapeHtml(action.label)}" data-index="${i}" />
-        <input type="text" class="qa-prompt" placeholder="Prompt" value="${escapeHtml(action.prompt)}" data-index="${i}" />
+        <input type="text" class="qa-label" placeholder="Label" aria-label="Quick action ${i + 1} label" value="${escapeHtml(action.label)}" data-index="${i}" />
+        <input type="text" class="qa-prompt" placeholder="Prompt" aria-label="Quick action ${i + 1} prompt" value="${escapeHtml(action.prompt)}" data-index="${i}" />
         <button class="qa-remove" data-index="${i}" aria-label="Remove quick action ${i + 1}" ${actions.length === 1 ? 'disabled' : ''}>✕</button>
       `;
       area.appendChild(row);
