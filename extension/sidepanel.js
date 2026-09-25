@@ -1335,10 +1335,14 @@ function renderChatTabs() {
     label.className = 'chat-tab-label';
     label.textContent = labelText;
     tab.appendChild(label);
-    const close = document.createElement('span');
+    // #392: a real button so keyboard users can close tabs (the ✕ stopPropagation
+    // keeps the activation off the tab's switch handler).
+    const close = document.createElement('button');
+    close.type = 'button';
     close.className = 'chat-tab-close';
     close.textContent = '✕';
     close.title = 'Close tab';
+    close.setAttribute('aria-label', 'Close tab');
     close.addEventListener('click', (e) => {
       e.stopPropagation();
       closeChatTabById(id);
@@ -1725,9 +1729,18 @@ function renderHistoryView() {
       card.className = `history-card${item.isActive ? ' history-card-active' : ''}`;
       card.dataset.convId = item.id;
 
-      const titleEl = document.createElement('div');
-      titleEl.className = 'history-card-title';
+      // The title row is the card's keyboard activation path (#392): a real
+      // button (Enter/Space → click) that opens the conversation. The nested
+      // action buttons below stopPropagation, so they never double-fire.
+      const titleEl = document.createElement('button');
+      titleEl.type = 'button';
+      titleEl.className = 'history-card-title history-card-open';
+      titleEl.title = 'Open conversation';
       appendHighlighted(titleEl, item.title, query);
+      titleEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        switchToConversation(item.id);
+      });
 
       // Main column: title + one-line preview of the opening ask (identifying
       // a chat without opening it). No snippet → title-only, layout unchanged.
@@ -3457,6 +3470,9 @@ function renderTabAutocomplete(filterText) {
     }
     item.title = safeText(t.title || t.url) + (t.url ? `\n${safeText(t.url)}` : '');
     item.addEventListener('mousedown', (e) => { e.preventDefault(); selectTabAutocomplete(i); });
+    // #392: mousedown keeps composer focus; keyboard/AT activation arrives as
+    // a click with detail 0 — honor it so a focused row's Enter isn't a no-op.
+    item.addEventListener('click', (e) => { if (e.detail === 0) selectTabAutocomplete(i); });
     popup.appendChild(item);
   });
   popup.setAttribute('aria-activedescendant', 'tab-ac-opt-0'); // #304
@@ -3608,6 +3624,7 @@ function renderSkillPopup(filterText) {
     }
     item.title = `${s.name}\n${s.description || ''}`;
     item.addEventListener('mousedown', (e) => { e.preventDefault(); selectSkill(i); });
+    item.addEventListener('click', (e) => { if (e.detail === 0) selectSkill(i); }); // keyboard (see tab rows)
     popup.appendChild(item);
   });
   // #73 loudness: the workspace holds more skill folders than the listing
@@ -3696,18 +3713,23 @@ function renderFilePopup(filterText, keepFilter) {
     // folder; ＋ arms it as a context chip (Zo lists/recurses server-side).
     if (e.kind === 'dir') {
       item.classList.add('has-add');
-      const add = document.createElement('span');
+      const add = document.createElement('button');
+      add.type = 'button';
       add.className = 'picker-item-add';
       add.textContent = '＋';
       add.title = `${e.path} — add this FOLDER as context (click the row to browse into it)`;
-      add.addEventListener('mousedown', (ev) => {
+      add.setAttribute('aria-label', 'Add folder as context');
+      const armFolder = (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
         armPickedFile(e, true);
-      });
+      };
+      add.addEventListener('mousedown', armFolder); // beats the row's mousedown navigate
+      add.addEventListener('click', armFolder); // keyboard/AT activation
       item.appendChild(add);
     }
     item.addEventListener('mousedown', (ev) => { ev.preventDefault(); selectFileRow(i); });
+    item.addEventListener('click', (ev) => { if (ev.detail === 0) selectFileRow(i); }); // keyboard (see tab rows)
     popup.appendChild(item);
   });
   popup.setAttribute('aria-activedescendant', 'file-ac-opt-0'); // #304

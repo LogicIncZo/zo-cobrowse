@@ -25,8 +25,9 @@
       <div class="header-actions">
         <button id="theme-toggle" class="icon-btn theme-toggle" aria-label="Toggle theme" data-i18n-title="sidepanelThemeToggle">☀</button>
         <div class="status-dot-wrap">
-          <span id="status-dot" class="dot dot-disconnected" role="img" aria-label="Connection status: not configured" title="Not configured"></span>
-          <!-- #308: visually-hidden text twin — magnifier/BR users get the status too -->
+          <button id="status-dot" type="button" class="dot dot-disconnected" aria-label="Connection status — open settings" title="Not configured"></button>
+          <!-- #308: visually-hidden text twin — magnifier/BR users get the status too.
+               updateStatus keeps the dot's aria-label on the live state. -->
           <span id="status-text" class="sr-only" aria-live="polite">Connection status: not configured</span>
         </div>
         <button id="help-btn" class="icon-btn" aria-label="Help" data-i18n-title="sidepanelHelp">?</button>
