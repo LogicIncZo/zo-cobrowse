@@ -23,7 +23,7 @@
         <span id="page-url">— no page —</span>
       </div>
       <div class="header-actions">
-        <button id="theme-toggle" class="icon-btn theme-toggle" aria-label="Toggle theme" data-i18n-title="sidepanelThemeToggle">☀</button>
+        <button id="theme-toggle" class="icon-btn theme-toggle" aria-label="Toggle theme" aria-expanded="false" data-i18n-title="sidepanelThemeToggle">☀</button>
         <div class="status-dot-wrap">
           <button id="status-dot" type="button" class="dot dot-disconnected" aria-label="Connection status — open settings" title="Not configured"></button>
           <!-- #308: visually-hidden text twin — magnifier/BR users get the status too.
@@ -132,7 +132,7 @@
                 title="Page DOM attached to messages — OFF sends the URL/title pointer only (privacy / token cap)">🧩 DOM ✓</button>
         <!-- R3 (#257): the recipe library popup — browse/run/rename/delete/
              import saved flows, export them as a Zo skill. -->
-        <button id="recipe-lib-btn" class="shot-toggle" type="button"
+        <button id="recipe-lib-btn" class="shot-toggle" type="button" aria-haspopup="dialog" aria-expanded="false"
                 title="Recipe library — saved flows (run, rename, delete, import, export)">🧾 Recipes</button>
       </div>
       <div id="tab-autocomplete" class="tab-autocomplete hidden" role="listbox" aria-label="Open tabs — reference as context"></div>
