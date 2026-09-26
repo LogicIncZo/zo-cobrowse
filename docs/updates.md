@@ -3,6 +3,17 @@
 New features in Zo Co-browse, newest first. Each entry explains what shipped;
 open **How to use it** for the hands-on steps.
 
+## Diagnostics share, repaired <span class="badge-new">NEW</span> {#diag-share-hotfix}
+
+_2026-09-26 · [PR #407](https://github.com/LogicIncZo/zo-cobrowse/pull/407) · v0.3.6.2_
+
+Same-day hotfix to the share button that shipped this morning: dpaste.com
+rejected uploads (the form was sent without a content-type header — now
+fixed), and the 0x0.st fallback host has shut down entirely, so the fallback
+is now **paste.debian.net** (Debian Pastezone) — same anonymous, 24-hour
+expiry, and pastes there are hidden by default. Nothing about what is or
+isn't included in the bundle changed.
+
 ## Navigation that really navigates — plus a shareable debug link <span class="badge-new">NEW</span> {#navigate-debug-share}
 
 _2026-09-26 · [PR #403](https://github.com/LogicIncZo/zo-cobrowse/pull/403) + [PR #404](https://github.com/LogicIncZo/zo-cobrowse/pull/404) · v0.3.6.1_

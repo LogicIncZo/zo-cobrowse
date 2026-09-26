@@ -6,6 +6,10 @@ This page mirrors everything **unreleased** on `dev`.
 
 ## Unreleased
 
+_Nothing unreleased — the latest is [0.3.6.2](#changelog-v0362)._
+
+## [0.3.6.2] — 2026-09-26 {#changelog-v0362}
+
 ### Fixed
 
 - **Diagnostics share transport (v0.3.6.1 follow-up).** dpaste.com rejected
