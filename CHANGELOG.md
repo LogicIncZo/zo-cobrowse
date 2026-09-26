@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+### Fixed
+
+- **Diagnostics share transport (v0.3.6.1 follow-up).** dpaste.com rejected
+  the upload (HTTP 400 "Missing required field 'content'") because the form
+  body went out without an `application/x-www-form-urlencoded` content-type —
+  the header is now sent. The dead 0x0.st fallback (uploads disabled, its
+  connection hangs) is replaced with paste.debian.net (Debian Pastezone:
+  anonymous JSON API, 24-hour expiry, pastes hidden by default). Both hosts
+  live-verified; unit tests pin the exact request shapes and headers.
+
 ## [0.3.6.1] — 2026-09-26
 
 ### Fixed

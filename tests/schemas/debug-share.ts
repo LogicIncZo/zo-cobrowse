@@ -9,7 +9,8 @@ import { z } from "zod";
 export const PasteHostSchema = z.object({
   name: z.string().min(1),
   endpoint: z.string().url(),
-  bodyType: z.enum(["form", "multipart"]),
+  bodyType: z.enum(["form", "json", "multipart"]),
+  headers: z.record(z.string()).optional(),
 });
 export type PasteHost = z.infer<typeof PasteHostSchema>;
 

@@ -35,23 +35,34 @@ export const SETTINGS_SNAPSHOT_KEYS = [
 
 export const DIAG_SHARE_EXPIRY_MS = 24 * 60 * 60 * 1000;
 
-/** Anonymous paste hosts, tried in order. dpaste.com takes expiry_days (1 =
- * 24h); 0x0.st takes an absolute epoch `expires`. Neither needs an account. */
+/** Anonymous paste hosts, tried in order — both live-verified 2026-09-26.
+ * dpaste.com takes expiry_days (1 = 24h) and REQUIRES the urlencoded
+ * content-type (a headerless string body is served as text/plain → HTTP 400
+ * "Missing required field 'content'"). paste.debian.net (Debian Pastezone)
+ * takes JSON {code, expire} → {url} and hides pastes by default; its strict
+ * anonymous spam filter wants multi-line content, which the bundle always is.
+ * 0x0.st was dropped as fallback — it disabled uploads (spam pressure) and
+ * now hangs connections. */
 export const PASTE_HOSTS = [
   {
     name: 'dpaste.com',
     endpoint: 'https://dpaste.com/api/v2/',
     bodyType: 'form',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
     fields: (text) => ({ content: text, syntax: 'text', expiry_days: '1' }),
   },
   {
-    name: '0x0.st',
-    endpoint: 'https://0x0.st/',
-    bodyType: 'multipart',
-    fields: (text, now) => ({
-      file: new Blob([text], { type: 'text/plain' }),
-      expires: String(Math.floor(now / 1000) + DIAG_SHARE_EXPIRY_MS / 1000),
-    }),
+    name: 'paste.debian.net',
+    endpoint: 'https://paste.debian.net/api/v1/paste',
+    bodyType: 'json',
+    headers: { 'content-type': 'application/json' },
+    fields: (text) => ({ code: text, lang: 'text', expire: 86400 }),
+    parse: (out) => {
+      try {
+        const j = JSON.parse(out);
+        return (j && typeof j.url === 'string' && looksLikeUrl(j.url)) ? j.url.trim() : '';
+      } catch { return ''; }
+    },
   },
 ];
 
@@ -158,13 +169,18 @@ export async function uploadDiagnostics(text, { fetchImpl, now = Date.now() } = 
       let body;
       if (host.bodyType === 'form') {
         body = new URLSearchParams(host.fields(text, now)).toString();
+      } else if (host.bodyType === 'json') {
+        body = JSON.stringify(host.fields(text, now));
       } else {
+        // multipart: fetch sets the boundary content-type itself — never
+        // pass an explicit one here.
         const fd = new FormData();
         for (const [k, v] of Object.entries(host.fields(text, now))) fd.append(k, v);
         body = fd;
       }
       const res = await doFetch(host.endpoint, {
         method: 'POST',
+        headers: host.headers,
         body,
         signal: ctl?.signal,
       });
@@ -173,11 +189,13 @@ export async function uploadDiagnostics(text, { fetchImpl, now = Date.now() } = 
         failures.push(`${host.name}: HTTP ${res.status}${out ? ' — ' + out.slice(0, 120) : ''}`);
         continue;
       }
-      if (!looksLikeUrl(out)) {
+      // dpaste answers with the bare URL; paste.debian.net wraps it in JSON.
+      const url = host.parse ? host.parse(out) : (looksLikeUrl(out) ? out.trim() : '');
+      if (!url) {
         failures.push(`${host.name}: unexpected response`);
         continue;
       }
-      return { ok: true, url: out.trim(), host: host.name, expiresAt: now + DIAG_SHARE_EXPIRY_MS };
+      return { ok: true, url, host: host.name, expiresAt: now + DIAG_SHARE_EXPIRY_MS };
     } catch (err) {
       const msg = err && err.name === 'AbortError' ? `timed out after ${UPLOAD_TIMEOUT_MS / 1000}s` : (err?.message || String(err));
       failures.push(`${host.name}: ${msg}`);

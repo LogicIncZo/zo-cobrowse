@@ -386,9 +386,9 @@ describe("SHARE_DIAGNOSTICS — anonymous 24h paste (user-triggered only)", () =
     const resp = await bus.runtime.sendMessage({ type: "SHARE_DIAGNOSTICS" });
     expect(resp.ok).toBe(false);
     expect(resp.error).toContain("dpaste.com");
-    expect(resp.error).toContain("0x0.st");
+    expect(resp.error).toContain("paste.debian.net");
     expect(fm.to("dpaste.com/api/v2").length).toBeGreaterThanOrEqual(1);
-    expect(fm.to("0x0.st").length).toBeGreaterThanOrEqual(1);
+    expect(fm.to("paste.debian.net/api/v1/paste").length).toBeGreaterThanOrEqual(1);
     bus.storage.sync.set({ debugMode: false });
     await flush();
   });
