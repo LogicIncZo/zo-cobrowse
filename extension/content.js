@@ -676,6 +676,7 @@
       --wa-bg: #fff; --wa-text: #101828; --wa-border: #d0d5dd; --wa-border-soft: #eaecf0;
       --wa-head-bg: #f8fafc; --wa-muted: #475467; --wa-hover: #f2f4f7; --wa-icon-bg: #fff;
       --wa-btn-text: #344054; --wa-error: #b42318;
+      --wa-focus: #2962b8;
       /* #392: AA fixes — icon boundary >=3:1 (non-text), note text >=4.5:1 */
       --wa-icon-border: #667085; --wa-note: #b54708;
     }
@@ -683,6 +684,7 @@
       --wa-bg: #1c212b; --wa-text: #e6e8ee; --wa-border: #3a4150; --wa-border-soft: #2a3140;
       --wa-head-bg: #232936; --wa-muted: #98a2b3; --wa-hover: #2a3140; --wa-icon-bg: #1c212b;
       --wa-btn-text: #cbd2dc; --wa-error: #f97066;
+      --wa-focus: #8ab4f8;
       --wa-note: #fdb022; /* 8.8:1 on --wa-bg (light's #b54708 is 3.0:1 here) */
     }
     [hidden] { display: none !important; }
@@ -714,7 +716,12 @@
     .zo-wa-instr { margin: 8px 10px 0; padding: 6px 8px; border: 1px solid var(--wa-border);
       border-radius: 6px; font: inherit; width: calc(100% - 20px); box-sizing: border-box;
       background: var(--wa-bg); color: var(--wa-text); }
-    .zo-wa-instr:focus { outline: 2px solid #2962b8; border-color: #2962b8; }
+    .zo-wa-instr:focus { outline: 2px solid var(--wa-focus); border-color: var(--wa-focus); }
+    /* #392 r2: the page's global :focus-visible ring can't cross the shadow
+       boundary — every widget interactive carries its own. */
+    .zo-wa-btn:focus-visible, .zo-wa-chip:focus-visible, .zo-wa-x:focus-visible,
+    .zo-wa-icon:focus-visible, .zo-wa-instr:focus-visible {
+      outline: 2px solid var(--wa-focus); outline-offset: 1px; }
     .zo-wa-body { padding: 10px; overflow-y: auto; max-height: 180px; white-space: pre-wrap; }
     .zo-wa-loading { display: flex; align-items: center; color: var(--wa-muted); max-height: none; }
     .zo-wa-spin { width: 14px; height: 14px; border: 2px solid var(--wa-border);

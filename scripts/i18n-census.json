@@ -38,15 +38,21 @@
   ],
   "count": 35,
   "ariaLabels": [
+    "'A page screenshot was attached to this turn'",
     "'Add folder as context'",
     "'Close tab'",
     "'Close'",
+    "'Copy Zo conversation id'",
+    "'Delete conversation'",
     "'Enhance with Zo'",
+    "'Export conversation as Markdown'",
     "'Follow-up actions'",
     "'Follow-up instruction'",
     "'Instruction for Zo (optional)'",
     "'Name for the composed recipe'",
     "'New name'",
+    "'Open in Zo web'",
+    "'Rename conversation'",
     "'Show action steps'",
     "'Stop voice input'",
     "'Voice input'",
@@ -78,8 +84,9 @@
     "`More actions for ${safeText(r.name)}`",
     "expanded ? 'Show action steps' : 'Hide action steps'",
     "label",
+    "labelText + (id === streamingId ? ' — generating…' : '')",
     "show ? 'Hide Jev API key' : 'Show Jev API key'",
     "show ? 'Hide Zo access token' : 'Show Zo access token'"
   ],
-  "ariaLabelCount": 42
+  "ariaLabelCount": 49
 }

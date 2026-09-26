@@ -1366,12 +1366,16 @@ function renderChatTabs() {
     // Single shared panel — switching a tab swaps #messages in place.
     tab.setAttribute('aria-controls', 'messages');
     tab.title = labelText + (id === streamingId ? ' — generating…' : '');
+    // #392 r2: the streaming state must not be color-only — the pulsing dot
+    // carries no semantics, so the accessible name states it explicitly.
+    tab.setAttribute('aria-label', labelText + (id === streamingId ? ' — generating…' : ''));
     if (convo.pinned) {
       // 📌 glyph marks a pinned chat (exempt from LRU eviction).
       const pin = document.createElement('span');
       pin.className = 'chat-tab-pin';
       pin.textContent = '📌';
       pin.title = 'Pinned — open ⇢ right-click to unpin';
+      pin.setAttribute('aria-hidden', 'true');
       tab.appendChild(pin);
     }
     if (id === streamingId && id !== activeId) {
@@ -1379,6 +1383,7 @@ function renderChatTabs() {
       // active tab the user is already watching the stream live.
       const dot = document.createElement('span');
       dot.className = 'chat-tab-stream-dot';
+      dot.setAttribute('aria-hidden', 'true');
       tab.appendChild(dot);
     }
     const label = document.createElement('span');
@@ -1839,6 +1844,7 @@ function renderHistoryView() {
       renameBtn.className = 'history-card-rename';
       renameBtn.textContent = '✎';
       renameBtn.title = 'Rename conversation';
+      renameBtn.setAttribute('aria-label', 'Rename conversation');
       renameBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         startCardRename(card, item);
@@ -1849,6 +1855,7 @@ function renderHistoryView() {
       exportBtn.className = 'history-card-rename';
       exportBtn.textContent = '⬇';
       exportBtn.title = 'Export as Markdown';
+      exportBtn.setAttribute('aria-label', 'Export conversation as Markdown');
       exportBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         exportConversation(item.id);
@@ -1864,6 +1871,7 @@ function renderHistoryView() {
         copyIdBtn.className = 'history-card-rename';
         copyIdBtn.textContent = '⧉';
         copyIdBtn.title = `${item.zoThreadId} — copy Zo conversation id`;
+        copyIdBtn.setAttribute('aria-label', 'Copy Zo conversation id');
         copyIdBtn.addEventListener('click', async (e) => {
           e.stopPropagation();
           try {
@@ -1878,6 +1886,7 @@ function renderHistoryView() {
           openInZoBtn.className = 'history-card-rename';
           openInZoBtn.textContent = '↗';
           openInZoBtn.title = 'Open in Zo';
+          openInZoBtn.setAttribute('aria-label', 'Open in Zo web');
           openInZoBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             try { chrome.tabs.create({ url: chatUrl }); } catch { /* tabs unavailable */ }
@@ -1889,6 +1898,7 @@ function renderHistoryView() {
       deleteBtn.className = 'history-card-delete';
       deleteBtn.textContent = '✕';
       deleteBtn.title = 'Delete conversation';
+      deleteBtn.setAttribute('aria-label', 'Delete conversation');
       deleteBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         if (confirm('Delete this conversation?')) {
@@ -1951,6 +1961,7 @@ function startCardRename(card, item) {
   inputEl.value = item.title;
   inputEl.maxLength = 60;
   inputEl.placeholder = 'Chat title';
+  inputEl.setAttribute('aria-label', 'Rename conversation');
   inputEl.addEventListener('click', (e) => e.stopPropagation());
   inputEl.addEventListener('keydown', (e) => {
     e.stopPropagation();
@@ -2418,6 +2429,11 @@ function addMessageFooter(parentMsgEl, opts = {}) {
     ctxChip.className = 'msg-footer-chip msg-footer-context';
     ctxChip.textContent = `${CTX_ICONS[contextTier] || '🔗'} ${CTX_NAMES[contextTier] || 'Tier ' + contextTier}`;
     ctxChip.title = safeText(contextReason) || 'Context sent this turn';
+    // #392 r2: title-only tooltips are invisible to screen readers — the
+    // per-turn context decision gets a real accessible name (incl. reason).
+    ctxChip.setAttribute('aria-label',
+      `Context sent this turn: ${CTX_NAMES[contextTier] || 'Tier ' + contextTier}` +
+      (contextReason ? ` — ${safeText(contextReason)}` : ''));
     footer.appendChild(ctxChip);
   }
   if (screenshot) {
@@ -2425,6 +2441,7 @@ function addMessageFooter(parentMsgEl, opts = {}) {
     shotChip.className = 'msg-footer-chip msg-footer-shot';
     shotChip.textContent = '📷';
     shotChip.title = 'A page screenshot was attached to this turn';
+    shotChip.setAttribute('aria-label', 'A page screenshot was attached to this turn');
     footer.appendChild(shotChip);
   }
 

@@ -1628,6 +1628,7 @@ input, textarea, select {
 .btn-sm {
   padding: 4px 10px;
   font-size: 11px;
+  min-height: 24px; /* #392 r2: hit-target floor (options sheet floored too) */
 }
 .btn-icon {
   width: 32px;

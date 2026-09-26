@@ -105,3 +105,43 @@ Light/sepia/forest/ocean placeholder contrast verified ≥4.5:1 post-fix; all
 `--text-muted`/`--text-soft`/`--zo-primary` pairs already passed and were kept.
 
 `bun run verify` + e2e green; no prompt changes (evals untouched).
+
+---
+
+# Accessibility review — round 2 (bash, unreleased surface)
+
+**Round:** 2026-09-26, on dev `60ec406` + the unreleased navigate-fix/diagnostics-share
+branch (`fix/panel-navigate-debug-share`, 877441a) — the first pass over the new
+diagnostics UI plus the lanes round 1 did not cover. **Method:** static evidence sweep
+(file:line cited per finding) over the write-assist shadow-DOM widget, dynamic state
+surfacing (chat tabs, message footers, history view), and the options-page hit-target
+sheet; contrast values computed from the exact theme tokens; every fix landed with an
+e2e assertion in the existing #307/#309/#342-family specs.
+
+## Round-2 findings ledger
+
+| # | Severity | Item | Disposition |
+|---|---|---|---|
+| 13 | **P2** | Write-assist shadow-DOM focus indicators: only `.zo-wa-instr` had an outline (`content.js:717`); Close ✕ / Enhance / Accept / Cancel / Retry / follow-up chips had none, and the page's global amber `:focus-visible` ring cannot cross the shadow boundary → WCAG 2.4.7 fail for every widget control | **Fixed in-round** — per-theme `--wa-focus` token (light `#2962b8`, dark `#8ab4f8`, both ≥3:1 on `--wa-bg`) + `:focus-visible` rules on all widget interactives; proven by the new spec-16 shadow-activeElement probe |
+| 14 | **P2** | Backgrounded-chat streaming state was color-only: a decorative pulsing dot + mouse-only `title` tooltip; the tab's accessible name never mentioned it → WCAG 1.4.1 fail (`sidepanel.js` renderChatTabs) | **Fixed in-round** — `aria-label` carries "— generating…", dot + 📌 pin are `aria-hidden`; asserted in spec 20 on both backgrounding paths |
+| 15 | P3 | History-card glyph buttons (✎ Rename, ⬇ Export, ⧉ Copy id, ↗ Open in Zo, ✕ Delete) resolved names only via `title` fallback — technically named per accname, but fragile and the copy-id title leaks the thread id into the name (`sidepanel.js:1838-1888`) | **Fixed in-round** — explicit `aria-label`s; asserted in spec 37 |
+| 16 | P3 | History rename input was placeholder-named ("Chat title") — the exact class of gap round 1 fixed for composer/search inputs, missed here (`sidepanel.js:1948-1953`) | **Fixed in-round** — `aria-label="Rename conversation"`; asserted in spec 37 |
+| 17 | P3 | Per-turn context-tier + screenshot footer chips are `<span>`s with `title`-only tooltips — the context-policy decision (what was sent and why) invisible to SRs (`sidepanel.js:2417-2432`) | **Fixed in-round** — `aria-label` = "Context sent this turn: \<tier\> — \<reason\>"; asserted in spec 37 |
+| 18 | P3 | `.btn-sm` computed ≈23px in both sheets — sub-24 target (WCAG 2.5.8); the spec-39 options sweep passed only via sub-pixel rounding | **Fixed in-round** — `min-height: 24px` on both `.btn-sm` rules (`styles.css:1628`, `options.html:152`); spec-39 sweeps harden it |
+
+## Checked, passing (no action)
+
+- **New diagnostics-share UI** (unreleased): `#share-status` is `role=status`, the
+  button is a named real `<button>`, the global options ring and the disclosure text
+  apply; disabled-until-Debug-mode with the note explaining why.
+- **Error cards announce**: `.msg-error` lands inside `#messages` (`role="log"`) so
+  "Response interrupted" + detail + named ↻ Retry all reach SRs.
+- **history-card `<mark>` highlight**: amber 35% mix over card bg — computed
+  **13.96:1** light / **7.74:1** dark against the inherited text color.
+- **Code-copy / jump-to-latest / empty-state chips**: real named buttons.
+- **Token + API-key inputs**: `autocomplete="off"` (deliberate for secrets);
+  username field likewise.
+- **Forced-colors (Windows High Contrast)**: qualitative pass — all interactive
+  chrome keeps borders/text (no background-only affordances); not gated by a test.
+
+`bun test` + `bun run verify` + full e2e green. No prompt changes (evals untouched).
