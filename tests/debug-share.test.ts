@@ -127,7 +127,7 @@ describe("uploadDiagnostics", () => {
   const text = "# bundle\n+0.0s [msg] ASK_ZO";
   const now = 1790412000000;
 
-  it("posts to dpaste.com first with expiry_days=1 and returns the parsed URL", async () => {
+  it("posts to dpaste.com first WITH the urlencoded content-type header (the 400 bug) and returns the parsed URL", async () => {
     const calls: Array<{ url: string; init: any }> = [];
     const fetchImpl = async (url: string, init: any) => {
       calls.push({ url, init });
@@ -143,37 +143,54 @@ describe("uploadDiagnostics", () => {
     }
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe("https://dpaste.com/api/v2/");
+    // Regression: a string body without this header goes out as text/plain —
+    // dpaste answers 400 "Missing required field 'content'".
+    expect(calls[0].init.headers).toMatchObject({ "content-type": "application/x-www-form-urlencoded" });
     const form = new URLSearchParams(calls[0].init.body as string);
     expect(form.get("expiry_days")).toBe("1");
     expect(form.get("content")).toBe(text);
   });
 
-  it("falls back to 0x0.st when dpaste fails; multipart carries the 24h epoch", async () => {
+  it("falls back to paste.debian.net — JSON body with expire=86400, url pulled from the JSON reply", async () => {
     const calls: Array<{ url: string; init: any }> = [];
     const fetchImpl = async (url: string, init: any) => {
       calls.push({ url, init });
-      if (calls.length === 1) return new Response("over quota", { status: 507 });
-      return new Response("https://0x0.st/XYZ.bin", { status: 200 });
+      if (calls.length === 1) return new Response("gone", { status: 507 });
+      return new Response(JSON.stringify({ id: "49b5624d", url: "https://paste.debian.net/hidden/49b5624d", expires: 86400 }), { status: 200 });
     };
     const r = await uploadDiagnostics(text, { fetchImpl, now });
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.host).toBe("0x0.st");
+      expect(r.host).toBe("paste.debian.net");
+      expect(r.url).toBe("https://paste.debian.net/hidden/49b5624d");
       expect(r.expiresAt).toBe(now + DIAG_SHARE_EXPIRY_MS);
     }
     expect(calls).toHaveLength(2);
-    const fd = calls[1].init.body as FormData;
-    expect(String(fd.get("expires"))).toBe(String(Math.floor(now / 1000) + DIAG_SHARE_EXPIRY_MS / 1000));
+    expect(calls[1].url).toBe("https://paste.debian.net/api/v1/paste");
+    expect(calls[1].init.headers).toMatchObject({ "content-type": "application/json" });
+    const body = JSON.parse(calls[1].init.body as string);
+    expect(body).toMatchObject({ code: text, lang: "text", expire: 86400 });
   });
 
-  it("both hosts failing collapses into one combined error (never throws)", async () => {
+  it("a debian 2xx whose JSON has no url is a failure, not a poisoned link", async () => {
+    const calls: Array<{ url: string; init: any }> = [];
+    const fetchImpl = async (url: string, init: any) => {
+      calls.push({ url, init });
+      return new Response('{"id":"x"}', { status: 200 });
+    };
+    const r = await uploadDiagnostics(text, { fetchImpl, now });
+    expect(r.ok).toBe(false);
+    expect((r as any).error).toContain("paste.debian.net: unexpected response");
+  });
+
+  it("all hosts failing collapses into one combined error (never throws)", async () => {
     const fetchImpl = async () => new Response("nope", { status: 500 });
     const r = await uploadDiagnostics(text, { fetchImpl, now });
     const parsed = UploadResultSchema.parse(r);
     expect(parsed.ok).toBe(false);
     if (!parsed.ok) {
       expect(parsed.error).toContain("dpaste.com: HTTP 500");
-      expect(parsed.error).toContain("0x0.st: HTTP 500");
+      expect(parsed.error).toContain("paste.debian.net: HTTP 500");
     }
   });
 
