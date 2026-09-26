@@ -6,7 +6,17 @@ This page mirrors everything **unreleased** on `dev`.
 
 ## Unreleased
 
-_Nothing unreleased — the latest is [0.3.6.1](#changelog-v0361)._
+_Nothing unreleased — the latest is [0.3.6.2](#changelog-v0362)._
+
+## [0.3.6.2] — 2026-09-26 {#changelog-v0362}
+
+### Fixed
+
+- **Diagnostics share transport (v0.3.6.1 follow-up).** dpaste.com rejected
+  the upload (HTTP 400) because the form body went out without the
+  urlencoded content-type header — now sent. The dead 0x0.st fallback is
+  replaced with paste.debian.net (anonymous JSON API, 24-hour expiry,
+  pastes hidden by default). Both hosts live-verified.
 
 ## [0.3.6.1] — 2026-09-26 {#changelog-v0361}
 
