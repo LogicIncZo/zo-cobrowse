@@ -4,7 +4,7 @@
 // non-visually; title alone is not a name.
 
 import { test, expect } from "@playwright/test";
-import { openHarness } from "./helpers/extension";
+import { openHarness, sendQuery, waitForTurnComplete } from "./helpers/extension";
 
 interface NameGap {
   id: string;
@@ -87,6 +87,35 @@ test.describe("accessible names sweep (#307)", () => {
       await opts.waitForLoadState("load");
       const gaps = await opts.evaluate(SWEEP);
       expect(gaps, `unnamed options controls: ${JSON.stringify(gaps, null, 1)}`).toEqual([]);
+    } finally {
+      await h.context.close();
+    }
+  });
+
+  test("history cards + per-turn context chips carry real names (#392 r2)", async () => {
+    const h = await openHarness({ freshProfile: true, sitePath: "/form.html" });
+    try {
+      const panel = h.panel;
+      await sendQuery(panel, "Summarize this page");
+      await waitForTurnComplete(panel);
+
+      // The context-tier chip: the per-turn policy decision (title-only
+      // tooltip before) gets a real accessible name incl. the reason.
+      const chip = panel.locator(".msg-footer-context").last();
+      await expect(chip).toBeVisible();
+      await expect(chip).toHaveAttribute("aria-label", /Context sent this turn: .+/);
+
+      // History view: the glyph buttons must not lean on title-only names.
+      await panel.locator("#history-btn").click();
+      const card = panel.locator(".history-card").first();
+      await expect(card).toBeVisible({ timeout: 10_000 });
+      await expect(card.locator(".history-card-rename").first()).toHaveAttribute("aria-label", "Rename conversation");
+      await expect(card.locator(".history-card-rename").nth(1)).toHaveAttribute("aria-label", "Export conversation as Markdown");
+      await expect(card.locator(".history-card-delete")).toHaveAttribute("aria-label", "Delete conversation");
+
+      // The inline rename input is not placeholder-named.
+      await card.locator(".history-card-rename").first().click();
+      await expect(card.locator(".history-rename-input")).toHaveAttribute("aria-label", "Rename conversation");
     } finally {
       await h.context.close();
     }

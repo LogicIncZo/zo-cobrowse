@@ -41,6 +41,25 @@ and this project uses [Semantic Versioning](https://semver.org/).
   shares. When Jev rescues a click you still see the ⚡ provenance on the
   action card; with debug mode on you can now also see it in the exported
   timeline.
+- **Accessibility round 2 (bash).** Audit + fixes over the lanes round 1
+  didn't cover and the new surfaces — ledger round 2 in
+  `docs/qa/accessibility-review.md` (#13–#18, all fixed in-round):
+  - **Write-assist shadow-DOM focus rings (#13, P2)** — the page's amber
+    `:focus-visible` ring can't cross the shadow boundary, and only the
+    instruction field carried its own; every widget control (Close ✕,
+    Enhance/Accept/Cancel/Retry, follow-up chips) now shows a per-theme
+    ring (`--wa-focus`, ≥3:1 in light and dark), proven by a shadow-root
+    focus probe in the e2e suite.
+  - **Streaming state is no longer color-only (#14, P2)** — a backgrounded
+    chat that is still generating now says "— generating…" in the tab's
+    accessible name; the pulsing dot and 📌 pin are `aria-hidden`.
+  - History-card glyph buttons (✎ ⬇ ⧉ ↗ ✕) and the inline rename input got
+    explicit accessible names instead of title/placeholder fallbacks (#15/#16),
+    the per-turn context-tier chip announces its decision + reason (#17),
+    and `.btn-sm` is floored to the 24px hit-target in both stylesheets (#18).
+  - Checked-passing (documented, no action): diagnostics-share semantics,
+    error-card announcements, `<mark>` highlight contrast (13.96:1 / 7.74:1),
+    forced-colors degradation.
 
 ## [0.3.6.0] — 2026-09-25
 

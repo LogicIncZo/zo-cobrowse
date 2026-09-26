@@ -31,6 +31,14 @@ This page mirrors everything **unreleased** on `dev`.
   on, the diagnostics ring records every NAVIGATE outcome, each Jev hook
   invocation (`pick` / `resolve-pick` / `done-gate` — served or refused,
   confidence, latency), and diagnostics shares.
+- **Accessibility round 2 (bash).** Ledger round 2 in
+  `docs/qa/accessibility-review.md` (#13–#18, all fixed in-round): the
+  write-assist widget's shadow-DOM controls now show a per-theme focus ring
+  (the page ring can't cross the shadow boundary); a backgrounded chat that
+  is still generating states "— generating…" in the tab's accessible name
+  instead of a color-only pulse; history-card glyph buttons and the rename
+  input carry explicit accessible names; the per-turn context-tier chip
+  announces its decision + reason; `.btn-sm` floored to the 24px hit-target.
 
 ## [0.3.4.3] — 2026-09-22
 
