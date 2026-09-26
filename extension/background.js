@@ -13,6 +13,7 @@ import { shouldDowngradeToJsonDisabled } from './lib/intent.js';
 import { BUNDLED_SKILL_PATH, PROTOCOL_SKILL_PATH, SKILL_STATE_KEY, injectVersion, parseInstalledVersion } from './lib/protocol-skill.js';
 import { parseZoOutput, stripCodeFence } from './lib/parse-output.js';
 import { buildDecideRequest, parseDecideResponse, shouldAct, doneGateQuestion, matchChoiceQuestion, pickChoiceQuestion, redactStateForJev, jevDecideImpl, DEFAULT_JEV_API_URL, DEFAULT_JEV_MODEL } from './lib/jev.js';
+import { buildDiagnosticsBundle, uploadDiagnostics, SETTINGS_SNAPSHOT_KEYS } from './lib/debug-share.js';
 // safeText stays the local one (line ~156) — do NOT import it here.
 import {
   STRIP_MAX_TABS,
@@ -345,6 +346,52 @@ try {
   });
 } catch { /* storage unavailable */ }
 
+/**
+ * User-triggered diagnostics share (Settings → Share diagnostics): compose
+ * the anonymous metadata-only bundle (lib/debug-share.js — allowlisted
+ * settings + scrubbed ring entries, never page text/tokens/config secrets)
+ * and upload it to an anonymous paste host with a 24-hour expiry. Runs only
+ * when the user clicks; default state sends nothing anywhere.
+ */
+async function shareDiagnostics() {
+  if (!debugLog.isEnabled()) {
+    return { ok: false, error: 'Debug diagnostics are off — enable Debug mode first (Settings → Features).' };
+  }
+  const state = debugLog.entries();
+  let sessionId = null;
+  try {
+    const stored = await chrome.storage.local.get({ cobrowse_diag_session: null });
+    sessionId = stored.cobrowse_diag_session;
+    if (!sessionId) {
+      sessionId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : 'diag-' + Date.now().toString(36) + '-' + Math.floor(Math.random() * 1e6).toString(36);
+      await chrome.storage.local.set({ cobrowse_diag_session: sessionId });
+    }
+  } catch { /* storage unavailable — share without a session id */ }
+  let settings = {};
+  try {
+    settings = await chrome.storage.sync.get(SETTINGS_SNAPSHOT_KEYS);
+  } catch { /* render with none */ }
+  const text = buildDiagnosticsBundle({
+    version: (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getManifest)
+      ? chrome.runtime.getManifest().version : '',
+    userAgent: (typeof navigator !== 'undefined' && navigator.userAgent) || '',
+    sessionId: sessionId || '',
+    now: Date.now(),
+    entries: state.entries,
+    dropped: state.dropped,
+    enabled: state.enabled,
+    settings,
+  });
+  const r = await uploadDiagnostics(text, { fetchImpl: (typeof fetch !== 'undefined' ? fetch : null) });
+  // Record the share's SHAPE, never the returned URL — a URL inside the ring
+  // would link the next exported bundle back to this one.
+  debugLog.push('share', r.ok ? `paste:${r.host}` : 'paste-failed', undefined,
+    r.ok ? { bytes: text.length } : { reason: String(r.error || '').slice(0, 120) });
+  return r;
+}
+
 
 // ---- Init ----
 chrome.storage.sync.get(
@@ -421,6 +468,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'CLEAR_DEBUG_LOG': {
       debugLog.clear();
       sendResponse({ ok: true });
+      return true;
+    }
+    case 'SHARE_DIAGNOSTICS': {
+      shareDiagnostics().then(sendResponse);
       return true;
     }
     case 'GET_PAGE_CONTEXT': {
@@ -719,14 +770,38 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
     }
     case 'NAVIGATE': {
-      const navTabId = request.tabId || senderTabId(sender);
-      if (!navTabId || !request.url) {
-        sendResponse({ ok: false, error: 'NAVIGATE requires tabId and url' });
-        return false;
-      }
-      chrome.tabs.update(navTabId, { url: request.url }).then(() =>
-        sendResponse({ ok: true })
-      ).catch((err) => sendResponse({ ok: false, error: err.message }));
+      (async () => {
+        const __t0 = perfNow();
+        let navTabId = request.tabId ?? senderTabId(sender);
+        if (!navTabId) {
+          // Panel sends carry no sender.tab — resolve the active tab like
+          // getActiveTabContext does, but never drive an extension/chrome page.
+          try {
+            const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (t && t.id && !/^(chrome|chrome-extension|chrome-untrusted|about|edge|devtools):/i.test(t.url || '')) {
+              navTabId = t.id;
+            }
+          } catch { /* tabs unavailable */ }
+        }
+        if (!request.url) {
+          debugLog.push('navigate', 'rejected', perfNow() - __t0, { ok: false });
+          sendResponse({ ok: false, error: 'NAVIGATE requires tabId and url' });
+          return;
+        }
+        if (!navTabId) {
+          debugLog.push('navigate', 'no-target', perfNow() - __t0, { ok: false });
+          sendResponse({ ok: false, error: 'NAVIGATE: no browsable tab to navigate' });
+          return;
+        }
+        try {
+          await chrome.tabs.update(navTabId, { url: request.url });
+          debugLog.push('navigate', 'tabs.update', perfNow() - __t0, { ok: true, tabId: navTabId });
+          sendResponse({ ok: true, tabId: navTabId });
+        } catch (err) {
+          debugLog.push('navigate', 'tabs.update', perfNow() - __t0, { ok: false, tabId: navTabId });
+          sendResponse({ ok: false, error: err.message });
+        }
+      })();
       return true;
     }
     case 'GENERATE_MODE': {
@@ -2600,7 +2675,20 @@ async function fetchClickableCandidates(tabId) {
  *  near-miss candidate matches the planner's description. High confidence →
  *  the winner's selector; anything else → the existing failure (and its
  *  healer/handoff path) stands untouched. */
+/** Jev hook outcomes ride the debug ring — which hook ran, whether it
+ * served, confidence, latency. Reasons/labels only; never page data. */
+function jevLogHook(hook, r, extra) {
+  const ok = !!(r && r.ok);
+  debugLog.push('jev', `${hook}:${ok ? 'resolved' : 'refused'}`, r && r.latencyMs, ok ? extra : undefined);
+}
+
 async function jevPickClickTarget(action, candidates) {
+  const r = await _jevPickClickTarget(action, candidates);
+  jevLogHook('pick', r, { conf: r.confidence });
+  return r;
+}
+
+async function _jevPickClickTarget(action, candidates) {
   const description = safeText(action.text || action.cue || '').slice(0, 120);
   if (!description) return { ok: false, reason: 'no description to match' };
   const labeled = candidates.map((c, i) => ({ id: `c${i}`, label: safeText(c.text || c.question || '').slice(0, 60) }));
@@ -2625,6 +2713,12 @@ async function jevPickClickTarget(action, candidates) {
  *  the winner's selector. The caller re-enters the executor with the concrete
  *  click so every rail (sensitive/backstop/boundary) runs on it. */
 async function jevResolvePick(action, tabId) {
+  const r = await _jevResolvePick(action, tabId);
+  jevLogHook('resolve-pick', r, { conf: r.confidence });
+  return r;
+}
+
+async function _jevResolvePick(action, tabId) {
   const question = safeText(action.pick && action.pick.question || '').slice(0, 200);
   if (!question) return { ok: false, reason: 'empty pick question' };
   const candidates = await fetchClickableCandidates(tabId);
@@ -2650,6 +2744,12 @@ async function jevResolvePick(action, tabId) {
  *  completes the run without the continuation's Zo round-trip; low confidence
  *  or any failure returns false and the chain proceeds exactly as before. */
 async function jevDoneGate(run, pageContext) {
+  const gate = await _jevDoneGate(run, pageContext);
+  jevLogHook('done-gate', gate ? { ok: true, latencyMs: gate.latencyMs } : { ok: false }, { conf: gate ? gate.noul : undefined });
+  return gate;
+}
+
+async function _jevDoneGate(run, pageContext) {
   const goal = safeText(run && run.goal || '').slice(0, 300);
   if (!goal || !pageContext) return null;
   const gate = await jevDecide(

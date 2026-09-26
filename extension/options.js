@@ -80,14 +80,19 @@ function populateTtsVoices(selected) {
 
 // ---- Debug diagnostics (#67) ----
 // The background records metadata-only timings while debugMode is on; this
-// exports them via clipboard (nothing leaves the browser otherwise).
+// exports them via clipboard (nothing leaves the browser otherwise) or, only
+// on an explicit click, as an anonymous 24h-expiry paste (lib/debug-share.js).
 async function refreshDebugControls(on) {
   const btn = document.getElementById('copy-diagnostics');
+  const shareBtn = document.getElementById('share-diagnostics');
   const status = document.getElementById('debug-status');
   if (!btn) return;
   btn.disabled = !on;
+  if (shareBtn) shareBtn.disabled = !on;
   if (!on) {
     if (status) status.textContent = '';
+    const shareStatus = document.getElementById('share-status');
+    if (shareStatus) shareStatus.textContent = '';
     return;
   }
   try {
@@ -98,6 +103,27 @@ async function refreshDebugControls(on) {
         : '';
     }
   } catch { /* background unavailable */ }
+}
+
+async function shareDiagnostics() {
+  const status = document.getElementById('share-status');
+  const btn = document.getElementById('share-diagnostics');
+  if (!btn) return;
+  btn.disabled = true;
+  if (status) status.textContent = 'Uploading…';
+  try {
+    const resp = await chrome.runtime.sendMessage({ type: 'SHARE_DIAGNOSTICS' });
+    if (resp && resp.ok && resp.url) {
+      await navigator.clipboard.writeText(resp.url).catch(() => {});
+      if (status) status.textContent = `Uploaded to ${resp.host} — auto-expires in 24h. Link copied: ${resp.url}`;
+    } else {
+      if (status) status.textContent = `Share failed: ${(resp && resp.error) || 'no response from background'}`;
+    }
+  } catch (err) {
+    if (status) status.textContent = `Share failed: ${err?.message || err}`;
+  } finally {
+    btn.disabled = !document.getElementById('debug-mode')?.checked;
+  }
 }
 
 async function copyDiagnostics() {
@@ -439,6 +465,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     refreshDebugControls(on);
   });
   document.getElementById('copy-diagnostics')?.addEventListener('click', copyDiagnostics);
+  document.getElementById('share-diagnostics')?.addEventListener('click', shareDiagnostics);
 
   // Quick Actions live editing
   document.getElementById('quick-actions-list')?.addEventListener('input', (e) => {

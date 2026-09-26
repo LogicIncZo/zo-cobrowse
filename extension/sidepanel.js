@@ -5287,13 +5287,24 @@ function handleStreamActions(actions, reasoning) {
 
   if (navigateActions.length) {
     addMessage('assistant', `📍 Navigating to: ${navigateActions[0].url}`);
+    // The panel is an extension page — the background can't infer the tab
+    // from the sender, so the capture's source tabId rides along explicitly.
+    let navOk = false;
     chrome.runtime.sendMessage({
       type: 'NAVIGATE',
       url: navigateActions[0].url,
-    }).catch(() => {});
+      tabId: currentContext?.tabId,
+    }).then((resp) => {
+      navOk = !!(resp && resp.ok);
+      if (!navOk) addMessage('error', `Navigation failed: ${safeText((resp && resp.error) || 'background unavailable')}`);
+    }).catch(() => {
+      addMessage('error', 'Navigation failed: background unavailable');
+    });
     setTimeout(async () => {
       await refreshPageContext();
-      if (doneResponse) {
+      // The done() response only renders when the navigation actually
+      // succeeded — a rejected NAVIGATE must never produce a "Navigated" lie.
+      if (navOk && doneResponse) {
         const el = addMessage('assistant', doneResponse);
         addReasoningBubble(el, reasoning);
       }
