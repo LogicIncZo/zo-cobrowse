@@ -32,6 +32,16 @@ open the side panel on a normal website.
 - [ ] **`@` autocomplete** — rows show page title + dimmed host; two same-host tabs are
       distinguishable, and same-TITLE tabs get a path suffix in the strip + @ rows (#305).
       distinguishable; chips match.
+- [ ] **Navigate action moves the tab** — ask Zo to navigate (e.g. "go to
+      example.com") in Co-browse Mode: the tab really changes URL, the panel
+      shows "📍 Navigating to …" followed by the done text, and a failed
+      navigation shows a persisted error line instead of a "Navigated" lie
+      (the panel's NAVIGATE path is invisible to e2e when the shell differs).
+- [ ] **Diagnostics share (24h paste)** — with Debug mode on, Settings →
+      Features → 🔗 Share diagnostics uploads the metadata-only bundle and
+      copies an expiry link; opening it shows timings only — no page text,
+      tokens, browsed URLs, or identifying config. With Debug mode off the
+      button is disabled.
 - [ ] **TTS** — if voices are installed: Settings → Speech shows the voice dropdown filtered by
       language; picking one + Read aloud uses it (ear check); zero-voice systems show the disabled
       hint.

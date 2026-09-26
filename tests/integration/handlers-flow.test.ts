@@ -23,6 +23,7 @@ import {
   textResponse,
 } from "../helpers/zo-fetch-mock.ts";
 import { GenerateModeResultSchema } from "../schemas/zo-prompts.ts";
+import { NavigateRequestSchema, ShareDiagnosticsResponseSchema } from "../schemas/debug-share.ts";
 
 const bus = createFakeChrome();
 const fm = new ZoFetchMock();
@@ -338,10 +339,72 @@ describe("tab handlers", () => {
   it("NAVIGATE updates the tab URL; missing url is rejected", async () => {
     const t = bus.tabs.registerTab({ title: "Nav", url: "https://from.dev/", active: false });
     const ok = await bus.runtime.sendMessage({ type: "NAVIGATE", tabId: t.id, url: "https://to.dev/" });
-    expect(ok).toEqual({ ok: true });
+    expect(ok).toEqual({ ok: true, tabId: t.id });
     expect((await bus.tabs.get(t.id)).url).toBe("https://to.dev/");
 
     const bad = await bus.runtime.sendMessage({ type: "NAVIGATE", tabId: t.id });
     expect(bad).toEqual({ ok: false, error: "NAVIGATE requires tabId and url" });
+  });
+
+  it("NAVIGATE payload matches the schema contract (explicit tabId rides the send)", async () => {
+    const r = NavigateRequestSchema.safeParse({ type: "NAVIGATE", url: "https://to.dev/", tabId: 7 });
+    expect(r.success).toBe(true);
+  });
+
+  it("NAVIGATE without tabId falls back to the active non-extension tab (panel sends carry no sender.tab)", async () => {
+    // Real Chrome keeps ONE active tab per window; earlier tests in this file
+    // registered actives, so reset the field before this scenario.
+    for (const t of bus.tabs._tabs) t.active = false;
+    const active = bus.tabs.registerTab({ title: "Active", url: "https://active.dev/", active: true });
+    const resp = await bus.runtime.sendMessage({ type: "NAVIGATE", url: "https://fallback.dev/" });
+    expect(resp).toEqual({ ok: true, tabId: active.id });
+    expect((await bus.tabs.get(active.id)).url).toBe("https://fallback.dev/");
+  });
+
+  it("NAVIGATE fallback refuses to drive an extension page", async () => {
+    for (const t of bus.tabs._tabs) t.active = false;
+    bus.tabs.registerTab({ title: "Ext", url: "chrome-extension://test-extension-id/options.html", active: true });
+    const resp = await bus.runtime.sendMessage({ type: "NAVIGATE", url: "https://nope.dev/" });
+    expect(resp).toEqual({ ok: false, error: "NAVIGATE: no browsable tab to navigate" });
+  });
+});
+
+describe("SHARE_DIAGNOSTICS — anonymous 24h paste (user-triggered only)", () => {
+  it("refuses honestly while debug diagnostics are off", async () => {
+    const resp = await bus.runtime.sendMessage({ type: "SHARE_DIAGNOSTICS" });
+    expect(resp.ok).toBe(false);
+    expect(resp.error).toContain("Debug diagnostics are off");
+    const parsed = ShareDiagnosticsResponseSchema.safeParse(resp);
+    expect(parsed.success).toBe(true);
+  });
+
+  it("with debugMode on, builds the bundle and attempts the paste hosts through fetch", async () => {
+    bus.storage.sync.set({ debugMode: true });
+    await flush();
+    // The recording fetch mock answers every host with JSON (not a URL) —
+    // both attempts must happen, and the failure must name them both.
+    const resp = await bus.runtime.sendMessage({ type: "SHARE_DIAGNOSTICS" });
+    expect(resp.ok).toBe(false);
+    expect(resp.error).toContain("dpaste.com");
+    expect(resp.error).toContain("0x0.st");
+    expect(fm.to("dpaste.com/api/v2").length).toBeGreaterThanOrEqual(1);
+    expect(fm.to("0x0.st").length).toBeGreaterThanOrEqual(1);
+    bus.storage.sync.set({ debugMode: false });
+    await flush();
+  });
+
+  it("the ring records the share attempt without persisting the paste URL", async () => {
+    bus.storage.sync.set({ debugMode: true });
+    await flush();
+    await bus.runtime.sendMessage({ type: "SHARE_DIAGNOSTICS" });
+    await bus.runtime.sendMessage({ type: "SHARE_DIAGNOSTICS" });
+    const log = await bus.runtime.sendMessage({ type: "GET_DEBUG_LOG" });
+    const shareEntries = log.entries.filter((e: any) => e.kind === "share");
+    expect(shareEntries.length).toBeGreaterThanOrEqual(2);
+    expect(shareEntries[0].label).toContain("paste-failed");
+    const blob = JSON.stringify(log.entries);
+    expect(blob).not.toContain("dpaste.com/"); // no paste URL rides the ring
+    bus.storage.sync.set({ debugMode: false });
+    await flush();
   });
 });

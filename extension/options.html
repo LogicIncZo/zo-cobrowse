@@ -533,6 +533,17 @@
         <button type="button" id="copy-diagnostics" class="btn btn-sm" disabled>📋 Copy diagnostics</button>
         <span id="debug-status" class="form-hint" role="status"></span>
       </div>
+      <div class="field-group">
+        <button type="button" id="share-diagnostics" class="btn btn-sm" disabled>🔗 Share diagnostics (24h link)</button>
+        <span id="share-status" class="form-hint" role="status"></span>
+        <p class="desc" style="margin-top:4px;">
+          Uploads the same anonymous, metadata-only bundle to a public paste host (dpaste.com,
+          fallback 0x0.st) with a 24-hour auto-expiry, and copies the link — only when you click.
+          No account, no auth, nothing identifying: page text, prompts, tokens, browsed URLs,
+          conversation ids, and your model/workspace settings are never included. Anyone with the
+          link can read it until it expires.
+        </p>
+      </div>
     </div>
 
     <!-- ── Speech ── -->
