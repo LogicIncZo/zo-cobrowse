@@ -10,7 +10,7 @@
 |---|---|---|
 | Security | **round 2 DONE 2026-09-25** (v0.3.5.0: #383 audit, #385–#387 fixes, #388 docs; `security-review.md` § Round 2) | next: every-few-releases cadence |
 | UX / usability | **#244 walkthrough RUN 2026-09-25** (`usability-walkthrough-0.3.6.md`; waiver discharged) | next: every-few-releases cadence |
-| Accessibility | **round 1 DONE 2026-09-25** (v0.3.6.0: #392 audit, #394–#397 fixes, #399 docs; `accessibility-review.md` ledger #1–#12) | next: every-few-releases cadence |
+| Accessibility | **round 2 DONE 2026-09-26** (v0.3.6.1: bash over the new surfaces + uncovered lanes, ledger #13–#18; round 1 was v0.3.6.0: #392, ledger #1–#12) | next: every-few-releases cadence |
 
 After 0.3.5: charter **accessibility round 1 + UX round closure** as the following review slate, before 0.9.0 feature work (reviews audit finished surfaces — the 0.3.0 precedent).
 
