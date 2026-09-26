@@ -6,6 +6,10 @@ This page mirrors everything **unreleased** on `dev`.
 
 ## Unreleased
 
+_Nothing unreleased — the latest is [0.3.6.1](#changelog-v0361)._
+
+## [0.3.6.1] — 2026-09-26 {#changelog-v0361}
+
 ### Fixed
 
 - **Navigate actions now actually navigate.** The sidepanel's direct NAVIGATE
