@@ -3,6 +3,34 @@
 New features in Zo Co-browse, newest first. Each entry explains what shipped;
 open **How to use it** for the hands-on steps.
 
+## Navigation that really navigates — plus a shareable debug link <span class="badge-new">NEW</span> {#navigate-debug-share}
+
+_2026-09-26 · [PR #403](https://github.com/LogicIncZo/zo-cobrowse/pull/403) + [PR #404](https://github.com/LogicIncZo/zo-cobrowse/pull/404) · v0.3.6.1_
+
+A stabilization release around one honest-to-goodness bug and one new way to
+help us debug the rest:
+
+- **"Navigate to …" actually navigates.** Navigate actions had been silently
+  failing in the side panel since the first release — the tab stayed put while
+  the chat still said "Navigated." The panel now tells the background exactly
+  which tab to drive, a failed navigation shows a persisted error line instead
+  of a false success, and an end-to-end test guards the whole path.
+- **Share a 24-hour debug link.** With Debug mode on, Settings → Features has
+  a new 🔗 **Share diagnostics (24h link)** button: one click uploads an
+  anonymous, metadata-only timing bundle to a public paste host that
+  auto-expires in 24 hours and copies the link to your clipboard. Nothing is
+  ever sent unless you click; page text, tokens, browsed URLs and
+  identifying settings are never included.
+- **Jev leaves evidence.** With Debug mode on, the exported diagnostics now
+  show every Jev fast-path decision (click rescues, handoff done-gates) with
+  confidence and latency — next to the ⚡ marker you already see on action
+  cards.
+- **Accessibility round 2.** The write-assist popover shows keyboard focus
+  rings on all its buttons; a background chat that is still generating
+  announces "generating" to screen readers instead of a color-only pulse;
+  history controls and the per-turn context chip carry real accessible names;
+  small buttons meet the 24px touch target.
+
 ## Everyone can drive it — accessibility round 1 <span class="badge-new">NEW</span> {#a11y-round-1}
 
 _2026-09-25 · [#392](https://github.com/LogicIncZo/zo-cobrowse/issues/392)–[#393](https://github.com/LogicIncZo/zo-cobrowse/issues/393) · v0.3.6.0_

@@ -57,4 +57,21 @@ test.describe("action turns", () => {
       await h.context.close();
     }
   });
+
+  test("navigate envelope really moves the tab (panel NAVIGATE path)", async () => {
+    // Regression: the panel used to send NAVIGATE without a tabId — the
+    // background (panel = extension page, no sender.tab) rejected it and the
+    // tab never moved while the panel still rendered "Navigated."
+    const h = await openHarness({ freshProfile: true });
+    try {
+      await sendQuery(h.panel, "navigate to the form page please");
+      await expect(h.site).toHaveURL(/form\.html/, { timeout: 20_000 });
+      // The honest sequence: announcing line, then the done() response —
+      // which only renders once the navigation actually succeeded.
+      await expect(h.panel.getByText("Navigated.", { exact: false })).toBeVisible({ timeout: 10_000 });
+      await expect(h.panel.locator(".msg-error")).toHaveCount(0);
+    } finally {
+      await h.context.close();
+    }
+  });
 });

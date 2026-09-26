@@ -1,5 +1,7 @@
 # Zo Co-browse — QA Report
 
+> **2026-09-26 — stabilization v0.3.6.1** (PRs #403/#404): panel NAVIGATE false-success root-caused (profile-leveldb forensics) and fixed with an e2e regression test; diagnostics-share shipped behind the #67 ring with an allowlist privacy posture (unit-asserted: no secrets/model-ids/origins); a11y review round 2 ledger #13–#18 all fixed in-round (`docs/qa/accessibility-review.md` § round 2).
+
 > **2026-09-25 — accessibility round 1 + #244 walkthrough shipped** (v0.3.6.0): `docs/qa/accessibility-review.md` (ledger #1–#12) + `docs/qa/usability-walkthrough-0.3.6.md` (#392/#393).
 
 > **2026-09-25 — security review round 2 shipped** (v0.3.5.0): verdicts + findings ledger #6–#15 in `docs/qa/security-review.md` § Round 2; living threat model at `docs/qa/threat-model.md` (#383/#384).

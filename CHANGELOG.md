@@ -6,6 +6,63 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.3.6.1] — 2026-09-26
+
+### Fixed
+
+- **Navigate actions now actually navigate.** The sidepanel's direct NAVIGATE
+  path (a `navigate` action outside handoff/recipe flows) has been dead since
+  the first commit: the panel sent no `tabId`, the background could not infer
+  one (the panel is an extension page — no `sender.tab`), and the rejection
+  was swallowed while the panel still rendered Zo's "Navigated…" done text.
+  Now the panel sends the capture's source `tabId`, the background falls back
+  to the active non-extension tab when it is absent (mirroring
+  `getActiveTabContext`), and a failed navigation renders a persisted error
+  line instead of the done-response lie. Regression-tested end-to-end
+  (`e2e/03-actions.spec.ts`).
+
+### Added
+
+- **User-triggered diagnostics sharing (Settings → Features → Debug).** Next
+  to 📋 Copy diagnostics there is now 🔗 Share diagnostics (24h link): one
+  click composes the anonymous, metadata-only bundle and uploads it to
+  dpaste.com (fallback 0x0.st) with a 24-hour auto-expiry and copies the
+  link. Nothing is sent unless you click; hosts need no account/auth. The
+  bundle (`lib/debug-share.js`) is built only from the #67 debug ring plus an
+  explicit settings allowlist — page text, prompts, tokens, browsed URLs
+  (reduced to origin+path wherever they can appear), conversation ids, and
+  identifying config (model ids, workspace origins, secrets) are never
+  included, with a second scrub pass over free-form strings as defense in
+  depth. The share attempt itself is recorded in the ring by shape only
+  (host + byte size), never the returned URL, so one share can't de-anonymize
+  the next.
+- **Observability: navigation and Jev now leave evidence.** The debug ring
+  (Settings → Features → Debug mode) records every NAVIGATE outcome (target
+  tab, ok/error, duration), each Jev hook invocation (`pick` / `resolve-pick`
+  / `done-gate` — served or refused, confidence, latency), and diagnostics
+  shares. When Jev rescues a click you still see the ⚡ provenance on the
+  action card; with debug mode on you can now also see it in the exported
+  timeline.
+- **Accessibility round 2 (bash).** Audit + fixes over the lanes round 1
+  didn't cover and the new surfaces — ledger round 2 in
+  `docs/qa/accessibility-review.md` (#13–#18, all fixed in-round):
+  - **Write-assist shadow-DOM focus rings (#13, P2)** — the page's amber
+    `:focus-visible` ring can't cross the shadow boundary, and only the
+    instruction field carried its own; every widget control (Close ✕,
+    Enhance/Accept/Cancel/Retry, follow-up chips) now shows a per-theme
+    ring (`--wa-focus`, ≥3:1 in light and dark), proven by a shadow-root
+    focus probe in the e2e suite.
+  - **Streaming state is no longer color-only (#14, P2)** — a backgrounded
+    chat that is still generating now says "— generating…" in the tab's
+    accessible name; the pulsing dot and 📌 pin are `aria-hidden`.
+  - History-card glyph buttons (✎ ⬇ ⧉ ↗ ✕) and the inline rename input got
+    explicit accessible names instead of title/placeholder fallbacks (#15/#16),
+    the per-turn context-tier chip announces its decision + reason (#17),
+    and `.btn-sm` is floored to the 24px hit-target in both stylesheets (#18).
+  - Checked-passing (documented, no action): diagnostics-share semantics,
+    error-card announcements, `<mark>` highlight contrast (13.96:1 / 7.74:1),
+    forced-colors degradation.
+
 ## [0.3.6.0] — 2026-09-25
 
 ### Accessibility — review round 1 + the #244 usability walkthrough (#392/#393, PRs #394–#400; spec PR #391)

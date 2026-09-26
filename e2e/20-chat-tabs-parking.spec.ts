@@ -50,6 +50,11 @@ test.describe("chat tabs mid-stream", () => {
     await h.panel.waitForTimeout(400);
     // Pulsing dot marks the streaming BACKGROUND tab.
     await expect(h.panel.locator("#chat-tabs .chat-tab-stream-dot").first()).toBeVisible({ timeout: 5_000 });
+    // #392 r2: the streaming state is in the tab's accessible name too —
+    // not color-only — and the decorative dot is hidden from the a11y tree.
+    const bgTab = h.panel.locator("#chat-tabs .chat-tab:has(.chat-tab-stream-dot)");
+    await expect(bgTab).toHaveAttribute("aria-label", /— generating…/);
+    await expect(h.panel.locator("#chat-tabs .chat-tab-stream-dot").first()).toHaveAttribute("aria-hidden", "true");
     // Wait out the stream, switch back to chat 1.
     await h.panel.waitForTimeout(6000);
     await clickTab(0);
@@ -68,6 +73,10 @@ test.describe("chat tabs mid-stream", () => {
     // with the pulsing dot — the stream was NOT cancelled.
     await expect(h.panel.locator("#messages .msg-streaming-text")).toHaveCount(0);
     await expect(h.panel.locator("#chat-tabs .chat-tab-stream-dot").first()).toBeVisible({ timeout: 5_000 });
+    // #392 r2: same non-color cue on this path (accessible name + hidden dot).
+    const bgTab2 = h.panel.locator("#chat-tabs .chat-tab:has(.chat-tab-stream-dot)");
+    await expect(bgTab2).toHaveAttribute("aria-label", /— generating…/);
+    await expect(h.panel.locator("#chat-tabs .chat-tab-stream-dot").first()).toHaveAttribute("aria-hidden", "true");
     // Wait out the stream, switch back to the old chat: answer intact.
     await h.panel.waitForTimeout(6000);
     await clickTab(0);

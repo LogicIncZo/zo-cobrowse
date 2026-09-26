@@ -170,4 +170,50 @@ test.describe("write-assist round 3 (#53)", () => {
       await h.context.close();
     }
   });
+
+  test("widget controls show a focus ring inside the shadow root (#392 r2)", async () => {
+    // The page's global amber :focus-visible ring cannot cross the shadow
+    // boundary — the widget carries its own per-theme ring, proven here on a
+    // keyboard-focused control.
+    const h = await openHarness({ freshProfile: true, sitePath: "/writing.html" });
+    try {
+      const ta = h.site.locator("#proj");
+      await ta.focus();
+      const icon = h.site.locator(".zo-wa-icon");
+      await expect(icon).toBeVisible({ timeout: 10_000 });
+      await icon.click();
+      const pop = h.site.locator(".zo-wa-pop");
+      await expect(pop).toBeVisible({ timeout: 10_000 });
+      await expect(pop.locator(".zo-wa-instr")).toBeVisible();
+
+      // Keyboard into the popover (open-focus is programmatic/mouse-modality;
+      // a real Tab grants :focus-visible) and probe the computed outline.
+      const probe = () =>
+        h.site.evaluate(() => {
+          const host = document.getElementById("zo-write-assist-host");
+          const el = (host?.shadowRoot?.activeElement ?? null) as HTMLElement | null;
+          if (!el) return { found: false as const };
+          const st = getComputedStyle(el);
+          return {
+            found: true as const,
+            cls: String(el.className || ""),
+            fv: el.matches(":focus-visible"),
+            style: st.outlineStyle,
+            width: st.outlineWidth,
+          };
+        });
+      await h.site.keyboard.press("Tab");
+      let p = await probe();
+      if (!p.found) {
+        // Focus escaped the popover (open-focus sat on the last control) —
+        // step back in and probe again.
+        await h.site.keyboard.press("Shift+Tab");
+        p = await probe();
+      }
+      expect(p.found, "focus left the widget popover after Tab").toBe(true);
+      expect(p).toMatchObject({ fv: true, style: "solid", width: "2px" });
+    } finally {
+      await h.context.close();
+    }
+  });
 });

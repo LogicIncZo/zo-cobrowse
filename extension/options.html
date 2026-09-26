@@ -149,7 +149,7 @@
     .btn-primary:hover { opacity: 0.9; box-shadow: 0 0 16px var(--amber-glow); }
     .btn-ghost { background: transparent; border: none; color: var(--text-muted); padding: 4px 8px; }
     .btn-ghost:hover { background: var(--bg-hover); color: var(--text); }
-    .btn-sm { padding: 4px 10px; font-size: 11px; }
+    .btn-sm { padding: 4px 10px; font-size: 11px; min-height: 24px; }
     .btn-danger {
       background: transparent;
       border-color: color-mix(in srgb, var(--red) 30%, transparent);
@@ -532,6 +532,17 @@
       <div class="field-group">
         <button type="button" id="copy-diagnostics" class="btn btn-sm" disabled>📋 Copy diagnostics</button>
         <span id="debug-status" class="form-hint" role="status"></span>
+      </div>
+      <div class="field-group">
+        <button type="button" id="share-diagnostics" class="btn btn-sm" disabled>🔗 Share diagnostics (24h link)</button>
+        <span id="share-status" class="form-hint" role="status"></span>
+        <p class="desc" style="margin-top:4px;">
+          Uploads the same anonymous, metadata-only bundle to a public paste host (dpaste.com,
+          fallback 0x0.st) with a 24-hour auto-expiry, and copies the link — only when you click.
+          No account, no auth, nothing identifying: page text, prompts, tokens, browsed URLs,
+          conversation ids, and your model/workspace settings are never included. Anyone with the
+          link can read it until it expires.
+        </p>
       </div>
     </div>
 

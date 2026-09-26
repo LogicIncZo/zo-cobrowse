@@ -4,6 +4,46 @@ The full, versioned history lives in the repo's
 [CHANGELOG.md](https://github.com/LogicIncZo/zo-cobrowse/blob/dev/CHANGELOG.md).
 This page mirrors everything **unreleased** on `dev`.
 
+## Unreleased
+
+_Nothing unreleased — the latest is [0.3.6.1](#changelog-v0361)._
+
+## [0.3.6.1] — 2026-09-26 {#changelog-v0361}
+
+### Fixed
+
+- **Navigate actions now actually navigate.** The sidepanel's direct NAVIGATE
+  path (a `navigate` action outside handoff/recipe flows) has been dead since
+  the first commit: the panel sent no `tabId`, the background could not infer
+  one (the panel is an extension page — no `sender.tab`), and the rejection
+  was swallowed while the panel still rendered Zo's "Navigated…" done text.
+  Now the panel sends the capture's source `tabId`, the background falls back
+  to the active non-extension tab when it is absent, and a failed navigation
+  renders a persisted error line instead of the done-response lie.
+  Regression-tested end-to-end (`e2e/03-actions.spec.ts`).
+
+### Added
+
+- **User-triggered diagnostics sharing (Settings → Features → Debug).** Next
+  to 📋 Copy diagnostics there is now 🔗 Share diagnostics (24h link): one
+  click composes the anonymous, metadata-only bundle (`lib/debug-share.js` —
+  debug ring + settings allowlist only; page text, prompts, tokens, browsed
+  URLs, conversation ids, and identifying config never included) and uploads
+  it to dpaste.com (fallback 0x0.st) with a 24-hour auto-expiry and copies
+  the link. Nothing is sent unless you click; hosts need no account/auth.
+- **Observability: navigation and Jev now leave evidence.** With Debug mode
+  on, the diagnostics ring records every NAVIGATE outcome, each Jev hook
+  invocation (`pick` / `resolve-pick` / `done-gate` — served or refused,
+  confidence, latency), and diagnostics shares.
+- **Accessibility round 2 (bash).** Ledger round 2 in
+  `docs/qa/accessibility-review.md` (#13–#18, all fixed in-round): the
+  write-assist widget's shadow-DOM controls now show a per-theme focus ring
+  (the page ring can't cross the shadow boundary); a backgrounded chat that
+  is still generating states "— generating…" in the tab's accessible name
+  instead of a color-only pulse; history-card glyph buttons and the rename
+  input carry explicit accessible names; the per-turn context-tier chip
+  announces its decision + reason; `.btn-sm` floored to the 24px hit-target.
+
 ## [0.3.4.3] — 2026-09-22
 
 ### Fixed — !handoff bug bash (#368–#372, PRs #373–#377)
