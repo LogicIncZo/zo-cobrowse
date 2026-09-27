@@ -15,7 +15,7 @@
 // hand-mirrored copy).
 
 import { ACTION_SCHEMA_COMPACT, BUILTIN_MODES, NOT_ATTACHED_CONTRACT, PLAIN_RESPONSE_HINT } from './modes.js';
-import { SKILL_POINTER, ACTION_ENVELOPE_DEMAND } from './protocol-skill.js';
+import { SKILL_POINTER, ACTION_ENVELOPE_DEMAND, READ_SKILL_POINTER } from './protocol-skill.js';
 import { shouldDowngradeToJsonDisabled, detectIntent } from './intent.js';
 import { buildTabManifest, isBlankPage } from './tab-contexts.js';
 import { buildSkillLines, buildFileLines } from './pickers.js';
@@ -280,6 +280,13 @@ function _compose(mode, pageContext, userQuery, opts) {
     const tail = actionTail(opts, mode, wantJson);
     if (tail.instructions) push('tail', tail.instructions);
     push('tail', wantJson ? tail.protocol : PLAIN_RESPONSE_HINT);
+  }
+  // #414: feature awareness on READ turns — downgraded AND natively-plain —
+  // ONLY on a verified install. The live probe showed Zo never consults
+  // workspace skills unprompted; mentioning the skill is what makes it read
+  // the canon. Action turns carry their own pointer in the slim tail.
+  if (!wantJson && opts && opts.protocolSkill && opts.protocolSkill.installed) {
+    push('tail', READ_SKILL_POINTER);
   }
   // Tier-0 honesty: when no page content rides, say so — exactly ONCE (#70).
   // NOT_ATTACHED_CONTRACT is the one canonical sentence (#236): turns that
