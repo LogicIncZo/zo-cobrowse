@@ -5,13 +5,16 @@ import {
   PROTOCOL_SKILL_DIR,
   PROTOCOL_SKILL_PATH,
   BUNDLED_SKILL_PATH,
+  BUNDLED_REFERENCE_PATHS,
   SKILL_MARKER,
   SKILL_POINTER,
+  READ_SKILL_POINTER,
   ACTION_ENVELOPE_DEMAND,
   SKILL_STATE_KEY,
   injectVersion,
   parseInstalledVersion,
   needsInstall,
+  workspaceReferencePath,
 } from "../extension/lib/protocol-skill.js";
 import { BUILTIN_MODES, ACTION_SCHEMA_COMPACT, NOT_ATTACHED_CONTRACT, PLAIN_RESPONSE_HINT } from "./../extension/lib/modes.js";
 import { SHARED_SAFETY_RULES, buildPrompt, describePrompt } from "../extension/lib/prompt.js";
@@ -39,22 +42,90 @@ describe("protocol-skill paths + constants", () => {
     expect(SKILL_STATE_KEY).toBe("cobrowse_protocol_skill");
   });
 
-  it("the bundled artifact exists, has frontmatter, and carries the marker vocabulary", () => {
+  it("every bundled reference maps under the workspace skill's references/ (#412)", () => {
+    expect(BUNDLED_REFERENCE_PATHS.length).toBeGreaterThanOrEqual(2);
+    for (const ref of BUNDLED_REFERENCE_PATHS) {
+      expect(ref).toMatch(/^skills\/zo-cobrowse\/references\/[\w-]+\.md$/);
+      expect(workspaceReferencePath(ref)).toBe(`/home/workspace/Skills/zo-cobrowse/references/${ref.split("/").pop()}`);
+    }
+    expect(workspaceReferencePath("")).toBe(null);
+  });
+
+  it("the slim pointer names both references (#412)", () => {
+    expect(SKILL_POINTER).toContain(SKILL_MARKER);
+    expect(SKILL_POINTER).toContain("references/protocol.md");
+    expect(SKILL_POINTER).toContain("references/features.md");
+  });
+
+  it("the bundled overview exists, has frontmatter, and indexes the product", () => {
     const bundled = readFileSync(resolve(import.meta.dir, "../extension", BUNDLED_SKILL_PATH), "utf-8");
     expect(bundled.startsWith("---\n")).toBe(true);
     expect(bundled).toMatch(/^name: zo-cobrowse$/m);
-    expect(bundled).toMatch(/actions/);
-    // The protocol sections the slim tail moves server-side.
+    expect(bundled).toContain("## Feature catalog");
+    expect(bundled).toContain("references/features.md");
+    expect(bundled).toContain("references/protocol.md");
+    // #412: the protocol body itself MOVED to references/protocol.md — the
+    // overview stays lean (progressive disclosure).
+    expect(bundled).not.toContain("## Cue-resolution ladders");
+  });
+
+  it("references/protocol.md carries the protocol sections the slim tail moved server-side", () => {
+    const protocol = readFileSync(resolve(import.meta.dir, "../extension", "skills/zo-cobrowse/references/protocol.md"), "utf-8");
     for (const section of ["Response envelope", "Action grammar", "Pull actions", "Cue-resolution ladders", "Safety rules"]) {
-      expect(bundled).toContain(section);
+      expect(protocol).toContain(section);
     }
     // Every action the executor knows is documented.
     for (const action of ["click{selector}", "fill{selector,value}", "fill_form{values:[{target,value}]}", "extract{selector,attribute}", "navigate{url}", "scroll{direction,amount?}", "wait{ms}", "done{response}", "read_tab{ref}", "read_page", "get_dom", "get_form", "read_file{path}"]) {
-      expect(bundled).toContain(action);
+      expect(protocol).toContain(action);
     }
     // Safety rules ride BOTH inline (every turn) and in the skill.
-    expect(bundled).toMatch(/NEVER click ANY button/i);
-    expect(bundled).toMatch(/password \/ card \/ CVV/i);
+    expect(protocol).toMatch(/NEVER click ANY button/i);
+    expect(protocol).toMatch(/password \/ card \/ CVV/i);
+  });
+});
+
+describe("bundled skill inventory (#411)", () => {
+  const BUNDLED_FEATURES_PATH = "skills/zo-cobrowse/references/features.md";
+
+  it("the reference files ship next to SKILL.md and are non-empty", () => {
+    const features = readFileSync(resolve(import.meta.dir, "../extension", BUNDLED_FEATURES_PATH), "utf-8");
+    expect(features.trim().length).toBeGreaterThan(500);
+  });
+
+  it("SKILL.md is the product overview: catalog index + reference pointers", () => {
+    const bundled = readFileSync(resolve(import.meta.dir, "../extension", BUNDLED_SKILL_PATH), "utf-8");
+    expect(bundled).toContain("## Feature catalog");
+    expect(bundled).toContain("references/features.md");
+    expect(bundled).toContain("references/protocol.md");
+    // #412: the protocol body moved atomically to references/protocol.md.
+    expect(bundled).not.toContain("## Action grammar");
+  });
+
+  it("features.md covers the shipped product canon", () => {
+    const features = readFileSync(resolve(import.meta.dir, "../extension", BUNDLED_FEATURES_PATH), "utf-8");
+    for (const section of ["Modes", "Bang commands", "Recipes", "Handoff runs", "Tabs", "Pickers", "Diagnostics", "What you must NOT do"]) {
+      expect(features).toContain(section);
+    }
+    // The load-bearing behaviors are named.
+    for (const surface of ["!handoff", "!recipe", "!context", "read_tab", "write-assist", "no-auto-submit"]) {
+      expect(features).toContain(surface);
+    }
+  });
+
+  it("features.md mode icons match the shipped BUILTIN_MODES icons (canon drift net)", () => {
+    const features = readFileSync(resolve(import.meta.dir, "../extension", BUNDLED_FEATURES_PATH), "utf-8");
+    const modesSrc = readFileSync(resolve(import.meta.dir, "../extension/lib/modes.js"), "utf-8");
+    // Every builtin's icon+name pair appears in the canon exactly as shipped.
+    for (const m of modesSrc.matchAll(/id: '(\w+)',\s*\n\s*name: '([^']+)',\s*\n\s*icon: '([^']+)'/g)) {
+      const [, , name, icon] = m;
+      expect(features).toContain(`${icon} **${name}**`);
+    }
+  });
+
+  it("frontmatter keeps the zo-cobrowse identity + version placeholder", () => {
+    const bundled = readFileSync(resolve(import.meta.dir, "../extension", BUNDLED_SKILL_PATH), "utf-8");
+    expect(bundled).toMatch(/^name: zo-cobrowse$/m);
+    expect(parseInstalledVersion(bundled)).toBe("0");
   });
 });
 
@@ -65,7 +136,8 @@ describe("injectVersion / parseInstalledVersion", () => {
     expect(out).toMatch(/version: "1\.2\.3\.4"/);
     expect(out).not.toMatch(/version: "0"/);
     // Everything else rides unchanged.
-    expect(out).toContain("# Zo Co-browse — action protocol");
+    expect(out).toContain("# Zo Co-browse");
+    expect(out).toContain("## Feature catalog");
   });
 
   it("appends a metadata block when the frontmatter lacks one", () => {
@@ -134,10 +206,15 @@ describe("buildPrompt — slim protocol tail (#235)", () => {
     expect(p).not.toContain(ACTION_SCHEMA_COMPACT);
   });
 
-  it("downgraded turns on an installed skill skip the slim tail entirely", () => {
+  it("downgraded turns on an installed skill skip the ACTION tail — the read pointer rides instead (#414)", () => {
     const p = buildPrompt(BUILTIN_MODES.cobrowse, makeCtx(), "Summarize this page", { protocolSkill: { installed: true } });
-    expect(p).not.toContain(SKILL_MARKER);
+    // No action tail on a downgraded turn…
+    expect(p).not.toContain(SKILL_POINTER);
+    expect(p).not.toContain(ACTION_ENVELOPE_DEMAND);
     expect(p).not.toContain(ACTION_SCHEMA_COMPACT);
+    // …but the read-turn feature pointer DOES ride (probe: Zo never consults
+    // the skill unprompted — #414).
+    expect(p).toContain(READ_SKILL_POINTER);
   });
 
   it("installed:false (failed install) keeps the full inline tail", () => {
@@ -146,10 +223,12 @@ describe("buildPrompt — slim protocol tail (#235)", () => {
     expect(p).not.toContain(SKILL_MARKER);
   });
 
-  it("read/downgraded turns are unaffected by the install state", () => {
-    const p = buildPrompt(BUILTIN_MODES.cobrowse, makeCtx(), "Summarize this page", { protocolSkill: { installed: true } });
-    expect(p).not.toContain(SKILL_MARKER);
-    expect(p).not.toContain(ACTION_SCHEMA_COMPACT);
+  it("read turns track the install state: pointer on verified, absent on failed (#414)", () => {
+    const installed = buildPrompt(BUILTIN_MODES.cobrowse, makeCtx(), "Summarize this page", { protocolSkill: { installed: true } });
+    expect(installed).toContain(READ_SKILL_POINTER);
+    expect(installed).not.toContain(ACTION_SCHEMA_COMPACT);
+    const failed = buildPrompt(BUILTIN_MODES.cobrowse, makeCtx(), "Summarize this page", { protocolSkill: { installed: false } });
+    expect(failed).not.toContain(READ_SKILL_POINTER);
   });
 
   it("describePrompt surfaces the install state and stays schema-valid", () => {
@@ -164,6 +243,32 @@ describe("buildPrompt — slim protocol tail (#235)", () => {
   it("describePrompt passes protocolSkill:null when the option is absent", () => {
     const d = describePrompt(BUILTIN_MODES.ask, makeCtx(), "q");
     expect(d.protocolSkill).toBe(null);
+  });
+});
+
+describe("buildPrompt — read-turn skill pointer (#414)", () => {
+  it("read turns carry the feature pointer on a verified install", () => {
+    const p = buildPrompt(BUILTIN_MODES.ask, makeCtx(), "Summarize this page", { protocolSkill: { installed: true } });
+    expect(p).toContain(READ_SKILL_POINTER);
+  });
+
+  it("stubbed thread follow-ups carry it too (feature asks happen on follow-ups)", () => {
+    const p = buildPrompt(BUILTIN_MODES.cobrowse, makeCtx(), "What changed since last turn? Also — how would I automate this weekly?", { effectiveTier: 0, establishedThread: true, protocolSkill: { installed: true } });
+    expect(p).toContain("Continue on this thread");
+    expect(p).toContain(READ_SKILL_POINTER);
+  });
+
+  it("read turns without a verified install stay pointer-free (never lighter than verified)", () => {
+    const p = buildPrompt(BUILTIN_MODES.ask, makeCtx(), "Summarize this page");
+    expect(p).not.toContain(READ_SKILL_POINTER);
+    const p2 = buildPrompt(BUILTIN_MODES.ask, makeCtx(), "Summarize this page", { protocolSkill: { installed: false, reason: "x" } });
+    expect(p2).not.toContain(READ_SKILL_POINTER);
+  });
+
+  it("action turns do not double-pointer (the action tail owns the skill reference)", () => {
+    const p = buildPrompt(BUILTIN_MODES.cobrowse, makeCtx(), "Click the login button", { protocolSkill: { installed: true } });
+    expect(p).toContain(SKILL_POINTER);
+    expect(p.split(READ_SKILL_POINTER).length - 1).toBe(0);
   });
 });
 

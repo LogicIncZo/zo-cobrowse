@@ -41,6 +41,9 @@ export const ProtocolSkillStateSchema = z.object({
   checkedVersion: z.string().optional(),
   via: z.enum(["mcp", "ask"]).optional(),
   reason: z.string().optional(),
+  // #412: per-file install status for the multi-file skill — SKILL.md (the
+  // version key + canary) plus the best-effort reference writes.
+  files: z.array(z.object({ path: z.string(), ok: z.boolean() })).optional(),
 });
 export type ProtocolSkillState = z.infer<typeof ProtocolSkillStateSchema>;
 
@@ -52,6 +55,9 @@ export const DescribedPromptSchema = z.object({
   expectJson: z.boolean(),
   downgradeApplied: z.boolean(),
   protocolSkill: ProtocolSkillStateSchema.nullable().optional(),
+  // #415: true when the auto-managed per-Mode persona carries the system
+  // text server-side and the inline system section was dropped.
+  personaApplied: z.boolean().optional(),
   approxTokens: z.number().int().min(0),
 }).passthrough();
 export type DescribedPrompt = z.infer<typeof DescribedPromptSchema>;

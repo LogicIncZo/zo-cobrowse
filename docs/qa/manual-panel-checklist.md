@@ -91,6 +91,14 @@ open the side panel on a normal website.
 - [ ] **Origin validation** — saving a garbage origin ("not a url") flags a clear
       error and persists nothing; a valid http(s) URL saves with "✅ Saved!".
 
+## 0.3.7.0 additions (skill lifecycle: versioned product skill, persona lane)
+
+- [ ] After loading the extension (install or ↻ reload) WITH a configured token: Settings → About shows `📜 Zo skill: v<manifest version> installed (mcp)`.
+- [ ] The Zo workspace (`/home/workspace/Skills/zo-cobrowse/`) holds SKILL.md + `references/protocol.md` + `references/features.md`, and SKILL.md's frontmatter version matches the manifest.
+- [ ] Reload the extension (version unchanged) → no redundant install chatter; bump the version → files rewrite on the next turn or install event.
+- [ ] Prompt inspector on a builtin Mode: the `You are Zo —` system line is ABSENT (persona carries it) and the footer/mirror shows the slim tail; a custom Mode or a tuned systemPrompt override brings the inline system line back.
+- [ ] In Settings, persona routing set to a user persona → the inline system line returns and the user persona id rides (inspect a turn if unsure).
+
 ## 0.3.0 additions (protocol skill + slim tails, prompt-budget gate)
 
 - [ ] **📜 Protocol-skill chip** — after a Co-browse ACTION send (e.g. "click the first

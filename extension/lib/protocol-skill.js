@@ -20,6 +20,22 @@ export const PROTOCOL_SKILL_PATH = `${PROTOCOL_SKILL_DIR}/SKILL.md`;
 export const BUNDLED_SKILL_PATH = 'skills/zo-cobrowse/SKILL.md';
 
 /**
+ * Reference files bundled next to SKILL.md (#412 — multi-file skill). Each
+ * rides the same install: bundled path → workspace path under the skill dir.
+ * References are best-effort — a failed reference write is recorded in the
+ * state's `files` and never blocks the SKILL.md canary.
+ */
+export const BUNDLED_REFERENCE_PATHS = [
+  'skills/zo-cobrowse/references/protocol.md',
+  'skills/zo-cobrowse/references/features.md',
+];
+
+export function workspaceReferencePath(bundledPath) {
+  const name = String(bundledPath || '').split('/').pop();
+  return name ? `${PROTOCOL_SKILL_DIR}/references/${name}` : null;
+}
+
+/**
  * chrome.storage.session key holding the install state
  * ({installed, checkedVersion, version?, via?, reason?}). The sidepanel
  * inspector reads the same key so the preview mirrors what the background
@@ -40,10 +56,20 @@ export const SKILL_MARKER = 'cobrowse-protocol-skill';
  * server-side — the skill carries all three, verbatim-canon).
  */
 export const SKILL_POINTER =
-  `Use the installed ${SKILL_MARKER} (Skills/zo-cobrowse) for the action protocol — grammar, cue ladders, pacing. Read it before acting.`;
+  `Use the installed ${SKILL_MARKER} (Skills/zo-cobrowse) for the action protocol — grammar, cue ladders, pacing (references/protocol.md) — and for the product canon: Modes, bang commands, Recipes, handoff (references/features.md). Read it before acting.`;
 
 /** The envelope demand — the one protocol line that must ride every turn. */
 export const ACTION_ENVELOPE_DEMAND = 'Respond with JSON {"actions":[...]}';
+
+/**
+ * The read-turn pointer (#414). The live probe (probe-read-turn-awareness)
+ * proved Zo does NOT consult workspace skills unprompted on read turns — it
+ * answers feature questions generically (and contradicted the product's
+ * human-checkpoint design). This one line rides read turns ONLY on a verified
+ * install; mentioning the skill is what makes Zo read it (probe Q1: GO).
+ */
+export const READ_SKILL_POINTER =
+  `When the user asks what the product can do or wants a repeatable workflow, consult the installed ${SKILL_MARKER} (Skills/zo-cobrowse) — references/features.md catalogues every surface.`;
 
 /**
  * Rewrite the bundled artifact's frontmatter version to the extension version
