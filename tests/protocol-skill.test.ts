@@ -85,6 +85,16 @@ describe("bundled skill inventory (#411)", () => {
     }
   });
 
+  it("features.md mode icons match the shipped BUILTIN_MODES icons (canon drift net)", () => {
+    const features = readFileSync(resolve(import.meta.dir, "../extension", BUNDLED_FEATURES_PATH), "utf-8");
+    const modesSrc = readFileSync(resolve(import.meta.dir, "../extension/lib/modes.js"), "utf-8");
+    // Every builtin's icon+name pair appears in the canon exactly as shipped.
+    for (const m of modesSrc.matchAll(/id: '(\w+)',\s*\n\s*name: '([^']+)',\s*\n\s*icon: '([^']+)'/g)) {
+      const [, , name, icon] = m;
+      expect(features).toContain(`${icon} **${name}**`);
+    }
+  });
+
   it("frontmatter keeps the zo-cobrowse identity + version placeholder", () => {
     const bundled = readFileSync(resolve(import.meta.dir, "../extension", BUNDLED_SKILL_PATH), "utf-8");
     expect(bundled).toMatch(/^name: zo-cobrowse$/m);
