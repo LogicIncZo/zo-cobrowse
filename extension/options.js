@@ -208,6 +208,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (versionEl) versionEl.textContent = `v${chrome.runtime.getManifest().version}`;
   } catch { /* manifest unavailable in tests */ }
 
+  // #412: product-skill install state — one read-only About line. The
+  // background writes the state (chrome.storage.session); this only mirrors it.
+  try {
+    const skillLine = document.getElementById('skill-sync-line');
+    if (skillLine && chrome?.storage?.session?.get) {
+      const bag = await chrome.storage.session.get('cobrowse_protocol_skill');
+      const st = bag?.cobrowse_protocol_skill;
+      if (st) {
+        skillLine.hidden = false;
+        skillLine.textContent = st.installed
+          ? `📜 Zo skill: v${st.version || '?'} installed${st.via ? ` (${st.via})` : ''}${Array.isArray(st.files) && st.files.some((f) => !f.ok) ? ' — some reference files failed' : ''}`
+          : `📜 Zo skill: not installed${st.reason ? ` — ${st.reason}` : ''} (retries on your next action)`;
+      }
+    }
+  } catch { /* session storage unavailable — line stays hidden */ }
+
   // Token show/hide — the password field hides the secret from shoulder-surfers
   // but users need to verify a pasted token.
   const tokenToggle = document.getElementById('token-toggle');

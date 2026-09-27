@@ -10,7 +10,7 @@ import {
 } from './lib/modes.js';
 import { buildPrompt } from './lib/prompt.js';
 import { shouldDowngradeToJsonDisabled } from './lib/intent.js';
-import { BUNDLED_SKILL_PATH, PROTOCOL_SKILL_PATH, SKILL_STATE_KEY, injectVersion, parseInstalledVersion } from './lib/protocol-skill.js';
+import { BUNDLED_SKILL_PATH, BUNDLED_REFERENCE_PATHS, PROTOCOL_SKILL_PATH, PROTOCOL_SKILL_DIR, SKILL_STATE_KEY, injectVersion, parseInstalledVersion, workspaceReferencePath } from './lib/protocol-skill.js';
 import { parseZoOutput, stripCodeFence } from './lib/parse-output.js';
 import { buildDecideRequest, parseDecideResponse, shouldAct, doneGateQuestion, matchChoiceQuestion, pickChoiceQuestion, redactStateForJev, jevDecideImpl, DEFAULT_JEV_API_URL, DEFAULT_JEV_MODEL } from './lib/jev.js';
 import { buildDiagnosticsBundle, uploadDiagnostics, SETTINGS_SNAPSHOT_KEYS } from './lib/debug-share.js';
@@ -1379,6 +1379,12 @@ chrome.runtime.onInstalled.addListener((details) => {
     chrome.storage.session.set({ cobrowse_updated_at: Date.now() }).catch((e) => console.debug('session.set:', e));
     reinjectContentScripts();
   }
+  // #412: install/update also (re)installs the versioned product skill —
+  // fire-and-forget; failures land in the debug ring and the lazy
+  // first-action-turn check remains the fallback.
+  if (details.reason === 'install' || details.reason === 'update') {
+    syncProtocolSkillAtInstall();
+  }
 });
 
 // Re-inject content.js into open http(s) tabs. Excluded by the query:
@@ -2443,21 +2449,49 @@ async function installProtocolSkill(extVersion) {
       return { installed: true, checkedVersion: extVersion, version: extVersion, via: 'mcp' };
     }
   } catch { /* missing or MCP hiccup → (re)install below */ }
+  // SKILL.md is the version key + canary. MCP write_file first; the proven
+  // one-shot agent-write fallback second.
+  let wrote = false;
+  let via = 'mcp';
   try {
     await mcpToolCall('write_file', { target_file: PROTOCOL_SKILL_PATH, content });
-    if (parseInstalledVersion(await readInstalled()) === extVersion) {
-      return { installed: true, checkedVersion: extVersion, version: extVersion, via: 'mcp' };
-    }
-    return { installed: false, checkedVersion: extVersion, reason: 'read-back verification failed' };
+    wrote = true;
   } catch (err) {
     try {
       await oneShotWorkspaceWrite(PROTOCOL_SKILL_PATH, content);
-      if (parseInstalledVersion(await readInstalled()) === extVersion) {
-        return { installed: true, checkedVersion: extVersion, version: extVersion, via: 'ask' };
-      }
-    } catch { /* fall through */ }
-    return { installed: false, checkedVersion: extVersion, reason: err?.message || String(err) };
+      via = 'ask';
+      wrote = true;
+    } catch { /* canary below reports honestly */ }
   }
+  // #412: the reference files ride the same install — best-effort, never
+  // fatal. A failed reference write is recorded in `files`; the SKILL.md
+  // canary alone decides the install state.
+  const files = [{ path: PROTOCOL_SKILL_PATH, ok: wrote }];
+  for (const bundledRef of BUNDLED_REFERENCE_PATHS) {
+    const wsPath = workspaceReferencePath(bundledRef) || `${PROTOCOL_SKILL_DIR}/references/unknown`;
+    try {
+      const rr = await fetch(chrome.runtime.getURL(bundledRef));
+      if (!rr.ok) throw new Error(`HTTP ${rr.status}`);
+      const refText = await rr.text();
+      if (!refText.trim()) throw new Error('empty artifact');
+      await mcpToolCall('write_file', { target_file: wsPath, content: refText });
+      files.push({ path: wsPath, ok: true });
+    } catch (err) {
+      files.push({ path: wsPath, ok: false });
+      debugLog.push('skill_sync', `ref-write-failed:${wsPath.split('/').pop()}`);
+    }
+  }
+  // Canary read-back. mcpToolCall THROWS on isError results (a missing file
+  // is an error result, not a transport failure) — treat any throw as a
+  // failed verification, never let it escape into the turn's stream path.
+  let canaryVersion = null;
+  try {
+    canaryVersion = parseInstalledVersion(await readInstalled());
+  } catch { canaryVersion = null; }
+  if (canaryVersion === extVersion) {
+    return { installed: true, checkedVersion: extVersion, version: extVersion, via, files };
+  }
+  return { installed: false, checkedVersion: extVersion, reason: 'read-back verification failed', files };
 }
 
 /**
@@ -2492,7 +2526,32 @@ async function ensureProtocolSkill() {
   if (state && state.checkedVersion === extVersion) return state;
   const next = await installProtocolSkill(extVersion);
   await writeSkillState(next);
+  debugLog.push('skill_sync', `lazy:${next.installed ? 'ok' : 'fail'}:${next.version || next.reason || ''}`);
   return next;
+}
+
+/**
+ * #412: proactive skill sync at extension install/update — fire-and-forget
+ * from chrome.runtime.onInstalled. config hydration is callback-based (a
+ * separate task from event delivery), so the token is read directly here;
+ * when it is absent (fresh install before setup) this no-ops and the lazy
+ * first-action-turn check remains the installer of record.
+ */
+async function syncProtocolSkillAtInstall() {
+  try {
+    if (typeof chrome === 'undefined' || !chrome.storage?.local?.get) return;
+    const bag = await chrome.storage.local.get({ zoAccessToken: null });
+    if (!bag.zoAccessToken) return;
+    const extVersion = (chrome.runtime?.getManifest) ? chrome.runtime.getManifest().version : null;
+    if (!extVersion) return;
+    const state = await readSkillState();
+    if (state && state.checkedVersion === extVersion) return;
+    const next = await installProtocolSkill(extVersion);
+    await writeSkillState(next);
+    debugLog.push('skill_sync', `onInstalled:${next.installed ? 'ok' : 'fail'}:${next.version || next.reason || ''}`);
+  } catch (e) {
+    console.debug('syncProtocolSkillAtInstall:', e);
+  }
 }
 
 async function listPersonas() {
