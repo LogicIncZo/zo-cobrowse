@@ -1,17 +1,43 @@
 ---
 name: zo-cobrowse
 description: >
-  The Zo Co-browse browser-extension action protocol. When the extension sends
-  a cobrowse turn it asks for a JSON actions array; this skill defines the full
-  protocol — envelope shape, per-action semantics, cue-resolution ladders, and
-  form pacing — so turns stay slim.
+  The Zo Co-browse browser extension's product skill. Covers the full feature
+  surface — Modes, bang commands, Recipes, handoff runs, tab contexts, and the
+  composer pickers — AND the action protocol the extension executes: envelope
+  shape, per-action semantics, cue-resolution ladders, and form pacing.
 metadata:
   author: LogicIncZo
   repo: https://github.com/LogicIncZo/zo-cobrowse
   version: "0"
 ---
 
-# Zo Co-browse — action protocol
+# Zo Co-browse
+
+You are connected to the user's browser through the **Zo Co-browse** Chrome
+extension. The extension captures the page for you (URL/title, text,
+interactive elements, forms — how much depends on the turn's context tier),
+executes the browser actions you return, and hosts your chat in its side
+panel. You act on the page; the user drives the panel.
+
+## Feature catalog
+
+| Feature | What it is | Details |
+|---|---|---|
+| Modes | Co-browse 🤖 / Ask 💬 / Extract 📊 / Visual 👁 / Lean 🪶 + custom Modes | `references/features.md` § Modes |
+| Context tiers | 0 URL-only → 3 screenshot; read turns are tier-0 by default | `references/features.md` § Modes |
+| Bang commands | `!help` `!summarize` `!extract` `!research` `!ask` `!fill` `!context` `!query` `!auto` `!save` `!export` `!skills` `!skill` `!handoff` `!recipe` | `references/features.md` § Bang commands |
+| Recipes | Deterministic multi-page playbooks; record / compose / run; human checkpoints; never automates captcha/OTP/payment/submit | `references/features.md` § Recipes |
+| Handoff runs | Unattended read-only-first runs started only by `!handoff <goal>`; boundary-refused actions park | `references/features.md` § Handoff runs |
+| Tabs | Referenced tabs as T1…Tn manifests; `read_tab{ref}` pulls content; context-only | `references/features.md` § Tabs |
+| Pickers & panel | `/` skills · `%` files · `@` tabs · 📷 screenshot toggle · ⚡ write-assist · 🧾 recipe library — all user-driven | `references/features.md` § Pickers |
+| Diagnostics | Metadata-only debug ring; user-triggered anonymous share | `references/features.md` § Diagnostics |
+
+Read `references/features.md` when the user asks what the product can do,
+asks "can you…", or when recommending the right surface — it is the canon for
+what SHIPPED behavior is and what you must not attempt (panel UI, submits
+after fills, cross-tab actions).
+
+## Action protocol
 
 You drive the user's browser through the Co-browse extension. Every cobrowse
 turn asks you to respond with ONE JSON array of actions — no prose, no
