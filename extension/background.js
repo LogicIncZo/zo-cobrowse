@@ -2,6 +2,7 @@
 // Marks the port dead on failure and returns false so callers can stop
 // retrying instead of throwing "disconnected port object" up the stack.
 import {
+  BUILTIN_MODES,
   resolveMode,
   presetToMode,
   DEFAULT_MODE_ID,
@@ -11,6 +12,7 @@ import {
 import { buildPrompt } from './lib/prompt.js';
 import { shouldDowngradeToJsonDisabled } from './lib/intent.js';
 import { BUNDLED_SKILL_PATH, BUNDLED_REFERENCE_PATHS, PROTOCOL_SKILL_PATH, PROTOCOL_SKILL_DIR, SKILL_STATE_KEY, injectVersion, parseInstalledVersion, workspaceReferencePath } from './lib/protocol-skill.js';
+import { PERSONA_STORAGE_KEY, PERSONA_STATE_KEY, decidePersona, parsePersonaId, personaNameFor, planPersonaSweep } from './lib/persona-sync.js';
 import { parseZoOutput, stripCodeFence } from './lib/parse-output.js';
 import { buildDecideRequest, parseDecideResponse, shouldAct, doneGateQuestion, matchChoiceQuestion, pickChoiceQuestion, redactStateForJev, jevDecideImpl, DEFAULT_JEV_API_URL, DEFAULT_JEV_MODEL } from './lib/jev.js';
 import { buildDiagnosticsBundle, uploadDiagnostics, SETTINGS_SNAPSHOT_KEYS } from './lib/debug-share.js';
@@ -1542,8 +1544,12 @@ async function _askZoStreamImpl(port, msg) {
   // Resolve the Mode — single source of truth for prompt + context tier.
   const mode = resolveMode(modeId || config.zoActiveMode || DEFAULT_MODE_ID, customModes || {}, modeOverrides || {});
   // Persona is now orthogonal: the dropdown chooses it, else it falls back to
-  // the configured default persona id. No lite/full routing.
-  const resolvedPersonaId = personaId || config.zoPersonaId || '';
+  // the configured default persona id. No lite/full routing. #415: with no
+  // user routing, a builtin Mode may use the auto-managed per-Mode persona —
+  // its server-side system text replaces the inline system section. Resolved
+  // AFTER the skill/persona sync below (the first turn of a version syncs
+  // and uses the persona in the same turn).
+  let autoPersonaId = '';
 
   // Pull-loop state (#24 — read_tab / read_page / get_dom / get_form).
   // Created fresh for a user turn; the follow-up cycles below re-enter with
@@ -1574,6 +1580,12 @@ async function _askZoStreamImpl(port, msg) {
   const protocolSkill = mode.expectJson && !shouldDowngradeToJsonDisabled(mode, userQuery)
     ? await ensureProtocolSkill()
     : null;
+  // #415: persona sync piggybacks a verified skill install (one attempt per
+  // version per session — ensurePersonas pins even on failure).
+  if (protocolSkill && protocolSkill.installed) await ensurePersonas();
+  if (!autoPersonaId && !personaId && !config.zoPersonaId) autoPersonaId = await personaIdForTurn(mode);
+  const resolvedPersonaId = personaId || config.zoPersonaId || autoPersonaId;
+  const personaApplied = !personaId && !config.zoPersonaId && Boolean(autoPersonaId);
   // Compose turns keep the FULL tail (no slim skill pointer): the slim tail
   // sends Zo to read the skill from the workspace mid-run, and one polluted
   // read_file there is a minutes-long failure (observed on a real RTI
@@ -1589,7 +1601,7 @@ async function _askZoStreamImpl(port, msg) {
     readonlyRun = !!(run && run.boundaryMode === 'readonly');
   }
   const establishedThread = !!loop.threadId;
-  const prompt = msg._followUpInput || buildPrompt(mode, pageContext, userQuery, { effectiveTier, ...(msg.shotOnly ? { screenshotOnly: true } : {}), tabContexts: loop.tabContexts, skills: msg.skills, workspaceFiles: msg.workspaceFiles, ...(protocolSkill ? { protocolSkill } : {}), ...(establishedThread ? { establishedThread: true } : {}), jevAssist: jevReady() && !readonlyRun, ...(composeTurn ? { noSlimTail: true } : {}) });
+  const prompt = msg._followUpInput || buildPrompt(mode, pageContext, userQuery, { effectiveTier, ...(msg.shotOnly ? { screenshotOnly: true } : {}), tabContexts: loop.tabContexts, skills: msg.skills, workspaceFiles: msg.workspaceFiles, ...(protocolSkill ? { protocolSkill } : {}), ...(establishedThread ? { establishedThread: true } : {}), jevAssist: jevReady() && !readonlyRun, ...(composeTurn ? { noSlimTail: true } : {}), ...(personaApplied ? { personaApplied: true } : {}) });
 
   try {
     const response = await fetch(config.zoApiUrl, {
@@ -2148,13 +2160,16 @@ async function askZo(pageContext, userQuery, modelName, personaId, modeId, custo
 
   // Resolve the Mode — single source of truth for prompt + context tier.
   const mode = resolveMode(modeId || config.zoActiveMode || DEFAULT_MODE_ID, customModes || {}, modeOverrides || {});
-  const resolvedPersonaId = personaId || config.zoPersonaId || '';
+  const autoPersonaId = personaId || config.zoPersonaId ? '' : await personaIdForTurn(mode);
+  const resolvedPersonaId = personaId || config.zoPersonaId || autoPersonaId;
+  const personaApplied = !personaId && !config.zoPersonaId && Boolean(autoPersonaId);
 
   const protocolSkill = mode.expectJson && !shouldDowngradeToJsonDisabled(mode, userQuery)
     ? await ensureProtocolSkill()
     : null;
+  if (protocolSkill && protocolSkill.installed) await ensurePersonas();
   const threadId = msgThreadId(conversationId);
-  const prompt = buildPrompt(mode, pageContext, userQuery, { effectiveTier, ...(shotOnly ? { screenshotOnly: true } : {}), skills, workspaceFiles, ...(protocolSkill ? { protocolSkill } : {}), ...(threadId ? { establishedThread: true } : {}), jevAssist: jevReady() });
+  const prompt = buildPrompt(mode, pageContext, userQuery, { effectiveTier, ...(shotOnly ? { screenshotOnly: true } : {}), skills, workspaceFiles, ...(protocolSkill ? { protocolSkill } : {}), ...(threadId ? { establishedThread: true } : {}), jevAssist: jevReady(), ...(personaApplied ? { personaApplied: true } : {}) });
   // Per-chat threading: the sidepanel sends the chat's stored thread id; the
   // global stays as the fallback for ambient callers (context menu, omnibox).
 
@@ -2552,6 +2567,99 @@ async function syncProtocolSkillAtInstall() {
   } catch (e) {
     console.debug('syncProtocolSkillAtInstall:', e);
   }
+}
+
+// ---- persona_id lane (#415) -------------------------------------------------
+// One Zo persona per builtin Mode, each carrying that Mode's EXACT
+// systemPrompt — the inline `system` section drops from turns on a verified
+// match. Fail-closed everywhere: custom Modes, user-configured persona
+// routing, byte-drift, or any sync failure → the inline system rides.
+
+/**
+ * Sync personas for the builtin Modes (once per extension version per
+ * session). Adopt-by-name is prompt-safe because the name embeds a hash of
+ * the system prompt; drift or lost storage re-creates. Never throws.
+ */
+async function ensurePersonas() {
+  const extVersion = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getManifest)
+    ? chrome.runtime.getManifest().version : null;
+  if (!extVersion || !config.zoAccessToken) return null;
+  try {
+    const bag = await chrome.storage.session.get(PERSONA_STATE_KEY);
+    if (bag[PERSONA_STATE_KEY] && bag[PERSONA_STATE_KEY].checkedVersion === extVersion) {
+      return (await chrome.storage.local.get(PERSONA_STORAGE_KEY))[PERSONA_STORAGE_KEY] || null;
+    }
+  } catch { /* session unavailable — continue (cheap re-checks) */ }
+  let stored = {};
+  try {
+    stored = (await chrome.storage.local.get(PERSONA_STORAGE_KEY))[PERSONA_STORAGE_KEY] || {};
+  } catch { /* start empty */ }
+  const next = { ...stored };
+  const targetNames = [];
+  try {
+    for (const mode of Object.values(BUILTIN_MODES)) {
+      const decision = decidePersona(mode, stored);
+      const name = personaNameFor(mode.id, mode.systemPrompt);
+      targetNames.push(name);
+      if (decision.kind === 'use') continue;
+      // Sync: adopt-by-name (exact name ⇒ exact prompt) else create.
+      let personaId = '';
+      try {
+        const listed = await listPersonas();
+        const match = listed && listed.success && Array.isArray(listed.personas)
+          ? listed.personas.find((p) => p && p.name === name && p.id)
+          : null;
+        if (match) personaId = match.id;
+      } catch { /* listing failure — create below may still work */ }
+      if (!personaId) {
+        const created = await mcpToolCall('create_persona', { name, prompt: mode.systemPrompt });
+        personaId = parsePersonaId(toolText(created));
+      }
+      if (personaId) {
+        next[mode.id] = { personaId, prompt: mode.systemPrompt, name };
+      } else {
+        debugLog.push('persona_sync', `create-failed:${mode.id}`);
+      }
+      if (decision.stalePersonaId && decision.stalePersonaId !== personaId) {
+        try { await mcpToolCall('delete_persona', { persona_id: decision.stalePersonaId }); } catch { /* best-effort */ }
+      }
+    }
+    // Sweep orphans scoped to our name prefix (lost storage / renamed framings).
+    try {
+      const listed = await listPersonas();
+      if (listed && listed.success) {
+        for (const orphanId of planPersonaSweep(listed.personas, targetNames)) {
+          try { await mcpToolCall('delete_persona', { persona_id: orphanId }); } catch { /* best-effort */ }
+        }
+      }
+    } catch { /* best-effort */ }
+    await chrome.storage.local.set({ [PERSONA_STORAGE_KEY]: next });
+    try { await chrome.storage.session.set({ [PERSONA_STATE_KEY]: { checkedVersion: extVersion } }); } catch { /* memo-only */ }
+    debugLog.push('persona_sync', `ok:v${extVersion}:${Object.keys(next).length}`);
+    return next;
+  } catch (err) {
+    // Pin even on failure — ONE sync attempt per version per session, matching
+    // the skill installer's total-failure pinning. The inline system keeps
+    // riding (fail-closed) until the next session re-checks.
+    try { await chrome.storage.session.set({ [PERSONA_STATE_KEY]: { checkedVersion: extVersion } }); } catch { /* memo-only */ }
+    debugLog.push('persona_sync', `fail:${String(err?.message || err).slice(0, 60)}`);
+    return null; // fail-closed: inline system keeps riding
+  }
+}
+
+/**
+ * Per-turn persona resolution: the auto persona id for a builtin Mode whose
+ * stored prompt still byte-matches, or '' when anything is off (fail-closed).
+ * User-configured persona routing (config.zoPersonaId) always wins by being
+ * checked first at the call site.
+ */
+async function personaIdForTurn(mode) {
+  if (!mode || mode.builtin !== true || !mode.systemPrompt || config.zoPersonaId) return '';
+  try {
+    const stored = (await chrome.storage.local.get(PERSONA_STORAGE_KEY))[PERSONA_STORAGE_KEY];
+    const decision = decidePersona(mode, stored);
+    return decision.kind === 'use' ? decision.personaId : '';
+  } catch { return ''; }
 }
 
 async function listPersonas() {

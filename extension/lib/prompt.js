@@ -159,7 +159,10 @@ function _compose(mode, pageContext, userQuery, opts) {
   const parts = [];
   const push = (section, text) => parts.push({ section, text });
 
-  push('system', mode.systemPrompt);
+  // #415: when the auto-managed per-Mode persona carries this Mode's system
+  // text server-side (verified byte-equal at decision time), the inline
+  // system section drops — Zo composes the persona system + this prompt.
+  if (!(opts && opts.personaApplied)) push('system', mode.systemPrompt);
   push('sep', '');
   // Cold start: a blank/new-tab page (or no URL at all) carries no page
   // pointer — the whole ## Page section is omitted rather than sending
@@ -302,7 +305,7 @@ function _compose(mode, pageContext, userQuery, opts) {
     }
   }
 
-  return { parts, tier, intent: detectIntent(userQuery), expectJson: wantJson, downgradeApplied: jsonDisabled, protocolSkill: (opts && opts.protocolSkill) || null };
+  return { parts, tier, intent: detectIntent(userQuery), expectJson: wantJson, downgradeApplied: jsonDisabled, protocolSkill: (opts && opts.protocolSkill) || null, personaApplied: Boolean(opts && opts.personaApplied) };
 }
 
 /**
