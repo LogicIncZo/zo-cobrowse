@@ -6,6 +6,55 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.3.7.0] — 2026-09-27
+
+### Added
+
+- **Versioned product skill — the Zo Co-browse skill now ships, installs, and
+  updates with the extension (#411, #412; spec PR #410).** The bundled skill
+  went multi-file — a lean `SKILL.md` overview + feature catalog with
+  `references/protocol.md` (the action protocol, verbatim) and
+  `references/features.md` (the full shipped-behavior canon: Modes, bang
+  commands, Recipes, handoff boundaries, tab contexts, pickers, diagnostics).
+  The install is **proactive**: `chrome.runtime.onInstalled` (install and
+  update) syncs all files into `/home/workspace/Skills/zo-cobrowse/` via MCP
+  `write_file` with a canary read-back; the lazy first-action-turn check
+  remains the fallback (fresh installs before a token is configured). The
+  slim action-turn tail names both references; per-file install status rides
+  the state record (new Zod contract) and surfaces in the About card and the
+  prompt inspector. Result: Zo reads the product canon server-side on demand
+  instead of the prompts carrying it — the prompt-budget gate pins no
+  per-turn growth for feature knowledge.
+- **Read-turn skill pointer (#414), probe-decided.** A live probe answered
+  the open question: when a turn mentions the skill, Zo reads it (returned a
+  unique per-run probe version string with no pointer); with no mention, Zo
+  never consults workspace skills — it answered a feature question
+  generically, even suggesting a server-side automation path that contradicts
+  the product's human-checkpoint design. Decision: a one-line pointer rides
+  read turns (downgraded and natively-plain, stubs included) on a verified
+  install only. Probe transcript committed
+  (`tests/test-prompts/fixtures/read-turn-awareness-probe.json`); the probe
+  restores the workspace's original bytes.
+- **persona_id lane — the per-turn `system` section moved server-side
+  (#415).** One Zo persona per builtin Mode, each carrying that Mode's exact
+  systemPrompt (spike-verified: personas compose with custom inline system
+  text, persona first, and survive a rotated conversation id — transcripts
+  committed). Hash-named (`zo-cobrowse: <mode> · <hash>`) so adopt-by-name is
+  prompt-safe; sync piggybacks a verified skill install, one attempt per
+  version per session (pinned on failure). A turn drops the inline system
+  section only on a byte-equal verified match with no user persona routing —
+  custom Modes, tuned overrides, user-configured routing, drift, or any
+  failure ride inline (fail-closed). The inspector mirrors the decision.
+
+### Changed
+
+- **Legacy repo `skill/` companion retired (#413).** The pre-Mode-system
+  personas + preset library (never auto-installed, unversioned, partially
+  inaccurate) is absorbed into the versioned bundled skill; presets live on
+  as the builtin Modes via `presetToMode`. AGENTS.md rows repointed.
+- Read turns on a verified install carry the feature-catalog pointer
+  (~34 tok; budget gate green).
+
 ## [0.3.6.2] — 2026-09-26
 
 ### Fixed

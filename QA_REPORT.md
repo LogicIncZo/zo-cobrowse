@@ -8,6 +8,8 @@
 
 > **2026-09-25 — security review round 2 shipped** (v0.3.5.0): verdicts + findings ledger #6–#15 in `docs/qa/security-review.md` § Round 2; living threat model at `docs/qa/threat-model.md` (#383/#384).
 
+> **2026-09-27 — v0.3.7.0 skill-lifecycle slate** (PRs #410–#421): versioned product skill (multi-file SKILL.md + references/, proactive onInstalled sync, canary-verified), read-turn pointer decided by live probe (transcripts committed; probe restores workspace bytes), persona_id lane spike-GO'd live (composition + rotation) with fail-closed build. Two landing bugs caught in-loop: unguarded canary read (mcpToolCall throws on isError — was escaping into the stream path) and per-turn persona sync consuming suites' ask-fixture queues (6 suites) — both fixed with regression nets. Manual-checklist additions: skill line in Settings → About; `Skills/zo-cobrowse` files in the workspace after install/update.
+
 **Round:** 2026-08-08 · **Branch:** `Rewritet` · **Scope:** Full codebase audit (extension, backend, tests, manifest) + remediation of all findings.
 
 ## Headline status (after remediation)

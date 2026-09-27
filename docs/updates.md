@@ -3,6 +3,16 @@
 New features in Zo Co-browse, newest first. Each entry explains what shipped;
 open **How to use it** for the hands-on steps.
 
+## Zo now knows its own manual <span class="badge-new">NEW</span> {#skill-lifecycle}
+
+_2026-09-27 · PRs [#417](https://github.com/LogicIncZo/zo-cobrowse/pull/417)–[#421](https://github.com/LogicIncZo/zo-cobrowse/pull/421) · v0.3.7.0_
+
+The extension now ships a **versioned skill into your Zo workspace** and keeps it in step with the extension itself — installed when you install the extension, updated when the extension updates. Nothing to set up.
+
+- **Zo natively knows the product.** The skill catalogues every surface — Modes, bang commands, Recipes, handoff runs, tab references, the composer pickers — plus the full action protocol. When you ask "can you automate this weekly task?", Zo consults its own manual and points you at `!recipe record` instead of guessing. Deep details live in reference files Zo reads only when it needs them, so your prompts stay lean.
+- **Leaner turns.** The per-turn system line for each builtin Mode moved server-side too (a Zo persona carries it), and read-only turns got a one-line pointer to the manual — both verified live, both fail-safe: if the skill or persona can't be verified, your prompts carry everything inline exactly as before. Your own Mode tweaks and persona routing always win.
+- **Nothing changes if you never look.** The skill lives at `Skills/zo-cobrowse` in your Zo workspace; the Settings → About card shows its install state if you're curious.
+
 ## Diagnostics share, repaired <span class="badge-new">NEW</span> {#diag-share-hotfix}
 
 _2026-09-26 · [PR #407](https://github.com/LogicIncZo/zo-cobrowse/pull/407) · v0.3.6.2_

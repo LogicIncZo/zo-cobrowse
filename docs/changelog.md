@@ -6,7 +6,19 @@ This page mirrors everything **unreleased** on `dev`.
 
 ## Unreleased
 
-_Nothing unreleased — the latest is [0.3.6.2](#changelog-v0362)._
+_Nothing unreleased — the latest is [0.3.7.0](#changelog-v0370)._
+
+## [0.3.7.0] — 2026-09-27 {#changelog-v0370}
+
+### Added
+
+- **Versioned product skill (#411, #412).** The bundled skill went multi-file — lean `SKILL.md` overview + feature catalog, `references/protocol.md` (action protocol verbatim), `references/features.md` (full shipped-behavior canon). Installs/updates **proactively** at `chrome.runtime.onInstalled` (MCP `write_file` + canary read-back); the lazy first-action-turn check remains the fallback. Per-file install status in the About card + inspector; the prompt-budget gate pins no per-turn growth for feature knowledge.
+- **Read-turn skill pointer (#414), probe-decided.** Live probe: Zo reads the skill when a turn mentions it; with no mention it never consults workspace skills (and answered a feature question with a path contradicting the human-checkpoint design). A one-line pointer rides read turns on a verified install only.
+- **persona_id lane (#415).** One Zo persona per builtin Mode carries that Mode's exact systemPrompt server-side (spike-verified composition + rotation). Inline system drops only on a byte-equal verified match with no user routing — everything else rides inline (fail-closed). Inspector mirrors the decision.
+
+### Changed
+
+- **Legacy repo `skill/` companion retired (#413)** — absorbed into the versioned bundled skill; presets live on as the builtin Modes.
 
 ## [0.3.6.2] — 2026-09-26 {#changelog-v0362}
 
