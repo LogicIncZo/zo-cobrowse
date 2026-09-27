@@ -1,0 +1,29 @@
+{
+  "personaName": "zo-cobrowse-probe-1790486169928",
+  "at": "2026-09-27T05:16:09.928Z",
+  "create": "id='7b644667-d813-463d-a7cb-12b4e28b8bbf' name='zo-cobrowse-probe-1790486169928' prompt=\"You are PTR-7, the user's AI co-browsing assistant. ALWAYS begin every reply with the exact token [PTR-7].\" model=None image=None image_hue=None scopes=['all'] created_at='2026-09-27T05:16:14.696817+00:00' updated_at='2026-09-27T05:16:14.696817+00:00'",
+  "personaId": "7b644667-d813-463d-a7cb-12b4e28b8bbf",
+  "s1": {
+    "answer": "",
+    "personaHonored": false,
+    "customHonored": false,
+    "echoedConversationId": "con_k1N2Ypgw3iDjhegF"
+  },
+  "threadA": {
+    "answer": "",
+    "echoedConversationId": "con_k1N2Ypgw3iDjhegF",
+    "personaHonored": false
+  },
+  "threadB": {
+    "rotatedConversationId": "con_ozdelkvzrNjECwba",
+    "answer": "[PTR-7] Hello! Ready when you are.",
+    "echoedConversationId": "con_ozdelkvzrNjECwba",
+    "personaHonored": true,
+    "rotationSurvived": true
+  },
+  "verdict": {
+    "compositionWithCustom": "no-go",
+    "threadRotation": "go"
+  },
+  "cleanup": "deleted"
+}

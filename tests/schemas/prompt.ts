@@ -55,6 +55,9 @@ export const DescribedPromptSchema = z.object({
   expectJson: z.boolean(),
   downgradeApplied: z.boolean(),
   protocolSkill: ProtocolSkillStateSchema.nullable().optional(),
+  // #415: true when the auto-managed per-Mode persona carries the system
+  // text server-side and the inline system section was dropped.
+  personaApplied: z.boolean().optional(),
   approxTokens: z.number().int().min(0),
 }).passthrough();
 export type DescribedPrompt = z.infer<typeof DescribedPromptSchema>;

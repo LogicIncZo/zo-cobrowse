@@ -13,6 +13,7 @@ import {
 } from './lib/context-policy.js';
 import { describePrompt } from './lib/prompt.js';
 import { SKILL_STATE_KEY } from './lib/protocol-skill.js';
+import { PERSONA_STORAGE_KEY, decidePersona } from './lib/persona-sync.js';
 import { assignRefs, disambiguatedLabel, ensureActiveTabRef, isBlankPage, thinTabExcerpts } from './lib/tab-contexts.js';
 import { visionModelSuggestion, modelVisionSupport, findModelEntry } from './lib/vision.js';
 import { extractUrls, MAX_LINK_CHIPS } from './lib/links.js';
@@ -2138,6 +2139,15 @@ async function renderPromptInspector() {
       skillState = bag?.[SKILL_STATE_KEY] || null;
     } catch { /* unavailable — preview stays conservative (full tail) */ }
   }
+  // #415 parity: mirror the background's persona decision so the preview
+  // shows the system section dropped exactly when the send will drop it.
+  let personaApplied = false;
+  try {
+    if (!config.selectedPersona && mode.builtin && typeof chrome !== 'undefined' && chrome?.storage?.local?.get) {
+      const pbag = await chrome.storage.local.get(PERSONA_STORAGE_KEY);
+      personaApplied = decidePersona(mode, pbag?.[PERSONA_STORAGE_KEY]).kind === 'use';
+    }
+  } catch { /* preview stays conservative — the system section rides */ }
   const described = describePrompt(mode, currentContext, query, {
     effectiveTier: effTier,
     ...(shotArmed && !domContextOn ? { screenshotOnly: true } : {}),
@@ -2145,6 +2155,7 @@ async function renderPromptInspector() {
     skills: pickedSkills,
     workspaceFiles: pickedFiles,
     ...(skillState ? { protocolSkill: skillState } : {}),
+    ...(personaApplied ? { personaApplied: true } : {}),
     // #343: preview parity — the Jev section shows in the inspector exactly
     // when the background would send it.
     jevAssist: !!(config.jevEnabled && config.jevApiKey),
