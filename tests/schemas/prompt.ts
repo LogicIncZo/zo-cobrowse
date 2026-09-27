@@ -41,6 +41,9 @@ export const ProtocolSkillStateSchema = z.object({
   checkedVersion: z.string().optional(),
   via: z.enum(["mcp", "ask"]).optional(),
   reason: z.string().optional(),
+  // #412: per-file install status for the multi-file skill — SKILL.md (the
+  // version key + canary) plus the best-effort reference writes.
+  files: z.array(z.object({ path: z.string(), ok: z.boolean() })).optional(),
 });
 export type ProtocolSkillState = z.infer<typeof ProtocolSkillStateSchema>;
 

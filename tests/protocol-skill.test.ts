@@ -5,6 +5,7 @@ import {
   PROTOCOL_SKILL_DIR,
   PROTOCOL_SKILL_PATH,
   BUNDLED_SKILL_PATH,
+  BUNDLED_REFERENCE_PATHS,
   SKILL_MARKER,
   SKILL_POINTER,
   ACTION_ENVELOPE_DEMAND,
@@ -12,6 +13,7 @@ import {
   injectVersion,
   parseInstalledVersion,
   needsInstall,
+  workspaceReferencePath,
 } from "../extension/lib/protocol-skill.js";
 import { BUILTIN_MODES, ACTION_SCHEMA_COMPACT, NOT_ATTACHED_CONTRACT, PLAIN_RESPONSE_HINT } from "./../extension/lib/modes.js";
 import { SHARED_SAFETY_RULES, buildPrompt, describePrompt } from "../extension/lib/prompt.js";
@@ -39,22 +41,45 @@ describe("protocol-skill paths + constants", () => {
     expect(SKILL_STATE_KEY).toBe("cobrowse_protocol_skill");
   });
 
-  it("the bundled artifact exists, has frontmatter, and carries the marker vocabulary", () => {
+  it("every bundled reference maps under the workspace skill's references/ (#412)", () => {
+    expect(BUNDLED_REFERENCE_PATHS.length).toBeGreaterThanOrEqual(2);
+    for (const ref of BUNDLED_REFERENCE_PATHS) {
+      expect(ref).toMatch(/^skills\/zo-cobrowse\/references\/[\w-]+\.md$/);
+      expect(workspaceReferencePath(ref)).toBe(`/home/workspace/Skills/zo-cobrowse/references/${ref.split("/").pop()}`);
+    }
+    expect(workspaceReferencePath("")).toBe(null);
+  });
+
+  it("the slim pointer names both references (#412)", () => {
+    expect(SKILL_POINTER).toContain(SKILL_MARKER);
+    expect(SKILL_POINTER).toContain("references/protocol.md");
+    expect(SKILL_POINTER).toContain("references/features.md");
+  });
+
+  it("the bundled overview exists, has frontmatter, and indexes the product", () => {
     const bundled = readFileSync(resolve(import.meta.dir, "../extension", BUNDLED_SKILL_PATH), "utf-8");
     expect(bundled.startsWith("---\n")).toBe(true);
     expect(bundled).toMatch(/^name: zo-cobrowse$/m);
-    expect(bundled).toMatch(/actions/);
-    // The protocol sections the slim tail moves server-side.
+    expect(bundled).toContain("## Feature catalog");
+    expect(bundled).toContain("references/features.md");
+    expect(bundled).toContain("references/protocol.md");
+    // #412: the protocol body itself MOVED to references/protocol.md — the
+    // overview stays lean (progressive disclosure).
+    expect(bundled).not.toContain("## Cue-resolution ladders");
+  });
+
+  it("references/protocol.md carries the protocol sections the slim tail moved server-side", () => {
+    const protocol = readFileSync(resolve(import.meta.dir, "../extension", "skills/zo-cobrowse/references/protocol.md"), "utf-8");
     for (const section of ["Response envelope", "Action grammar", "Pull actions", "Cue-resolution ladders", "Safety rules"]) {
-      expect(bundled).toContain(section);
+      expect(protocol).toContain(section);
     }
     // Every action the executor knows is documented.
     for (const action of ["click{selector}", "fill{selector,value}", "fill_form{values:[{target,value}]}", "extract{selector,attribute}", "navigate{url}", "scroll{direction,amount?}", "wait{ms}", "done{response}", "read_tab{ref}", "read_page", "get_dom", "get_form", "read_file{path}"]) {
-      expect(bundled).toContain(action);
+      expect(protocol).toContain(action);
     }
     // Safety rules ride BOTH inline (every turn) and in the skill.
-    expect(bundled).toMatch(/NEVER click ANY button/i);
-    expect(bundled).toMatch(/password \/ card \/ CVV/i);
+    expect(protocol).toMatch(/NEVER click ANY button/i);
+    expect(protocol).toMatch(/password \/ card \/ CVV/i);
   });
 });
 
@@ -66,12 +91,13 @@ describe("bundled skill inventory (#411)", () => {
     expect(features.trim().length).toBeGreaterThan(500);
   });
 
-  it("SKILL.md is the product overview: catalog index + reference pointer + protocol body", () => {
+  it("SKILL.md is the product overview: catalog index + reference pointers", () => {
     const bundled = readFileSync(resolve(import.meta.dir, "../extension", BUNDLED_SKILL_PATH), "utf-8");
     expect(bundled).toContain("## Feature catalog");
     expect(bundled).toContain("references/features.md");
-    // The protocol body stays in SKILL.md until #412 moves it atomically.
-    expect(bundled).toContain("## Action protocol");
+    expect(bundled).toContain("references/protocol.md");
+    // #412: the protocol body moved atomically to references/protocol.md.
+    expect(bundled).not.toContain("## Action grammar");
   });
 
   it("features.md covers the shipped product canon", () => {
@@ -110,7 +136,7 @@ describe("injectVersion / parseInstalledVersion", () => {
     expect(out).not.toMatch(/version: "0"/);
     // Everything else rides unchanged.
     expect(out).toContain("# Zo Co-browse");
-    expect(out).toContain("## Action protocol");
+    expect(out).toContain("## Feature catalog");
   });
 
   it("appends a metadata block when the frontmatter lacks one", () => {

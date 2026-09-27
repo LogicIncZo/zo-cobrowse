@@ -15,12 +15,19 @@ const bus = createFakeChrome();
 const fm = new ZoFetchMock();
 
 const SKILL_PATH = "/home/workspace/Skills/zo-cobrowse/SKILL.md";
-const BUNDLED = readFileSync(resolve(import.meta.dir, "../../extension/skills/zo-cobrowse/SKILL.md"), "utf-8");
 const EXT_VERSION = bus.runtime._manifestVersion;
+const SKILL_STATE_KEY = "cobrowse_protocol_skill";
 
-/** A virtual workspace file: read_file miss → isError; write → stored. */
-let workspaceSkill: string | null = null;
-let writeFails = false;
+/** Bundled skill files served from the repo (SKILL.md + references/). */
+const BUNDLED_FILES: Record<string, string> = {};
+for (const rel of ["skills/zo-cobrowse/SKILL.md", "skills/zo-cobrowse/references/protocol.md", "skills/zo-cobrowse/references/features.md"]) {
+  BUNDLED_FILES[rel] = readFileSync(resolve(import.meta.dir, "../../extension", rel), "utf-8");
+}
+
+/** Virtual workspace files: read_file miss → isError; write → stored per path. */
+const workspaceFiles = new Map<string, string>();
+let writeFails = false; // fails every write_file
+let refWriteFails = false; // fails ONLY the reference writes (SKILL.md still lands)
 const mcpCalls: string[] = []; // "read_file" | "write_file" in call order
 
 function mcpOk(id: any, result: object) {
@@ -40,10 +47,12 @@ beforeAll(async () => {
   bus.storage.local._store.zoAccessToken = MOCK_ZO_TOKEN;
   fm.install();
   fm.handle((url, _init, req) => {
-    if (url.includes("skills/zo-cobrowse/SKILL.md")) {
-      // chrome.runtime.getURL fetch of the bundled artifact (the installer's
+    const bundledMatch = url.match(/skills\/zo-cobrowse\/(SKILL\.md|references\/[\w-]+\.md)$/);
+    if (bundledMatch) {
+      // chrome.runtime.getURL fetch of a bundled artifact (the installer's
       // first step) — serve the real file from the repo.
-      return textResponse(BUNDLED);
+      const rel = `skills/zo-cobrowse/${bundledMatch[1]}`;
+      return textResponse(BUNDLED_FILES[rel] ?? "");
     }
     if (url.endsWith("/mcp")) {
       const body = req.body || {};
@@ -56,15 +65,20 @@ beforeAll(async () => {
       if (body.method === "notifications/initialized") return textResponse("", 202);
       if (body.method === "tools/call" && body.params?.name === "read_file") {
         mcpCalls.push("read_file");
-        if (workspaceSkill == null) {
+        const target = String(body.params.arguments?.target_file || "");
+        const stored = workspaceFiles.get(target);
+        if (stored == null) {
           return mcpOk(body.id, { isError: true, content: [{ type: "text", text: "code: read_failed" }] });
         }
-        return mcpOk(body.id, { isError: false, content: [{ type: "text", text: JSON.stringify([workspaceSkill, `kind='file_ref' path='${SKILL_PATH}'`]) }] });
+        return mcpOk(body.id, { isError: false, content: [{ type: "text", text: JSON.stringify([stored, `kind='file_ref' path='${target}'`]) }] });
       }
       if (body.method === "tools/call" && body.params?.name === "write_file") {
         mcpCalls.push("write_file");
-        if (writeFails) return mcpOk(body.id, { isError: true, content: [{ type: "text", text: "tool disabled" }] });
-        workspaceSkill = String(body.params.arguments?.content || "");
+        const target = String(body.params.arguments?.target_file || "");
+        if (writeFails || (refWriteFails && target.includes("/references/"))) {
+          return mcpOk(body.id, { isError: true, content: [{ type: "text", text: "tool disabled" }] });
+        }
+        workspaceFiles.set(target, String(body.params.arguments?.content || ""));
         return mcpOk(body.id, { isError: false, content: [{ type: "text", text: "written" }] });
       }
       return jsonResponse({ jsonrpc: "2.0", id: body.id, error: { code: -32601, message: "method not found" } });
@@ -75,7 +89,7 @@ beforeAll(async () => {
     const body = req.body || {};
     if (typeof body.input === "string" && body.input.includes("---CONTENT START---")) {
       const m = body.input.match(/---CONTENT START---\n([\s\S]*?)\n---CONTENT END---/);
-      if (m) workspaceSkill = m[1];
+      if (m) workspaceFiles.set(SKILL_PATH, m[1]);
       return jsonResponse({ output: "written" });
     }
     return sseResponse(zoSseText({ text: "ok" }));
@@ -92,15 +106,20 @@ async function actionTurn(sessionId: number, chatId: string) {
   return zoAskCalls()[zoAskCalls().length - 1];
 }
 
-describe("protocol-skill install loop (#235)", () => {
-  it("first action turn: miss → write → canary read-back → slim tail on the wire", async () => {
+const INSTALL_SEQUENCE = ["read_file", "write_file", "write_file", "write_file", "read_file"];
+
+describe("protocol-skill install loop (#235, multi-file #412)", () => {
+  it("first action turn: miss → SKILL.md + references writes → canary read-back → slim tail", async () => {
     const req = await actionTurn(1, "chat-1");
-    expect(mcpCalls).toEqual(["read_file", "write_file", "read_file"]);
-    // The write carried the injected version.
-    expect(workspaceSkill).toContain(`version: "${EXT_VERSION}"`);
+    expect(mcpCalls).toEqual(INSTALL_SEQUENCE);
+    // The SKILL.md write carried the injected version; references landed too.
+    expect(workspaceFiles.get(SKILL_PATH)).toContain(`version: "${EXT_VERSION}"`);
+    expect(workspaceFiles.get("/home/workspace/Skills/zo-cobrowse/references/protocol.md")).toContain("## Cue-resolution ladders");
+    expect(workspaceFiles.get("/home/workspace/Skills/zo-cobrowse/references/features.md")).toContain("## Modes");
     // The turn's prompt is the SLIM tail: marker + envelope, no inline grammar.
     expect(req.body.input).toContain("cobrowse-protocol-skill");
     expect(req.body.input).toContain("Skills/zo-cobrowse");
+    expect(req.body.input).toContain("references/protocol.md");
     expect(req.body.input).not.toContain("click{selector}");
     // Safety rules stay inline on EVERY action turn (never-lighter invariant).
     expect(req.body.input).toContain("password/card/CVV");
@@ -113,21 +132,39 @@ describe("protocol-skill install loop (#235)", () => {
     expect(req.body.input).toContain("cobrowse-protocol-skill");
   });
 
-  it("extension update (version bump) re-installs with the new version", async () => {
+  it("#412: onInstalled(update) proactively re-installs before any turn", async () => {
     bus.runtime._manifestVersion = "9.9.9.9";
     const callsBefore = mcpCalls.length;
+    bus.runtime.onInstalled.emit({ reason: "update" });
+    await waitUntil(() => mcpCalls.length >= callsBefore + INSTALL_SEQUENCE.length, 8000);
+    expect(mcpCalls.slice(callsBefore)).toEqual(INSTALL_SEQUENCE);
+    expect(workspaceFiles.get(SKILL_PATH)).toContain('version: "9.9.9.9"');
+    // The pinned state means the next turn adds zero install calls…
     const req = await actionTurn(3, "chat-3");
-    expect(mcpCalls.slice(callsBefore)).toEqual(["read_file", "write_file", "read_file"]);
-    expect(workspaceSkill).toContain('version: "9.9.9.9"');
+    expect(mcpCalls.length).toBe(callsBefore + INSTALL_SEQUENCE.length);
     expect(req.body.input).toContain("cobrowse-protocol-skill");
+  });
+
+  it("#412: a failed reference write never blocks the install (SKILL.md canary decides)", async () => {
+    bus.runtime._manifestVersion = "9.9.9.10";
+    refWriteFails = true;
+    const callsBefore = mcpCalls.length;
+    const req = await actionTurn(4, "chat-4");
+    expect(mcpCalls.slice(callsBefore)).toEqual(INSTALL_SEQUENCE);
+    const state = (await bus.storage.session.get(SKILL_STATE_KEY))[SKILL_STATE_KEY];
+    expect(state.installed).toBe(true);
+    expect(state.files[0]).toEqual({ path: SKILL_PATH, ok: true });
+    expect(state.files.filter((f: any) => !f.ok).length).toBe(2);
+    expect(req.body.input).toContain("cobrowse-protocol-skill");
+    refWriteFails = false;
   });
 
   it("write_file failure falls back to the one-shot ask write, then verifies + slims", async () => {
     // Fresh session state: bump the version so the loop re-runs.
-    bus.runtime._manifestVersion = "9.9.9.10";
+    bus.runtime._manifestVersion = "9.9.9.11";
     writeFails = true;
     const asksBefore = zoAskCalls().length;
-    const req = await actionTurn(4, "chat-4");
+    const req = await actionTurn(5, "chat-5");
     // The fallback write went through the one-shot agent-write prompt…
     const fallbacks = zoAskCalls().slice(asksBefore).filter((r) => (r.body?.input || "").includes("---CONTENT START---"));
     expect(fallbacks.length).toBe(1);
@@ -166,9 +203,14 @@ describe("protocol-skill install loop (#235)", () => {
   it("total install failure keeps the full inline tail (never-lighter invariant)", async () => {
     // Fresh version + broken BOTH write paths: write_file errors AND the
     // fallback ask returns HTTP 500 → installed:false → grammar stays inline.
-    bus.runtime._manifestVersion = "9.9.9.11";
+    bus.runtime._manifestVersion = "9.9.9.12";
     writeFails = true;
     fm.handle((url, _init, req) => {
+      const bundledMatch = url.match(/skills\/zo-cobrowse\/(SKILL\.md|references\/[\w-]+\.md)$/);
+      if (bundledMatch) {
+        // Bundled artifact fetches still succeed — only the workspace writes fail.
+        return textResponse(BUNDLED_FILES[`skills/zo-cobrowse/${bundledMatch[1]}`] ?? "");
+      }
       if (url.endsWith("/mcp")) {
         const body = req.body || {};
         if (body.method === "initialize") {

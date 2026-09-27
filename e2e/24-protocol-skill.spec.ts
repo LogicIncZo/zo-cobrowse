@@ -26,6 +26,9 @@ async function resetSkill(): Promise<void> {
 }
 
 const ACTION_QUERY = "Click the first link on the page";
+// #412 multi-file install: read (miss/stale) → write SKILL.md → write the two
+// references → canary read of SKILL.md.
+const INSTALL_CALLS = ["read_file", "write_file", "write_file", "write_file", "read_file"];
 
 test.describe("protocol-skill install (#235)", () => {
   test("fresh workspace: first action turn installs the skill and slims the tail", async () => {
@@ -35,16 +38,21 @@ test.describe("protocol-skill install (#235)", () => {
       await sendQuery(h.panel, ACTION_QUERY);
       await waitForTurnComplete(h.panel);
 
-      // Install loop ran exactly: read (miss) → write → canary read.
+      // Install loop ran exactly: read (miss) → write SKILL.md → write
+      // references → canary read.
       const calls = (await recordedMcps()).map((r) => r.body.params?.name);
       const toolCalls = calls.filter((n) => n === "read_file" || n === "write_file");
-      expect(toolCalls).toEqual(["read_file", "write_file", "read_file"]);
+      expect(toolCalls).toEqual(INSTALL_CALLS);
 
-      // The write targeted the workspace path and carried the manifest version.
+      // The SKILL.md write targeted the workspace path and carried the
+      // manifest version; the reference writes landed under references/.
       const manifestVersion = await h.serviceWorker.evaluate(() => (chrome.runtime.getManifest() as any).version);
-      const write = (await recordedMcps()).find((r) => r.body.params?.name === "write_file");
-      expect(write.body.params.arguments.target_file).toBe(SKILL_PATH);
-      expect(write.body.params.arguments.content).toContain(`version: "${manifestVersion}"`);
+      const writes = (await recordedMcps()).filter((r) => r.body.params?.name === "write_file");
+      expect(writes[0].body.params.arguments.target_file).toBe(SKILL_PATH);
+      expect(writes[0].body.params.arguments.content).toContain(`version: "${manifestVersion}"`);
+      for (const w of writes.slice(1)) {
+        expect(w.body.params.arguments.target_file).toMatch(/^\/home\/workspace\/Skills\/zo-cobrowse\/references\/[\w-]+\.md$/);
+      }
       // The stored copy IS the written content.
       expect((await skillState()).content).toContain(`version: "${manifestVersion}"`);
 
@@ -75,9 +83,9 @@ test.describe("protocol-skill install (#235)", () => {
       await sendQuery(h.panel, ACTION_QUERY);
       await waitForTurnComplete(h.panel);
 
-      // read (hit, stale) → write (rewrite) → canary read.
+      // read (hit, stale) → write SKILL.md + references → canary read.
       const toolCalls = (await recordedMcps()).map((r) => r.body.params?.name).filter((n) => n === "read_file" || n === "write_file");
-      expect(toolCalls).toEqual(["read_file", "write_file", "read_file"]);
+      expect(toolCalls).toEqual(INSTALL_CALLS);
 
       const manifestVersion = await h.serviceWorker.evaluate(() => (chrome.runtime.getManifest() as any).version);
       expect((await skillState()).content).toContain(`version: "${manifestVersion}"`);
