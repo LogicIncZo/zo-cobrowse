@@ -58,6 +58,40 @@ describe("protocol-skill paths + constants", () => {
   });
 });
 
+describe("bundled skill inventory (#411)", () => {
+  const BUNDLED_FEATURES_PATH = "skills/zo-cobrowse/references/features.md";
+
+  it("the reference files ship next to SKILL.md and are non-empty", () => {
+    const features = readFileSync(resolve(import.meta.dir, "../extension", BUNDLED_FEATURES_PATH), "utf-8");
+    expect(features.trim().length).toBeGreaterThan(500);
+  });
+
+  it("SKILL.md is the product overview: catalog index + reference pointer + protocol body", () => {
+    const bundled = readFileSync(resolve(import.meta.dir, "../extension", BUNDLED_SKILL_PATH), "utf-8");
+    expect(bundled).toContain("## Feature catalog");
+    expect(bundled).toContain("references/features.md");
+    // The protocol body stays in SKILL.md until #412 moves it atomically.
+    expect(bundled).toContain("## Action protocol");
+  });
+
+  it("features.md covers the shipped product canon", () => {
+    const features = readFileSync(resolve(import.meta.dir, "../extension", BUNDLED_FEATURES_PATH), "utf-8");
+    for (const section of ["Modes", "Bang commands", "Recipes", "Handoff runs", "Tabs", "Pickers", "Diagnostics", "What you must NOT do"]) {
+      expect(features).toContain(section);
+    }
+    // The load-bearing behaviors are named.
+    for (const surface of ["!handoff", "!recipe", "!context", "read_tab", "write-assist", "no-auto-submit"]) {
+      expect(features).toContain(surface);
+    }
+  });
+
+  it("frontmatter keeps the zo-cobrowse identity + version placeholder", () => {
+    const bundled = readFileSync(resolve(import.meta.dir, "../extension", BUNDLED_SKILL_PATH), "utf-8");
+    expect(bundled).toMatch(/^name: zo-cobrowse$/m);
+    expect(parseInstalledVersion(bundled)).toBe("0");
+  });
+});
+
 describe("injectVersion / parseInstalledVersion", () => {
   it("replaces the placeholder version with the extension version", () => {
     const bundled = readFileSync(resolve(import.meta.dir, "../extension", BUNDLED_SKILL_PATH), "utf-8");
@@ -65,7 +99,8 @@ describe("injectVersion / parseInstalledVersion", () => {
     expect(out).toMatch(/version: "1\.2\.3\.4"/);
     expect(out).not.toMatch(/version: "0"/);
     // Everything else rides unchanged.
-    expect(out).toContain("# Zo Co-browse — action protocol");
+    expect(out).toContain("# Zo Co-browse");
+    expect(out).toContain("## Action protocol");
   });
 
   it("appends a metadata block when the frontmatter lacks one", () => {
