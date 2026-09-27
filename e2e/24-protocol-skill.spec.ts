@@ -32,9 +32,16 @@ const INSTALL_CALLS = ["read_file", "write_file", "write_file", "write_file", "r
 
 test.describe("protocol-skill install (#235)", () => {
   test("fresh workspace: first action turn installs the skill and slims the tail", async () => {
+    // Skill-state setup BEFORE the harness opens: the onInstalled sync fires
+    // at SW startup when no token is configured yet (the harness seeds it
+    // after), so it deterministically no-ops and the lazy turn-time install
+    // owns the assertions. Seeding after open raced the startup sync (#412
+    // CI flake: a won race pinned the current version and the turn made no
+    // install calls).
+    await resetSkill();
     const h = await openHarness({ freshProfile: true });
     try {
-      await resetSkill();
+      await clearRecordedRequests();
       await sendQuery(h.panel, ACTION_QUERY);
       await waitForTurnComplete(h.panel);
 
@@ -71,14 +78,14 @@ test.describe("protocol-skill install (#235)", () => {
   });
 
   test("stale installed copy is rewritten with the current version", async () => {
+    // Stale seed BEFORE open — same startup-sync determinism as the fresh test.
+    await resetSkill();
+    await fetch(`${E2E_BASE}/__skill`, {
+      method: "PUT",
+      body: '---\nname: zo-cobrowse\ndescription: stale\nmetadata:\n  version: "0.0.1"\n---\n\nold protocol\n',
+    });
     const h = await openHarness({ freshProfile: true });
     try {
-      await resetSkill();
-      // Seed a STALE copy (ancient version) as the already-installed skill.
-      await fetch(`${E2E_BASE}/__skill`, {
-        method: "PUT",
-        body: '---\nname: zo-cobrowse\ndescription: stale\nmetadata:\n  version: "0.0.1"\n---\n\nold protocol\n',
-      });
       await clearRecordedRequests();
       await sendQuery(h.panel, ACTION_QUERY);
       await waitForTurnComplete(h.panel);
@@ -98,10 +105,11 @@ test.describe("protocol-skill install (#235)", () => {
   });
 
   test("write_file failure falls back to the one-shot ask write — tail still slims on verify", async () => {
+    // Arm the writefail mode BEFORE open — same startup-sync determinism.
+    await resetSkill();
+    await fetch(`${E2E_BASE}/__skill?mode=writefail`, { method: "PUT" });
     const h = await openHarness({ freshProfile: true });
     try {
-      await resetSkill();
-      await fetch(`${E2E_BASE}/__skill?mode=writefail`, { method: "PUT" });
       await clearRecordedRequests();
       await sendQuery(h.panel, ACTION_QUERY);
       await waitForTurnComplete(h.panel);
