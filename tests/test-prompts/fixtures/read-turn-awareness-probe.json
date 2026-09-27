@@ -1,0 +1,18 @@
+{
+  "probeVersion": "0.0.0-probe-1790484612452",
+  "at": "2026-09-27T04:50:12.452Z",
+  "originalCaptured": true,
+  "probeInstalled": true,
+  "q1": {
+    "question": "What exact value is in the metadata.version field of the frontmatter of the zo-cobrowse skill installed in this workspace at /home/workspace/Skills/zo-cobrowse? Reply with just that value, or the word UNKNOWN if you cannot check.",
+    "answer": "`0.0.0-probe-1790484612452`",
+    "hit": true
+  },
+  "q2": {
+    "question": "In the Zo Co-browse browser extension, which bang command records the user's manual page actions into a repeatable multi-page workflow? Reply with just the command, or the word UNKNOWN.",
+    "answer": "",
+    "hit": false
+  },
+  "restored": "original",
+  "verdict": "go"
+}

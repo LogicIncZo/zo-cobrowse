@@ -62,6 +62,16 @@ export const SKILL_POINTER =
 export const ACTION_ENVELOPE_DEMAND = 'Respond with JSON {"actions":[...]}';
 
 /**
+ * The read-turn pointer (#414). The live probe (probe-read-turn-awareness)
+ * proved Zo does NOT consult workspace skills unprompted on read turns — it
+ * answers feature questions generically (and contradicted the product's
+ * human-checkpoint design). This one line rides read turns ONLY on a verified
+ * install; mentioning the skill is what makes Zo read it (probe Q1: GO).
+ */
+export const READ_SKILL_POINTER =
+  `When the user asks what the product can do or wants a repeatable workflow, consult the installed ${SKILL_MARKER} (Skills/zo-cobrowse) — references/features.md catalogues every surface.`;
+
+/**
  * Rewrite the bundled artifact's frontmatter version to the extension version
  * at install time (the bundled file carries a placeholder — the manifest is
  * the version source of truth, and the version-sync lint gates it).

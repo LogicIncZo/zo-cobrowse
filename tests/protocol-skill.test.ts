@@ -8,6 +8,7 @@ import {
   BUNDLED_REFERENCE_PATHS,
   SKILL_MARKER,
   SKILL_POINTER,
+  READ_SKILL_POINTER,
   ACTION_ENVELOPE_DEMAND,
   SKILL_STATE_KEY,
   injectVersion,
@@ -205,10 +206,15 @@ describe("buildPrompt — slim protocol tail (#235)", () => {
     expect(p).not.toContain(ACTION_SCHEMA_COMPACT);
   });
 
-  it("downgraded turns on an installed skill skip the slim tail entirely", () => {
+  it("downgraded turns on an installed skill skip the ACTION tail — the read pointer rides instead (#414)", () => {
     const p = buildPrompt(BUILTIN_MODES.cobrowse, makeCtx(), "Summarize this page", { protocolSkill: { installed: true } });
-    expect(p).not.toContain(SKILL_MARKER);
+    // No action tail on a downgraded turn…
+    expect(p).not.toContain(SKILL_POINTER);
+    expect(p).not.toContain(ACTION_ENVELOPE_DEMAND);
     expect(p).not.toContain(ACTION_SCHEMA_COMPACT);
+    // …but the read-turn feature pointer DOES ride (probe: Zo never consults
+    // the skill unprompted — #414).
+    expect(p).toContain(READ_SKILL_POINTER);
   });
 
   it("installed:false (failed install) keeps the full inline tail", () => {
@@ -217,10 +223,12 @@ describe("buildPrompt — slim protocol tail (#235)", () => {
     expect(p).not.toContain(SKILL_MARKER);
   });
 
-  it("read/downgraded turns are unaffected by the install state", () => {
-    const p = buildPrompt(BUILTIN_MODES.cobrowse, makeCtx(), "Summarize this page", { protocolSkill: { installed: true } });
-    expect(p).not.toContain(SKILL_MARKER);
-    expect(p).not.toContain(ACTION_SCHEMA_COMPACT);
+  it("read turns track the install state: pointer on verified, absent on failed (#414)", () => {
+    const installed = buildPrompt(BUILTIN_MODES.cobrowse, makeCtx(), "Summarize this page", { protocolSkill: { installed: true } });
+    expect(installed).toContain(READ_SKILL_POINTER);
+    expect(installed).not.toContain(ACTION_SCHEMA_COMPACT);
+    const failed = buildPrompt(BUILTIN_MODES.cobrowse, makeCtx(), "Summarize this page", { protocolSkill: { installed: false } });
+    expect(failed).not.toContain(READ_SKILL_POINTER);
   });
 
   it("describePrompt surfaces the install state and stays schema-valid", () => {
@@ -235,6 +243,32 @@ describe("buildPrompt — slim protocol tail (#235)", () => {
   it("describePrompt passes protocolSkill:null when the option is absent", () => {
     const d = describePrompt(BUILTIN_MODES.ask, makeCtx(), "q");
     expect(d.protocolSkill).toBe(null);
+  });
+});
+
+describe("buildPrompt — read-turn skill pointer (#414)", () => {
+  it("read turns carry the feature pointer on a verified install", () => {
+    const p = buildPrompt(BUILTIN_MODES.ask, makeCtx(), "Summarize this page", { protocolSkill: { installed: true } });
+    expect(p).toContain(READ_SKILL_POINTER);
+  });
+
+  it("stubbed thread follow-ups carry it too (feature asks happen on follow-ups)", () => {
+    const p = buildPrompt(BUILTIN_MODES.cobrowse, makeCtx(), "What changed since last turn? Also — how would I automate this weekly?", { effectiveTier: 0, establishedThread: true, protocolSkill: { installed: true } });
+    expect(p).toContain("Continue on this thread");
+    expect(p).toContain(READ_SKILL_POINTER);
+  });
+
+  it("read turns without a verified install stay pointer-free (never lighter than verified)", () => {
+    const p = buildPrompt(BUILTIN_MODES.ask, makeCtx(), "Summarize this page");
+    expect(p).not.toContain(READ_SKILL_POINTER);
+    const p2 = buildPrompt(BUILTIN_MODES.ask, makeCtx(), "Summarize this page", { protocolSkill: { installed: false, reason: "x" } });
+    expect(p2).not.toContain(READ_SKILL_POINTER);
+  });
+
+  it("action turns do not double-pointer (the action tail owns the skill reference)", () => {
+    const p = buildPrompt(BUILTIN_MODES.cobrowse, makeCtx(), "Click the login button", { protocolSkill: { installed: true } });
+    expect(p).toContain(SKILL_POINTER);
+    expect(p.split(READ_SKILL_POINTER).length - 1).toBe(0);
   });
 });
 
