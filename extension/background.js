@@ -1970,6 +1970,9 @@ function finishStream(port, sid, output, extra = {}) {
     ...(Number.isInteger(extra.contextTier)
       ? { contextTier: extra.contextTier, contextReason: extra.contextReason }
       : {}),
+    // #426 F2: set on a manual action turn that finished with zero actions —
+    // the panel renders + persists an honest warning instead of fake success.
+    ...(extra.actionless ? { actionless: true, actionlessReason: extra.actionlessReason } : {}),
   });
   // Stream-shape discovery: surface which events/fields Zo actually emitted.
   emitStreamDiagnostic(port, sid);
@@ -2002,6 +2005,18 @@ async function finishStreamWithPullLoop(port, sid, output, extra, loop) {
     // #368: block an actionless handoff turn BEFORE the panel sees STREAM_DONE —
     // the prose still renders, but the run no longer strands 'running'.
     await handoffBlockOnActionlessTurn(loop, parsedOutput);
+    // #426 F2: a MANUAL action turn (Mode expects the JSON envelope, not
+    // intent-downgraded to a read) that yielded zero actions is a silent
+    // failure — flag it so the panel warns instead of looking like success.
+    // Read turns (plainText by design) and handoff runs (blocked above) skip.
+    try {
+      const m = loop?.mode;
+      if (m && m.expectJson && !shouldDowngradeToJsonDisabled(m, loop?.msg?.userQuery || '')
+          && !loop?.msg?.handoffRunId && parsedOutput.actions.length === 0) {
+        withThread.actionless = true;
+        withThread.actionlessReason = 'Zo returned no executable actions for this action turn';
+      }
+    } catch { /* flag is best-effort; never block the finish */ }
     finishStream(port, sid, output, withThread);
     return;
   }

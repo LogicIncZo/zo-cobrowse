@@ -224,4 +224,28 @@ describe("detectIntent — schema conformance (tests/schemas/intent.ts)", () => 
       expect(DowngradeDecisionSchema.safeParse(shouldDowngradeToJsonDisabled({ expectJson: true }, q)).success).toBe(true);
     }
   });
+})
+
+describe("looksLikeActionJson — narration-led fences (#426 F3)", () => {
+  const narration = "Thinking. Reading the skill files directly.\nRoute verified.\n";
+  const envelope = '```json\n{"actions":[{"type":"done","response":"ok"}]}\n```';
+
+  it("narration followed by a fenced envelope is action JSON", () => {
+    expect(looksLikeActionJson(narration + envelope)).toBe(true);
+  });
+
+  it("progressive: an OPENED fence with the actions key suppresses mid-stream", () => {
+    // Mid-stream accumulation: fence opened, body partially arrived — enough
+    // to carry the "actions" key.
+    const mid = narration + "```json\n{\"actions\":";
+    expect(looksLikeActionJson(mid)).toBe(true);
+  });
+
+  it("fence opened but no actions key yet stays prose (no premature suppression)", () => {
+    expect(looksLikeActionJson(narration + "```json\n{\"foo\":")).toBe(false);
+  });
+
+  it("plain prose without any fence is unaffected", () => {
+    expect(looksLikeActionJson(narration)).toBe(false);
+  });
 });

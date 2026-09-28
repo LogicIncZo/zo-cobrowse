@@ -5182,9 +5182,20 @@ function handleStreamMessage(msg) {
       }
 
       // Persist to conversation (thread id echo + assistant message)
+      // #426 F2: a manual action turn that finished with ZERO actions is a
+      // silent failure — warn inline and persist the warning so the record is
+      // auditable (the leaked raw output above stays as context).
+      if (msg.actionless) {
+        const warn = `⚠️ ${safeText(msg.actionlessReason) || 'Zo returned no executable actions for this action turn'} — showing its raw output above.`;
+        addMessage('system', warn);
+      }
+
       const conv = getActiveConversation();
       if (conv) {
         if (msg.conversationId) conv.zoThreadId = msg.conversationId;
+        if (msg.actionless) {
+          conv.messages.push({ role: 'system', text: `⚠️ ${safeText(msg.actionlessReason) || 'Zo returned no executable actions for this action turn'} — showing its raw output above.`, timestamp: doneTimestamp });
+        }
         if (responseText) {
           const reasoningVal = safeText(msg.reasoning) || safeText(streamSession.reasoningText) || undefined;
           // Persist to conversation (chronological feed is already in the body; just save reasoning)
