@@ -6,7 +6,15 @@ This page mirrors everything **unreleased** on `dev`.
 
 ## Unreleased
 
-_Nothing unreleased — the latest is [0.3.7.0](#changelog-v0370)._
+_Nothing unreleased — the latest is [0.3.7.1](#changelog-v0371)._
+
+## [0.3.7.1] — 2026-09-27 {#changelog-v0371}
+
+### Fixed
+
+- **Narration-led action envelopes now execute (#426).** A real user turn returned a perfect Jev 2-hop plan and executed nothing — the parser only unwrapped a fence spanning the WHOLE output. Fenced envelopes are now found anywhere in the output (last fence first); surrounding prose rides the reasoning channel.
+- **Action turns that do nothing warn inline (⚠️, persisted)** instead of completing silently.
+- **Raw JSON no longer streams into the chat** on narration-led action turns — suppression recognizes the opened ```json fence progressively.
 
 ## [0.3.7.0] — 2026-09-27 {#changelog-v0370}
 

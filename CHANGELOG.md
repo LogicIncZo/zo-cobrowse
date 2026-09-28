@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
+## [0.3.7.1] — 2026-09-27
+
+### Fixed
+
+- **Narration-led action envelopes now execute (#426, found by the
+  debug-conversation workflow on a live user turn).** When Zo narrated its
+  tool use in prose and THEN emitted the ```json action envelope, the parser
+  dropped every action: a real Jev 2-hop navigation returned a perfect plan
+  and executed nothing, leaking the raw JSON into the chat as its answer.
+  The parser now scans fenced blocks anywhere in the output (last fence
+  first) and accepts the first whose body parses to an actions envelope —
+  the surrounding prose rides the reasoning channel instead of masquerading
+  as the answer. A fenced block that is not an actions envelope never
+  hijacks; unparseable output still degrades to plain text exactly as before.
+- **Action turns that do nothing are no longer silent.** When a manual
+  action turn finishes with zero executable actions, the turn now carries an
+  honest ⚠️ inline warning (rendered and persisted), instead of completing
+  looking like success.
+- **Raw JSON no longer streams into the chat on narration-led action
+  turns.** The streaming suppression now recognizes an opened ```json fence
+  carrying the actions key — progressively, as the fence arrives — instead
+  of only output that starts with `{`.
+
 ## [0.3.7.0] — 2026-09-27
 
 ### Added

@@ -167,6 +167,11 @@ export function looksLikeActionJson(text) {
   if (t.startsWith('```')) {
     t = t.replace(/^```[a-zA-Z0-9]*\s*\n?/, '');
   }
+  // #426 F3: narration-led action turns — prose first, THEN the envelope in a
+  // ```json fence. Once a fence has opened and its accumulated body carries
+  // the "actions" key, the rest of the stream is envelope, not prose: suppress
+  // progressively (deltas before the fence stay visible — they are narration).
+  if (/```[a-zA-Z0-9]*[ \t]*\r?\n[\s\S]*?"\s*actions\s*"\s*:/.test(t)) return true;
   if (!t.startsWith('{')) return false;
   // Reached the "actions" key while still inside the opening object. Matches
   // both partial (`{"actions":`) and complete (`{"actions":[...]}`) envelopes.

@@ -127,6 +127,44 @@ describe("background streaming pipeline", () => {
     expect(req.body.input).toContain("hi");
   });
 
+  it("#426 F2: a manual ACTION turn answered with bare prose flags actionless on STREAM_DONE", async () => {
+    // Prose-only answer for an action-intent query ("Click …") — no envelope
+    // anywhere, so parseZoOutput degrades to plainText with actions:[] and
+    // the finish flags the silent failure.
+    fm.handle(() => sseResponse(zoSseText({ text: "I looked at the page but decided not to act." })));
+    const rec = connectRecorder();
+    rec.post({ sessionId: 41, type: "ASK_ZO", userQuery: "Click the login button", modeId: "cobrowse", chatId: "chat-a1" });
+    await waitUntil(() => rec.seen.some((m) => m.type === "STREAM_DONE"));
+    const done = rec.seen.find((m) => m.type === "STREAM_DONE");
+    expect(done.actionless).toBe(true);
+    expect(String(done.actionlessReason)).toContain("no executable actions");
+    expect(done.actions).toEqual([]);
+  });
+
+  it("#426 F2: read turns and narration-led ENVELOPE turns never flag actionless", async () => {
+    // Read-intent query → downgraded to a plain read turn — prose is the
+    // designed answer, so no flag even though actions === [].
+    fm.handle(() => sseResponse(zoSseText({ text: "A calm summary of the page." })));
+    const rec = connectRecorder();
+    rec.post({ sessionId: 42, type: "ASK_ZO", userQuery: "Summarize this page", modeId: "cobrowse", chatId: "chat-a2" });
+    await waitUntil(() => rec.seen.some((m) => m.type === "STREAM_DONE"));
+    let done = rec.seen.find((m) => m.type === "STREAM_DONE");
+    expect(done.actionless).toBeUndefined();
+
+    // Narration + fenced envelope → the #426 F1 fence scan parses actions,
+    // so the turn executed and must NOT be flagged.
+    fm.handle(() => sseResponse(zoSseText({
+      text: 'Thinking aloud about the route.\n```json\n{"actions":[{"type":"done","response":"Done via narration fence."}]}\n```',
+    })));
+    const rec2 = connectRecorder();
+    rec2.post({ sessionId: 43, type: "ASK_ZO", userQuery: "Click the first link", modeId: "cobrowse", chatId: "chat-a3" });
+    await waitUntil(() => rec2.seen.some((m) => m.type === "STREAM_DONE"));
+    done = rec2.seen.find((m) => m.type === "STREAM_DONE");
+    expect(done.actionless).toBeUndefined();
+    expect(done.actions.length).toBe(1);
+    expect(done.fullText).toBe("Done via narration fence.");
+  });
+
   it("#300: a chained handoff turn's STREAM_DONE carries the capture tier it used", async () => {
     fm.handle(() => sseResponse(zoSseText({ text: "continuation answer" })));
     const rec = connectRecorder();
