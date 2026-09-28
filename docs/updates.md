@@ -3,6 +3,12 @@
 New features in Zo Co-browse, newest first. Each entry explains what shipped;
 open **How to use it** for the hands-on steps.
 
+## When Zo narrates, the plan still runs <span class="badge-new">NEW</span> {#narration-envelope-fix}
+
+_2026-09-27 · [PR #427](https://github.com/LogicIncZo/zo-cobrowse/pull/427) · v0.3.7.1_
+
+A bug hunt on a real session (the "multi-hop navigate using Jev" conversation) found that when Zo explained its plan in prose before returning the action JSON, the extension dropped the whole plan: nothing executed, and the raw JSON appeared in your chat as the answer. Fixed three ways: the plan now executes no matter how much Zo narrates around it (narration moves to the collapsible thinking trace); if an action turn genuinely produces nothing, you get an honest ⚠️ warning instead of fake success; and raw JSON never streams into the chat mid-turn.
+
 ## Zo now knows its own manual <span class="badge-new">NEW</span> {#skill-lifecycle}
 
 _2026-09-27 · PRs [#417](https://github.com/LogicIncZo/zo-cobrowse/pull/417)–[#421](https://github.com/LogicIncZo/zo-cobrowse/pull/421) · v0.3.7.0_

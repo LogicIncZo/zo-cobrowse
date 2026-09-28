@@ -10,6 +10,8 @@
 
 > **2026-09-27 — v0.3.7.0 skill-lifecycle slate** (PRs #410–#421): versioned product skill (multi-file SKILL.md + references/, proactive onInstalled sync, canary-verified), read-turn pointer decided by live probe (transcripts committed; probe restores workspace bytes), persona_id lane spike-GO'd live (composition + rotation) with fail-closed build. Two landing bugs caught in-loop: unguarded canary read (mcpToolCall throws on isError — was escaping into the stream path) and per-turn persona sync consuming suites' ask-fixture queues (6 suites) — both fixed with regression nets. Manual-checklist additions: skill line in Settings → About; `Skills/zo-cobrowse` files in the workspace after install/update.
 
+> **2026-09-27 — v0.3.7.1 stabilization** (PR #427, issue #426): narration-led action envelopes dropped by the whole-string fence anchor — root-caused by the debug-conversation workflow on a live turn (con_hY6Pyb43TOcqWbp6, 6/6 findings independently confirmed by two-investigator + per-finding-confirmer workflow, report artifact + `out/debug/`), fixed test-first (fence scan last-to-first, actionless-turn flag + persisted ⚠️, fence-aware streaming suppression); also shipped the workflow itself as a saved project workflow + `scripts/debug/` leveldb tooling.
+
 **Round:** 2026-08-08 · **Branch:** `Rewritet` · **Scope:** Full codebase audit (extension, backend, tests, manifest) + remediation of all findings.
 
 ## Headline status (after remediation)
