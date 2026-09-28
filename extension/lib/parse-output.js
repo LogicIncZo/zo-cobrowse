@@ -83,6 +83,40 @@ function envelopeFrom(parsed, fallbackText) {
 }
 
 /**
+ * Scan a narration-led output for a fenced JSON action envelope (#426 F1):
+ * Zo sometimes narrates its tool use in prose and THEN emits the envelope in
+ * a ```json fence — the whole-string strip in parseZoOutput can't see it.
+ * Fences are scanned LAST-to-first (the envelope is conventionally the final
+ * block); the first fence whose body parses (strict, then repairJson) to an
+ * object with an `actions` array wins. Text outside the chosen fence is the
+ * model's intermediate narration and comes back as `narration` for the
+ * reasoning channel. A fenced block that is not an actions envelope (an
+ * example snippet, a non-envelope JSON object) never hijacks the parse.
+ *
+ * @returns {{ env: object, narration: string } | null}
+ */
+export function extractFencedEnvelope(text) {
+  if (typeof text !== 'string') return null;
+  const fences = [...text.matchAll(/```[a-zA-Z0-9]*[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*```/g)];
+  for (let i = fences.length - 1; i >= 0; i--) {
+    const body = fences[i][1];
+    for (const candidate of [body, repairJson(body)]) {
+      let parsed = null;
+      try {
+        parsed = JSON.parse(candidate);
+      } catch {
+        continue;
+      }
+      if (parsed && typeof parsed === 'object' && Array.isArray(parsed.actions)) {
+        const narration = text.replace(fences[i][0], ' ').trim();
+        return { env: envelopeFrom(parsed, text), narration };
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Parse a Zo output (string — possibly fenced JSON — or a response object)
  * into the standard channel triple: reasoning, actions, plainText. Never
  * throws; unparseable strings degrade to plainText.
@@ -113,7 +147,8 @@ export function parseZoOutput(output) {
       // Strict parse failed. Before giving up, try one repair pass for the
       // unescaped-inner-quote form (live-observed on roboform.com: Zo wrote
       // input[name="…"] with double quotes inside the JSON string). If the
-      // repair also fails, treat it as plain text (#29 behavior).
+      // repair also fails, try the narration-led fence scan (#426 F1) before
+      // treating it as plain text (#29 behavior).
       try {
         env = envelopeFrom(JSON.parse(repairJson(fencedStripped)), normalizedOutput);
       } catch {
@@ -126,10 +161,21 @@ export function parseZoOutput(output) {
       rawOutput = env.rawOutput;
       plainText = env.plainText;
     } else {
-      // Not JSON — this is a plain-text (markdown) answer. Show it directly
-      // rather than routing through `reasoning` (ticket #29: plain-text
-      // answers were only surfaced via reasoning and otherwise became "Done.").
-      plainText = normalizedOutput;
+      const fenced = extractFencedEnvelope(normalizedOutput);
+      if (fenced) {
+        // Narration-led envelope: actions execute; the prose the model wrote
+        // around the fence is intermediate narration — it rides the reasoning
+        // channel (inline muted prose / collapsible trace), never the answer.
+        reasoning = fenced.env.reasoning || fenced.narration;
+        actions = fenced.env.actions;
+        rawOutput = fenced.env.rawOutput;
+        plainText = '';
+      } else {
+        // Not JSON — this is a plain-text (markdown) answer. Show it directly
+        // rather than routing through `reasoning` (ticket #29: plain-text
+        // answers were only surfaced via reasoning and otherwise became "Done.").
+        plainText = normalizedOutput;
+      }
     }
   }
   return { reasoning, actions, rawOutput, plainText, normalizedOutput };

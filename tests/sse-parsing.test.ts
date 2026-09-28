@@ -391,6 +391,48 @@ describe("repairJson — unescaped inner quotes (live roboform.com failure)", ()
     const { actions } = parseZoOutput(`{"actions":[{"type":"fill","selector":"input[name='02frstname']","value":"T"}]}`);
     expect(actions[0].selector).toBe("input[name='02frstname']");
   });
+  // #426 F1 — narration-led output: Zo narrates its tool use, THEN emits the
+  // action envelope in a ```json fence (live con_hY6Pyb43TOcqWbp6).
+  it("recovers the envelope when narration precedes the ```json fence", () => {
+    const narration = "The SKILL.md read got drowned by workspace-index injection. Let me read the skill files directly.\nRoute verified: the Pambu Panchangam article links **Chennai**.\n\nHere is my plan:\n";
+    const envelope = '```json\n{\n  "actions": [\n    { "type": "click", "pick": { "question": "Click the Chennai link" } },\n    { "type": "wait", "ms": 2500 },\n    { "type": "done", "response": "**Multi-hop navigation complete.**" }\n  ]\n}\n```';
+    const { actions, plainText, reasoning } = parseZoOutput(narration + envelope);
+    expect(plainText).toBe("");
+    expect(actions.length).toBe(3);
+    expect(actions[0].type).toBe("click");
+    expect(actions[2].type).toBe("done");
+    // The narration rides the reasoning channel, not the answer text.
+    expect(reasoning).toContain("workspace-index injection");
+    expect(reasoning).not.toContain('"actions"');
+  });
+
+  it("scans the LAST fence first when narration carries multiple blocks", () => {
+    const text = [
+      "Thinking about options:",
+      "```js\nconsole.log('not the envelope');\n```",
+      "Proceeding.",
+      "```json\n{\"actions\":[{\"type\":\"done\",\"response\":\"ok\"}]}\n```",
+    ].join("\n");
+    const { actions, plainText } = parseZoOutput(text);
+    expect(plainText).toBe("");
+    expect(actions.length).toBe(1);
+    expect(actions[0].type).toBe("done");
+  });
+
+  it("a fenced NON-envelope block never hijacks the parse", () => {
+    const text = "Here is an example:\n```json\n{\"foo\": \"bar\"}\n```\nThat is all.";
+    const { actions, plainText } = parseZoOutput(text);
+    expect(actions.length).toBe(0);
+    expect(plainText).toContain("Here is an example");
+  });
+
+  it("an unparseable fence degrades to plainText as before", () => {
+    const text = "Plan:\n```json\n{actions: [not json at all\n```\ndone.";
+    const { actions, plainText } = parseZoOutput(text);
+    expect(actions.length).toBe(0);
+    expect(plainText).toBe(text);
+  });
+
 
   it("still degrades to plainText when the repair cannot save it", () => {
     const { actions, plainText } = parseZoOutput("not json at all {broken");
