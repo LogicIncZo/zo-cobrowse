@@ -119,7 +119,16 @@
   /** Wait for an element to appear in DOM */
   function waitForElement(selector, timeout = 5000) {
     return new Promise((resolve, reject) => {
-      const el = document.querySelector(selector);
+      // An empty or invalid selector must reject with the timeout path's clean
+      // error — querySelector('') throws a raw DOMException ("The provided
+      // selector is empty") that used to surface verbatim in the chat.
+      if (!selector || typeof selector !== 'string') {
+        reject(new Error('Element not found: (no selector)'));
+        return;
+      }
+      let el = null;
+      try { el = document.querySelector(selector); }
+      catch (_e) { reject(new Error(`Element not found: ${selector}`)); return; }
       if (el) return resolve(el);
       const observer = new MutationObserver(() => {
         const found = document.querySelector(selector);
@@ -234,7 +243,10 @@
    *  for builder-style forms, with viewport preference for equal cues. */
   function resolveFieldTarget(target, selector) {
     if (selector) {
-      const el = document.querySelector(selector);
+      // An invalid/pseudo selector must fall through to the cue ladder, not
+      // throw — fill_form entries carry model-authored selectors.
+      let el = null;
+      try { el = document.querySelector(selector); } catch (_e) { /* not CSS */ }
       if (el) return el;
     }
     const t = String(target || '').trim().toLowerCase();
@@ -285,16 +297,25 @@
     return null;
   }
 
+  /** Pull the text cue out of a Playwright-style selector — :has-text("…"),
+   *  :text("…"), or the bare `text=…` form (quotes optional). Returns null for
+   *  anything else. Shared by the click and fill ladders. */
+  function selectorTextCue(selector) {
+    const s = String(selector || '');
+    const m = s.match(/:has-text\(\s*["']([^"']+)["']\s*\)|:text\(\s*["']([^"']+)["']\s*\)/i);
+    if (m) return (m[1] || m[2]).trim();
+    const tm = s.match(/^\s*text\s*=\s*(?:"([^"]+)"|'([^']+)'|(.*\S))\s*$/i);
+    return tm ? (tm[1] || tm[2] || tm[3]).trim() : null;
+  }
+
   /** Resolve a click target: pure CSS selector preferred, but fall back to
-   *  text matching when Zo emits Playwright-style :has-text("…") selectors.
-   *  Returns an element or null. */
+   *  text matching when Zo emits Playwright-style :has-text("…") / text=…
+   *  selectors. Returns an element or null. */
   function resolveClickTarget(selector) {
     if (!selector) return null;
     // Fast path: valid CSS.
     if (isValidCssSelector(selector)) return document.querySelector(selector);
-    // Extract text from Playwright :has-text("…") / :text("…").
-    const m = selector.match(/:has-text\(\s*["']([^"']+)["']\s*\)|:text\(\s*["']([^"']+)["']\s*\)/i);
-    const txt = m ? (m[1] || m[2]) : null;
+    const txt = selectorTextCue(selector);
     return txt ? resolveClickableByText(txt) : null;
   }
 
@@ -496,17 +517,32 @@
   async function executeAction(action) {
     switch (action.type) {
       case 'click': {
-        const el = resolveClickTarget(action.selector) || await waitForElement(
-          isValidCssSelector(action.selector) ? action.selector : ''
-        );
-        if (!el) throw new Error(`Element not found: ${action.selector}`);
+        const sel = typeof action.selector === 'string' ? action.selector.trim() : '';
+        if (!sel) return { ok: false, type: 'click', error: 'click action has no selector' };
+        const el = resolveClickTarget(sel) ||
+          // Only a valid-CSS miss is worth waiting for — pseudo/text cues
+          // resolve immediately or not at all (waitForElement polls
+          // querySelector, so waiting on them can never succeed).
+          (isValidCssSelector(sel) ? await waitForElement(sel) : null);
+        if (!el) throw new Error(`Element not found: ${sel}`);
         el.scrollIntoView({ behavior: smoothBehavior(), block: 'center' });
         await sleep(300);
         el.click();
         return { ok: true, type: 'click' };
       }
       case 'fill': {
-        const el = (await waitForElement(action.selector))
+        const sel = typeof action.selector === 'string' ? action.selector.trim() : '';
+        if (!sel) return { ok: false, type: 'fill', error: 'fill action has no selector' };
+        let el = null;
+        if (isValidCssSelector(sel)) {
+          el = await waitForElement(sel);
+        } else {
+          // Pseudo/text selectors are not valid CSS — querySelector would
+          // throw; route the cue through the semantic field ladder instead.
+          const cue = selectorTextCue(sel);
+          el = cue ? resolveFieldTarget(cue, '') : null;
+          if (!el) throw new Error(`Element not found: ${sel}`);
+        }
         setFieldValue(el, action.value);
         return { ok: true, type: 'fill' };
       }
@@ -527,7 +563,12 @@
         };
       }
       case 'extract': {
-        const el = await waitForElement(action.selector);
+        const sel = typeof action.selector === 'string' ? action.selector.trim() : '';
+        if (!sel) return { ok: false, type: 'extract', error: 'extract action has no selector' };
+        if (!isValidCssSelector(sel)) {
+          throw new Error(`extract action selector is not valid CSS: ${sel} — send a CSS selector or use read_page`);
+        }
+        const el = await waitForElement(sel);
         const val = action.attribute
           ? el.getAttribute(action.attribute)
           : el.textContent?.trim();
