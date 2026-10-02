@@ -63,11 +63,17 @@ function loadRealRunner(win: Window): { executeAction: Exe; waitForElement: (sel
     prologue +
     extractFn("isValidCssSelector") + "\n" +
     extractFn("resolveClickableByText") + "\n" + // #220: resolveClickTarget's text-match half
+    extractFn("selectorTextCue") + "\n" + // #428: :has-text()/:text()/text= cue extraction
     extractFn("resolveClickTarget") + "\n" +
     extractFn("fireValueEvents") + "\n" +
     extractFn("writeFieldValue") + "\n" + // #53: setFieldValue delegates here
     extractFn("setFieldValue") + "\n" +
     extractFn("waitForElement") + "\n" +
+    extractFn("pickVisible") + "\n" + // #428: resolveFieldTarget's viewport pick
+    extractFn("normCue") + "\n" +
+    extractFn("nearestQuestion") + "\n" +
+    extractFn("resolveByQuestion") + "\n" +
+    extractFn("resolveFieldTarget") + "\n" + // #428: fill's pseudo-selector ladder
     extractFn("executeAction") + "\n" +
     "self.__capture = { waitForElement, executeAction };",
     sandbox,
@@ -211,5 +217,115 @@ describe("content.js buildSelector — form-field targeting", () => {
     expect(buildSelector(els[1])).toMatch(/:nth-child\(\d+\)/);
     // The two siblings must resolve to distinct selectors.
     expect(buildSelector(els[0])).not.toBe(buildSelector(els[1]));
+  });
+});
+
+describe("content.js selector hardening — clean failures + text= cues", () => {
+  // Live corpus (con_N4Lo0bXKrDhF3mnF, con_gpTuIzC7GBkVCNF6): an unresolvable
+  // locator used to reach waitForElement('') and surface the raw
+  // "Failed to execute 'querySelector' … The provided selector is empty"
+  // DOMException in the chat. Every failure below must be a clean,
+  // model-actionable error instead, and Playwright's bare `text=…` syntax
+  // (which Zo demonstrably emits) must resolve.
+  let win: Window;
+  let executeAction: Exe;
+  let waitForElement: (sel: string, t?: number) => Promise<any>;
+
+  beforeAll(() => {
+    win = new Window({ url: "https://example.test/hardening" });
+    win.document.body.innerHTML = `
+      <form id="signup">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" />
+        <button type="submit">Create account</button>
+      </form>
+    `;
+    // happy-dom has no layout engine — scrollIntoView is a no-op stub.
+    (win.HTMLElement.prototype as any).scrollIntoView = () => {};
+    ({ executeAction, waitForElement } = loadRealRunner(win));
+  });
+
+  it("click with no selector fails cleanly (no querySelector DOMException)", async () => {
+    const res = await executeAction({ type: "click", selector: "" });
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/no selector/i);
+    expect(res.error).not.toMatch(/querySelector|DOMException/i);
+  });
+
+  it("click with a missing selector field fails cleanly", async () => {
+    const res = await executeAction({ type: "click" });
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/no selector/i);
+  });
+
+  it("click resolves Playwright bare text= selectors", async () => {
+    const res = await executeAction({ type: "click", selector: "text=Create account" });
+    expect(res).toEqual({ ok: true, type: "click" });
+  });
+
+  it("click resolves quoted text= selectors", async () => {
+    const res = await executeAction({ type: "click", selector: 'text="Create account"' });
+    expect(res).toEqual({ ok: true, type: "click" });
+  });
+
+  it("click with an unmatched :has-text() selector reports Element not found (not the empty-selector DOMException)", async () => {
+    await expect(executeAction({ type: "click", selector: 'button:has-text("Nonexistent")' }))
+      .rejects.toThrow(/Element not found/);
+    await expect(executeAction({ type: "click", selector: 'button:has-text("Nonexistent")' }))
+      .rejects.not.toThrow(/provided selector is empty/);
+  });
+
+  it("fill resolves Playwright bare text= selectors through the field ladder", async () => {
+    const res = await executeAction({ type: "fill", selector: "text=Email", value: "a@b.co" });
+    expect(res).toEqual({ ok: true, type: "fill" });
+    expect(win.document.querySelector("#email")!.value).toBe("a@b.co");
+  });
+
+  it("fill resolves :has-text() selectors through the field ladder", async () => {
+    const res = await executeAction({ type: "fill", selector: 'input:has-text("Email")', value: "c@d.co" });
+    expect(res).toEqual({ ok: true, type: "fill" });
+    expect(win.document.querySelector("#email")!.value).toBe("c@d.co");
+  });
+
+  it("fill with no selector fails cleanly", async () => {
+    const res = await executeAction({ type: "fill", value: "x" });
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/no selector/i);
+    expect(res.error).not.toMatch(/querySelector|DOMException/i);
+  });
+
+  it("fill with an unmatched pseudo-selector reports Element not found", async () => {
+    await expect(executeAction({ type: "fill", selector: 'input:has-text("Nope")', value: "x" }))
+      .rejects.toThrow(/Element not found/);
+  });
+
+  it("extract with no selector fails cleanly", async () => {
+    const res = await executeAction({ type: "extract", selector: "" });
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/no selector/i);
+  });
+
+  it("extract with a pseudo-selector asks for valid CSS instead of throwing a DOMException", async () => {
+    await expect(executeAction({ type: "extract", selector: 'div:has-text("x")' }))
+      .rejects.toThrow(/not valid CSS/);
+  });
+
+  it("waitForElement rejects an empty selector with a clean error", async () => {
+    await expect(waitForElement("", 10)).rejects.toThrow(/not found/i);
+    await expect(waitForElement("", 10)).rejects.not.toThrow(/provided selector is empty/);
+  });
+
+  it("waitForElement rejects an invalid selector with a clean error", async () => {
+    await expect(waitForElement(':has-text("x")', 10)).rejects.toThrow(/not found/i);
+  });
+
+  it("fill_form entries with pseudo-selectors resolve through the field ladder (no raw throw)", async () => {
+    const res = await executeAction({
+      type: "fill_form",
+      values: [{ target: "Email", selector: 'input:has-text("Email")', value: "e@f.co" }],
+    });
+    expect(res.ok).toBe(true);
+    expect(res.fields[0]).toMatchObject({ ok: true, target: "Email" });
+    expect(win.document.querySelector("#email")!.value).toBe("e@f.co");
   });
 });

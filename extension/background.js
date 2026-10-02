@@ -918,18 +918,25 @@ function makeActionEval(action) {
     const a = ${a};
     try {
       if (a.type === 'navigate' || a.type === 'done') return { ok: true, type: a.type };
-      let el = a.selector ? document.querySelector(a.selector) : null;
-      if (a.selector && !el) {
-        // Playwright :has-text()/:text() fallback — not valid CSS.
-        const hm = a.selector.match(/:has-text\(\s*["']([^"']+)["']\s*\)|:text\(\s*["']([^"']+)["']\s*\)/i);
+      let el = null;
+      try { el = a.selector ? document.querySelector(a.selector) : null; } catch (_e) { el = null; }
+      if (a.type === 'click' && a.selector && !el) {
+        // Click-only: the clickable-list text fallback must never resolve a
+        // FILL target (a value could land on a button) — fill/extract cues
+        // fall through to Path 2, whose field ladder owns them. The cue forms
+        // (:has-text()/:text()/text=) are not valid CSS, so the querySelector
+        // above throws for them; match by visible text instead.
+        const hm = a.selector.match(/:has-text\\(\\s*["']([^"']+)["']\\s*\\)|:text\\(\\s*["']([^"']+)["']\\s*\\)|^\\s*text\\s*=\\s*(?:"([^"]+)"|'([^']+)'|(.*\\S))\\s*$/i);
         if (hm) {
-          const ht = (hm[1] || hm[2]).toLowerCase().trim();
+          const ht = String(hm[1] || hm[2] || hm[3] || hm[4] || hm[5] || '').toLowerCase().trim();
           for (const c of document.querySelectorAll('a, button, [role=button], [onclick], input[type=submit], input[type=button]')) {
             if ((c.textContent || '').trim().toLowerCase().includes(ht)) { el = c; break; }
           }
         }
       }
-      if (a.selector && !el) return { ok: false, error: 'Element not found: ' + a.selector, type: a.type };
+      if (!el && (a.type === 'click' || a.type === 'fill' || a.type === 'extract')) {
+        return { ok: false, error: a.selector ? ('Element not found: ' + a.selector) : ('no selector for ' + a.type), type: a.type };
+      }
       switch (a.type) {
         case 'click':
           el.scrollIntoView({ block: 'center' });
@@ -4567,14 +4574,26 @@ async function probeClickTarget(tabId, selector) {
   }
 }
 
-function probeExpr(sel) {
-  return '(function(){var el=document.querySelector(' + JSON.stringify(sel) + ');'
-    + 'if(!el)return null;'
-    + 'return{form:!!el.closest("form"),type:el.type||"",tag:(el.tagName||"").toLowerCase(),role:(el.getAttribute&&el.getAttribute("role"))||"",text:(el.textContent||el.value||"").trim().substring(0,40)};})()';
-}
-
 function probeFn(sel) {
-  const el = document.querySelector(sel);
+  // Resolve the click target the same way the executors do (makeActionEval /
+  // content.js resolveClickTarget): CSS first, then the Playwright cue forms
+  // (:has-text("…") / :text("…") / bare text=…). A null probe here fails OPEN
+  // (isSensitiveSubmitProbe(null) → false), so a cue the executor CAN resolve
+  // but this probe cannot would bypass the #26 sensitive-submit backstop
+  // exactly where clicks are most dangerous. Self-contained: this function is
+  // serialized into the page by chrome.scripting.executeScript.
+  var el = null;
+  try { el = sel ? document.querySelector(sel) : null; } catch (_e) { el = null; }
+  if (!el && sel) {
+    var m = sel.match(/:has-text\(\s*["']([^"']+)["']\s*\)|:text\(\s*["']([^"']+)["']\s*\)|^\s*text\s*=\s*(?:"([^"]+)"|'([^']+)'|(.*\S))\s*$/i);
+    if (m) {
+      var cue = String(m[1] || m[2] || m[3] || m[4] || m[5] || '').toLowerCase().trim();
+      var list = document.querySelectorAll('a, button, [role=button], [onclick], input[type=submit], input[type=button]');
+      for (var i = 0; i < list.length; i++) {
+        if ((list[i].textContent || '').trim().toLowerCase().includes(cue)) { el = list[i]; break; }
+      }
+    }
+  }
   if (!el) return null;
   return {
     form: !!el.closest('form'),
@@ -4583,6 +4602,12 @@ function probeFn(sel) {
     role: (el.getAttribute && el.getAttribute('role')) || '',
     text: (el.textContent || el.value || '').trim().substring(0, 40),
   };
+}
+
+function probeExpr(sel) {
+  // Serialize the SAME probeFn the executeScript path runs — one probe
+  // implementation, two transports (CDP eval / executeScript), no drift.
+  return '(' + probeFn.toString() + ')(' + JSON.stringify(sel) + ')';
 }
 
 async function executeActions(actions, tabId, opts = {}) {
@@ -4792,7 +4817,10 @@ function executeDomAction(action) {
   // and cannot close over module scope.
   const resolveFieldTarget = (target, selector) => {
     if (selector) {
-      const el = document.querySelector(selector);
+      // An invalid/pseudo selector must fall through to the cue ladder, not
+      // throw — fill_form entries carry model-authored selectors.
+      let el = null;
+      try { el = document.querySelector(selector); } catch (_e) { /* not CSS */ }
       if (el) return el;
     }
     const t = String(target || '').trim().toLowerCase();
@@ -4847,19 +4875,23 @@ function executeDomAction(action) {
     return candidates.length ? pickVisible(candidates) : null;
   };
   return new Promise((resolve, reject) => {
-    let el = action.selector ? document.querySelector(action.selector) : null;
-    if (!el && action.selector) {
-      // Playwright :has-text()/:text() fallback — not valid CSS.
-      const hm = action.selector.match(/:has-text\(\s*["']([^"']+)["']\s*\)|:text\(\s*["']([^"']+)["']\s*\)/i);
+    let el = null;
+    try { el = action.selector ? document.querySelector(action.selector) : null; } catch (_e) { el = null; }
+    if (action.type === 'click' && !el && action.selector) {
+      // Click-only text fallback — same rule as makeActionEval: a fill must
+      // never resolve through the clickable list.
+      const hm = action.selector.match(/:has-text\(\s*["']([^"']+)["']\s*\)|:text\(\s*["']([^"']+)["']\s*\)|^\s*text\s*=\s*(?:"([^"]+)"|'([^']+)'|(.*\S))\s*$/i);
       if (hm) {
-        const ht = (hm[1] || hm[2]).toLowerCase().trim();
+        const ht = String(hm[1] || hm[2] || hm[3] || hm[4] || hm[5] || '').toLowerCase().trim();
         for (const c of document.querySelectorAll('a, button, [role=button], [onclick], input[type=submit], input[type=button]')) {
           if ((c.textContent || '').trim().toLowerCase().includes(ht)) { el = c; break; }
         }
       }
     }
-    if (!el && action.selector) {
-      reject(new Error(`Element not found: ${action.selector}`));
+    // fill_form is exempt: its selectors are per-entry (values[].selector) and
+    // the inlined resolveFieldTarget reports per-field misses.
+    if (!el && (action.type === 'click' || action.type === 'fill' || action.type === 'extract')) {
+      reject(new Error(action.selector ? `Element not found: ${action.selector}` : `no selector for ${action.type}`));
       return;
     }
     switch (action.type) {
